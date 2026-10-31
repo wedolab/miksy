@@ -1,0 +1,9 @@
+# Удалённый (HTTP) сервер с секретом в заголовке: Claude и Codex получают helper заголовков,
+# opencode — {file:} на файл секрета, Antigravity — мост miksy (stdio ↔ HTTP).
+# Секрет только в headers (или url); в env у HTTP-сервера он не доставляется
+name: tracker
+url: https://tracker.acme.example/mcp
+headers:
+  Authorization: Bearer ${ACME_TRACKER_TOKEN}
+# Не подключать конкретному агенту:
+# agents: { gemini: skip }

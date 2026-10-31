@@ -1,0 +1,8 @@
+description: Проект Acme/billing-api
+
+# Убрать пришедшее из слоёв выше (mcp.<имя>, skill.<имя>, instructions.<файл>)
+exclude: [mcp.tracker]
+
+# Командные skills из репо проекта — тем вашим агентам, которые их сами не видят:
+# auto (до 30), all, список имён или false
+import_skills: auto

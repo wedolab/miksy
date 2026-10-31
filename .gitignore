@@ -1,0 +1,13 @@
+# Конфигурация, если держать её прямо в движке (обычно она в отдельном miksy-config)
+/local/
+/layers/
+/map.yaml
+
+# Песочница для sync --out, тестовые прогоны и собранные бинарники
+/out/
+/dist/
+
+node_modules/
+
+# Локальные разрешения Claude Code для этого репо
+.claude/settings.local.json

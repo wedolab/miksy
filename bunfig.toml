@@ -1,0 +1,5 @@
+# Тесты miksy — только в test/ (в local/backups могут лежать чужие репо со своими тестами)
+[test]
+root = "test"
+# Песочница: временные HOME, tmp и конфигурация miksy (test/preload.ts)
+preload = ["./test/preload.ts"]

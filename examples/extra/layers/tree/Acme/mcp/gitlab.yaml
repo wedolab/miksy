@@ -1,0 +1,9 @@
+# Локальный (stdio) сервер с секретом: значение — в local/secrets.env (ACME_GITLAB_TOKEN=…),
+# в слое — только ссылка. miksy запускает сервер через сгенерированную обёртку
+# (local/run/…), которая читает файл секрета: значения нет ни в одном конфиге агента
+name: gitlab
+command: npx
+args: [-y, "@zereight/mcp-gitlab"]
+env:
+  GITLAB_PERSONAL_ACCESS_TOKEN: ${ACME_GITLAB_TOKEN}
+  GITLAB_API_URL: https://gitlab.acme.example/api/v4

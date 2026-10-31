@@ -1,0 +1,29 @@
+# Глобальные слои и общие настройки конфигурации. Слои организаций и проектов — в дереве
+# layers/tree/, которое повторяет workspace (см. README движка): привязывать их здесь не нужно.
+
+# Домашний каталог агентов (~): применяется всегда
+global:
+  - { use: global }
+  - { use: env-windows, os: windows }
+  - { use: env-macos, os: macos }
+  - { use: env-linux, os: linux }
+
+# Особые случаи: слой из layers/ по шаблону пути (glob относительно workspace), применяется
+# после слоёв дерева. Например, один слой на несколько несвязанных путей:
+#   - { match: "*/infra-*", use: infra }
+layers: []
+
+# Префикс ваших личных skills (чтобы не совпадать с командными skills в репо проектов):
+# miksy adopt советует его, если имя без префикса
+skill_prefix: miksy-
+
+# Программы машины, на которые ссылаются MCP слоёв как ${ИМЯ}: miksy setup ищет их в PATH
+# и пишет путь в vars файла local/machine.yaml; не нашёл — подсказывает установку.
+# PYTHON (python3 / python) встроен; свои — так:
+tools:
+  GITHUB_MCP_SERVER:
+    find: [github-mcp-server]
+    install:
+      macos: brew install github-mcp-server
+      linux: https://github.com/github/github-mcp-server/releases
+      windows: https://github.com/github/github-mcp-server/releases
