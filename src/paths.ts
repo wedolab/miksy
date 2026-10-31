@@ -29,11 +29,16 @@ export function homeDir(): string {
   catch (e) { throw new Error(`домашний каталог ${slash(home)} не раскрывается: ${(e as Error).message}`); }
 }
 
+// Нет пути — false. Нет доступа к каталогу на пути (macOS, Linux) — ошибка, а не «нет пути»: иначе на Linux
+// путь под закрытым каталогом молча считался несуществующим (realpath самого каталога проходит). На Windows
+// «нет доступа» бывает у системных каталогов — там по-прежнему «нет пути»
 const exists = (p: string) => {
   try {
     lstatSync(p);
     return true;
-  } catch {
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (process.platform !== "win32" && (code === "EACCES" || code === "EPERM")) throw e;
     return false;
   }
 };
@@ -43,14 +48,14 @@ const exists = (p: string) => {
 export function canonical(path: string): string {
   let p = resolve(path);
   const rest: string[] = [];
-  while (!exists(p)) {
-    const up = dirname(p);
-    if (up === p) break;
-    rest.unshift(basename(p));
-    p = up;
-  }
   let real: string;
   try {
+    while (!exists(p)) {
+      const up = dirname(p);
+      if (up === p) break;
+      rest.unshift(basename(p));
+      p = up;
+    }
     real = realpathSync.native(p);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;

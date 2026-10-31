@@ -74,7 +74,8 @@ EOF
     expect(r.out).toContain("curl -fsSL https://bun.sh/install | bash");
     expect(readFileSync(`${f.home}/curl-args`, "utf8")).toContain("https://bun.sh/install");
     const dest = `${f.home}/Projects/miksy`;
-    expect(existsSync(`${dest}/src/cli.ts`)).toBe(true);
+    // Не склонирован — в сообщении теста вывод install.sh (иначе причину не видно)
+    expect(existsSync(`${dest}/src/cli.ts`) ? "" : `движок не склонирован; вывод install.sh:\n${r.out}`).toBe("");
     expect(readFileSync(`${f.home}/bun-args`, "utf8").trim()).toBe(`${canonical(dest)} src/cli.ts setup --yes`);
 
     // Повтор из клона: Bun уже в ~/.bun (не в PATH) — подхвачен, вопросов нет
@@ -118,7 +119,8 @@ EOF
     const r = run(f, `${f.dl}/install.sh`, "y\n\n");
     expect(r.code).toBe(0);
     const dest = `${f.home}/Projects/miksy`;
-    expect(Bun.spawnSync(["git", "-C", dest, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim()).toBe("stable");
+    const head = Bun.spawnSync(["git", "-C", dest, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim();
+    expect(head === "stable" ? head : `${head}; вывод install.sh:\n${r.out}`).toBe("stable");
     expect(existsSync(`${dest}/RELEASE`)).toBe(true);
     expect(r.out).toContain("ветка stable");
     const plain = sandbox();

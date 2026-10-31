@@ -33,6 +33,9 @@ function scripted(steps: Step[], transcript: string[]): Ask & { left: () => numb
 }
 
 const win = process.platform === "win32";
+// На Linux Node.js — только ссылка на скачивание (общего пакетного менеджера нет): вопроса об установке нет
+const linux = process.platform === "linux";
+const ifInstaller = (steps: Step[]): Step[] => (linux ? [] : steps);
 // Окружение процесса — как до теста (мастер меняет MIKSY_CONFIG и PATH, тест — HOME и прочее)
 let saved: Record<string, string | undefined> = {};
 beforeEach(() => { saved = { ...process.env }; });
@@ -110,7 +113,7 @@ describe("мастер setup", () => {
       { q: /Корень workspace/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "" },
-      { q: /Выполнить «.*node/i, a: "" },
+      ...ifInstaller([{ q: /Выполнить «.*node/i, a: "" }]),
       { q: /Создать команду/, a: "" },
       { q: win ? /пользовательский PATH/ : /дописать в ~\/\.zshrc/, a: "" },
       { q: /Перенести в конфигурацию/, a: "1" },
@@ -174,7 +177,7 @@ describe("мастер setup", () => {
       { q: /Адрес git-репо конфигурации/, a: bare },
       { q: /Корень workspace/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
-      { q: /Выполнить «/, a: "n" },
+      ...ifInstaller([{ q: /Выполнить «/, a: "n" }]),
       { q: /Создать команду/, a: "n" },
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
@@ -204,7 +207,7 @@ describe("мастер setup", () => {
       { q: /Корень workspace/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "y" },
-      { q: /Выполнить «/, a: () => { throw new Error("прервано"); } },
+      { q: linux ? /Создать команду/ : /Выполнить «/, a: () => { throw new Error("прервано"); } },
     ])).toThrow("прервано");
     f.out.length = 0;
     // Повтор: конфигурация, machine.yaml и копия уже есть — первый вопрос про программы
@@ -287,7 +290,7 @@ describe("мастер setup", () => {
       { q: /Корень workspace/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "n" },
       // Шаг 4: только npx (context7 из примера); uvx и node — ещё не в слоях
-      { q: /Выполнить «.*node/i, a: "n" },
+      ...ifInstaller([{ q: /Выполнить «.*node/i, a: "n" }]),
       { q: /Создать команду/, a: "n" },
       { q: /Перенести в конфигурацию/, a: "1" }, { q: /Записать в слой/, a: "y" },
       { q: /Перенести в конфигурацию/, a: "1" }, { q: /Записать в слой/, a: "y" },
@@ -297,7 +300,7 @@ describe("мастер setup", () => {
     ]);
     const t = f.text();
     expect(t).toMatch(/Программы для перенесённых серверов:\n(.*\n)*• uv \(uvx\): нужна серверам fetcher — нет в PATH/);
-    expect(t).toMatch(/• Node\.js \(node\): нужна серверам mine — нет в PATH\n  установка предложена выше: /);
+    expect(t).toMatch(/• Node\.js \(node\): нужна серверам mine — нет в PATH\n  (установка предложена выше|скачать): /);
     expect(t.indexOf("Программы для перенесённых серверов")).toBeLessThan(t.indexOf("8. План"));
   }, 120000);
 
@@ -348,7 +351,7 @@ describe("мастер setup", () => {
     put(`${f.config}/local.example/README.md`, "# Подготовка машины\n");
     expect(f.wizard([], { yes: true })).toBe(0);
     const t = f.text();
-    expect(t).toMatch(/• Node\.js \(npx\): нужна серверам context7 — нет в PATH\n  установить: (brew install node|winget install OpenJS\.NodeJS\.LTS|https:\/\/nodejs\.org)/);
+    expect(t).toMatch(/• Node\.js \(npx\): нужна серверам context7 — нет в PATH\n  (установить|скачать): (brew install node|winget install OpenJS\.NodeJS\.LTS|https:\/\/nodejs\.org)/);
     expect(f.calls.exec).toEqual([]);
     expect(t).toContain(`В вашей конфигурации есть заметка о подготовке машины — то, что miksy не настраивает сам (например, профили облачных CLI): ${f.config}/local.example/README.md. Прочитайте её.`);
     expect(t).not.toContain("Внешние настройки");

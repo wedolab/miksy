@@ -1,7 +1,7 @@
 // Команда выпуска bun run release (scripts/release.ts) на песочнице: репо владельца с bare-репо как
 // удалённым; номер — по записи «Не выпущено» в CHANGELOG.md. gh в PATH нет — GitHub Release не создаётся
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { nextVersion, parseChangelog, releaseText, unreleasedTemplate } from "../src/changelog";
@@ -32,10 +32,17 @@ function repo() {
   Bun.spawnSync(["git", "init", "-q", "--bare", bare]);
   git(dev, "remote", "add", "origin", bare);
   // PATH без каталогов с gh: пуш в bare идёт, GitHub Release — подсказкой. Только каталог git нельзя:
-  // git из mingw64\bin (так его находит Git Bash) без остального PATH Git for Windows падает при push
+  // git из mingw64\bin (так его находит Git Bash) без остального PATH Git for Windows падает при push.
+  // На Linux gh и git лежат вместе (/usr/bin) — git тогда через ссылку из отдельного каталога
   const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
-  const gh = process.platform === "win32" ? "gh.exe" : "gh";
-  const path = (process.env[key] ?? "").split(delimiter).filter((p) => p && !existsSync(join(p, gh))).join(delimiter);
+  const win = process.platform === "win32";
+  const dirs = (process.env[key] ?? "").split(delimiter).filter((p) => p && !existsSync(join(p, win ? "gh.exe" : "gh")));
+  if (!win) {
+    mkdirSync(`${dir}/bin`);
+    symlinkSync(Bun.which("git")!, `${dir}/bin/git`);
+    dirs.unshift(`${dir}/bin`);
+  }
+  const path = dirs.join(delimiter);
   const run = (...args: string[]) => {
     const r = Bun.spawnSync([process.execPath, SCRIPT, ...args], {
       cwd: dev, stdin: "ignore", stdout: "pipe", stderr: "pipe",

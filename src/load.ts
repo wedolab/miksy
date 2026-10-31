@@ -195,7 +195,9 @@ export function orphanTreeDirs(workspace: string, root = configRoot()): { path: 
   const walk = (layerDir: string, wsDir: string, rel: string) => {
     if (!existsSync(layerDir)) return;
     const wsNames = existsSync(wsDir) ? readdirSync(wsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name) : [];
-    for (const e of readdirSync(layerDir, { withFileTypes: true })) {
+    // По имени: порядок readdir зависит от файловой системы (на Linux — не алфавитный), вывод doctor — нет
+    const entries = readdirSync(layerDir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const e of entries) {
       if (!e.isDirectory() || LAYER_PARTS.has(e.name)) continue;
       const r = rel ? `${rel}/${e.name}` : e.name;
       const match = wsNames.find((n) => n.toLowerCase() === e.name.toLowerCase());
