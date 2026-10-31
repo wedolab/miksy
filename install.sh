@@ -27,7 +27,13 @@ say() { printf '%s\n' "$*"; }
 ask() { # ask <вопрос> → ответ в $REPLY (пустой — Enter или конец ввода)
   printf '%s ' "$1"
   REPLY=""
-  IFS= read -r REPLY <"$TTY" || REPLY=""
+  # Из файла — прямо из stdin, не открывая /dev/stdin заново: на Linux повторное открытие файла
+  # читает его с начала, и один ответ доставался бы нескольким вопросам
+  if [ "$FROM_FILE" = 1 ]; then
+    IFS= read -r REPLY || REPLY=""
+  else
+    IFS= read -r REPLY <"$TTY" || REPLY=""
+  fi
 }
 yes_no() { # yes_no <вопрос>: да — только явным ответом
   ask "$1 [y/N]"
