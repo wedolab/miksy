@@ -1,0 +1,38 @@
+# Полный bun test. Пока репо приватный, минуты Actions общие для всей организации (macOS — в 10 раз
+# дороже Linux): запуск только вручную (Actions → test → Run workflow) и только на Linux. Публичному репо
+# Actions бесплатны: тогда — на каждый пуш в main/stable и PR, на Linux, Windows и macOS. Править файл при
+# публикации не нужно — условия ниже переключаются сами
+name: test
+
+on:
+  push:
+    branches: [main, stable]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.event_name == 'workflow_dispatch' || !github.event.repository.private
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(github.event.repository.private && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14 # минимальная из engines в package.json
+      # Тесты делают коммиты в песочнице — git нужен автор
+      - run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+      - run: bun test
