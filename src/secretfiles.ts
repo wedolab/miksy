@@ -213,12 +213,20 @@ function others(path: string): string[] {
   const tmp = join(tmpdir(), `miksy-acl-${process.pid}-${Math.random().toString(36).slice(2)}.txt`);
   try {
     if (icacls([native(path), "/save", tmp]) !== 0) throw new Error(`${slash(path)}: icacls не прочитал доступ`);
-    const sddl = readFileSync(tmp, "utf16le").split(/\r?\n/)[1] ?? "";
-    const aces = [...sddl.matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^)]+)\)/g)];
-    return [...new Set(aces.filter((a) => a[1] === "A" && a[2] !== mySid()).map((a) => a[2]))];
+    return foreignAces(readFileSync(tmp, "utf16le").split(/\r?\n/)[1] ?? "", mySid());
   } finally {
     rmSync(tmp, { force: true });
   }
+}
+
+// Разрешающие записи SDDL не для me. Встроенные учётки машины SDDL пишет сокращением, а не SID: «LA» —
+// Администратор (…-500, так работают раннеры GitHub Windows), «LG» — Гость (…-501). Иначе miksy счёл бы
+// свою же запись чужой, удалил её и закрыл local/ от самого себя
+export function foreignAces(sddl: string, me: string): string[] {
+  const alias: Record<string, string> = { LA: "-500", LG: "-501" };
+  const mine = (t: string) => t === me || (alias[t] !== undefined && me.endsWith(alias[t]));
+  const aces = [...sddl.matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^)]+)\)/g)];
+  return [...new Set(aces.filter((a) => a[1] === "A" && !mine(a[2])).map((a) => a[2]))];
 }
 
 // null — доступ только у владельца; иначе что не так (для doctor)

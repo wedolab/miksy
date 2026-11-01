@@ -42,3 +42,15 @@ test.skipIf(process.platform === "win32")("R1: setup создаёт local 0700, 
   expect(statSync(`${f.config}/local`).mode & 0o777).toBe(0o700);
   expect(statSync(`${f.config}/local/secrets.env`).mode & 0o777).toBe(0o600);
 });
+
+test("ACL Windows: встроенный Администратор («LA» в SDDL) — своя запись, не чужая", async () => {
+  const { foreignAces } = await import("../src/secretfiles");
+  const machine = "S-1-5-21-1111111111-2222222222-3333333333";
+  // Так icacls /save пишет каталог, закрытый для встроенного Администратора (раннеры GitHub Windows)
+  const sddl = "D:PAI(A;OICI;FA;;;LA)";
+  expect(foreignAces(sddl, `${machine}-500`)).toEqual([]);
+  // Обычная учётка: LA — чужой, свой SID и системные группы — как раньше
+  expect(foreignAces(`D:PAI(A;OICI;FA;;;${machine}-1001)(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)`, `${machine}-1001`)).toEqual(["LA", "SY"]);
+  expect(foreignAces("D:PAI(A;OICI;FA;;;LG)", `${machine}-500`)).toEqual(["LG"]);
+  expect(foreignAces("D:PAI(D;OICI;FA;;;WD)", `${machine}-500`)).toEqual([]); // запрещающие — не доступ
+});
