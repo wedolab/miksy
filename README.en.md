@@ -46,9 +46,10 @@ has to replace a file, it keeps the original and restores it when you remove mik
 
 ## Requirements
 
-- **Agents:** Claude Code, Codex, opencode, Antigravity — any of them; miksy configures only the
-  ones you have installed. Works in the terminal and in editors that run agents through ACP (Zed).
-- **OS:** Windows and macOS are tested on real machines; Linux runs the automated tests.
+- **Agents:** Claude Code, Codex, opencode **2.x**, Antigravity — any of them; miksy configures only the
+  ones you have installed. Works in the terminal and in editors that run agents through ACP (Zed);
+  Antigravity gets them in its IDE and CLI (`agy`), not yet through ACP in Zed.
+- **OS:** Windows, macOS and Linux (Ubuntu 24.04) are tested on real machines and in CI.
 - **git** and **[Bun](https://bun.sh)** 1.3.14 or newer (the installer offers to install Bun).
 
 ## Installation
