@@ -1,5 +1,5 @@
 // Общее для тестов CLI: конфигурация, домашний каталог и workspace во временном каталоге
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -12,7 +12,8 @@ export function put(path: string, content: string) {
 
 // Конфигурация: глобальный слой и слой workspace с инструкциями; projects — проекты workspace (git-репо)
 export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "cli-")).replaceAll("\\", "/");
+  // Полный путь: TEMP бывает коротким именем 8.3 (RUNNER~1 на раннерах GitHub), а miksy печатает полный
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), "cli-"))).replaceAll("\\", "/");
   const config = `${dir}/config`;
   const home = `${dir}/home`;
   const ws = `${dir}/ws`;

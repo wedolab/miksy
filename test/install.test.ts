@@ -173,7 +173,8 @@ describe.skipIf(!win)("install.ps1", () => {
     expect(readFileSync(`${f.home}/bun-args`, "utf8").trim().toLowerCase()).toBe(`${dest.replaceAll("/", "\\")} src/cli.ts setup "--yes"`.toLowerCase());
 
     const again = run(f, `${dest}/install.ps1`, "");
-    expect(again.code).toBe(0);
+    expect(again.code === 0 ? "" : `код ${again.code}; вывод install.ps1:
+${again.out}`).toBe("");
     expect(again.out).toContain("1.3.14");
     expect(existsSync(`${f.home}/ps-args`) && readFileSync(`${f.home}/ps-args`, "utf8").split("\n").filter(Boolean).length).toBe(1);
   }, 60000);

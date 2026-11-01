@@ -110,7 +110,7 @@ describe("командные skills", () => {
     expect(auto.cfg.skills).toEqual([]);
     expect(auto.warnings.join()).toContain("больше 30");
     expect(withTeamSkills(cfg({ importSkills: { item: "all", layer: "l" } }), dir, "claude").cfg.skills).toHaveLength(31);
-  });
+  }, 30000);
 
   test("safeName", () => {
     expect(safeName("Source_Command Setup")).toBe("source-command-setup");

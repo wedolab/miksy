@@ -35,4 +35,5 @@ if (!inside(homeDir(), canonical(sandbox))) throw new Error("Тесты оста
 if (!inside(configRoot(), canonical(sandbox))) throw new Error("Тесты остановлены: конфигурация вне песочницы");
 installGuard(real, [sandbox, systemTmp]);
 
-afterAll(() => rmSync(sandbox, { recursive: true, force: true }));
+// Песочница всех тестов: на медленном диске (раннеры GitHub Windows) удаление дольше стандартных 5 с
+afterAll(() => rmSync(sandbox, { recursive: true, force: true }), 120000);
