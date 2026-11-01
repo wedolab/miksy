@@ -144,6 +144,7 @@ EOF
   }, 60000);
 });
 
+// Запуск PowerShell на раннерах GitHub Windows — до ~50 с на тест: лимит с запасом
 describe.skipIf(!win)("install.ps1", () => {
   const fakes = (f: ReturnType<typeof sandbox>) => {
     // Официальный установщик: powershell -c "irm bun.sh/install.ps1 | iex" → кладёт bun.cmd
@@ -177,7 +178,7 @@ describe.skipIf(!win)("install.ps1", () => {
 ${again.out}`).toBe("");
     expect(again.out).toContain("1.3.14");
     expect(existsSync(`${f.home}/ps-args`) && readFileSync(`${f.home}/ps-args`, "utf8").split("\n").filter(Boolean).length).toBe(1);
-  }, 60000);
+  }, 180000);
 
   test("две установки Bun (PATH и ~/.bun/bin) — какая используется, совет оставить одну; ничего не удаляется", () => {
     const f = sandbox();
@@ -200,7 +201,7 @@ ${again.out}`).toBe("");
     copyFileSync(`${one.dir}/fakebun.cmd`, `${one.bin}/bun.cmd`);
     copyFileSync(join(ROOT, "install.ps1"), `${one.dl}/install.ps1`);
     expect(run(one, `${one.dl}/install.ps1`, "\r\n").out).not.toContain("несколько установок Bun");
-  }, 60000);
+  }, 180000);
 
   test("в репо есть ветка stable — клон на ней (последний релиз); без неё — ветка по умолчанию", () => {
     const f = sandbox({ stable: true });
@@ -217,7 +218,7 @@ ${again.out}`).toBe("");
     copyFileSync(join(ROOT, "install.ps1"), `${plain.dl}/install.ps1`);
     expect(run(plain, `${plain.dl}/install.ps1`, "y\r\n\r\n").out).not.toContain("ветка stable");
     expect(Bun.spawnSync(["git", "-C", `${plain.home}/Projects/miksy`, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim()).not.toBe("stable");
-  }, 60000);
+  }, 180000);
 
   test("отказ от установки Bun — выход без изменений; ошибка клона — подсказка про доступ", () => {
     const f = sandbox();
@@ -229,5 +230,5 @@ ${again.out}`).toBe("");
     const bad = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n", `${f.dir}/nope.git`);
     expect(bad.code).toBe(1);
     expect(bad.out).toContain("gh auth login");
-  }, 60000);
+  }, 180000);
 });
