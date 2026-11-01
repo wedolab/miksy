@@ -82,8 +82,8 @@ git clone -b stable https://github.com/wedolab/miksy.git "<engine>"
 git clone "<адрес конфигурации>" "<engine>\..\miksy-config"      # только если она есть
 ```
 
-Конфигурация — рядом с движком, в `miksy-config`: так её найдёт `setup`. Клон не пускает (репо
-приватный) — попроси пользователя войти: `gh auth login`, затем `gh auth setup-git`. `-b stable` —
+Конфигурация — рядом с движком, в `miksy-config`: так её найдёт `setup`. Клон не проходит — проверь сеть;
+если адрес — приватная копия, попроси пользователя войти: `gh auth login`, затем `gh auth setup-git`. `-b stable` —
 ветка последнего выпуска (с неё работает `miksy update`); если git ответил, что ветки `stable` нет, —
 клонируй без `-b stable`.
 

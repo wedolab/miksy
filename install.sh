@@ -150,7 +150,7 @@ if [ -z "$ENGINE" ]; then
     say "Скачиваю $REPO → $DEST"
     if ! git clone "$REPO" "$DEST"; then
       say ""
-      say "Не удалось скачать miksy. Репо пока приватный — нужен доступ к нему:"
+      say "Не удалось скачать miksy — проверьте сеть (прокси, VPN) и адрес репо. Ставите из приватной копии —"
       say "  войдите в GitHub: gh auth login (затем gh auth setup-git) и запустите установку снова,"
       say "  или добавьте SSH-ключ в GitHub и укажите адрес: MIKSY_REPO=git@github.com:wedolab/miksy.git"
       exit 1

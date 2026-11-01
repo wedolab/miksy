@@ -82,7 +82,7 @@ function Invoke-MiksyInstall([string[]]$SetupArgs) {
       & git clone $repo $dest | Out-Host
       if ($LASTEXITCODE -ne 0) {
         Write-Host ''
-        Write-Host 'Не удалось скачать miksy. Репо пока приватный — нужен доступ к нему:'
+        Write-Host 'Не удалось скачать miksy — проверьте сеть (прокси, VPN) и адрес репо. Ставите из приватной копии —'
         Write-Host '  войдите в GitHub: gh auth login (затем gh auth setup-git) и запустите установку снова,'
         Write-Host '  или добавьте SSH-ключ в GitHub и укажите адрес: $env:MIKSY_REPO = "git@github.com:wedolab/miksy.git"'
         return 1

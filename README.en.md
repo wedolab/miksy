@@ -70,8 +70,12 @@ git clone -b stable https://github.com/wedolab/miksy.git $HOME\Projects\miksy
 cd $HOME\Projects\miksy; powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The repo is private for now: if `git clone` is refused, sign in to GitHub (`gh auth login`, then
-`gh auth setup-git`).
+Or in one line (the script asks where to put miksy, `~/Projects/miksy` by default):
+
+```
+curl -fsSL https://raw.githubusercontent.com/wedolab/miksy/main/install.sh | bash
+irm https://raw.githubusercontent.com/wedolab/miksy/main/install.ps1 | iex
+```
 
 The installer checks git, installs Bun if needed and starts the setup wizard (`miksy setup`). You can
 also hand the installation to your agent: give it [INSTALL-AGENT.md](INSTALL-AGENT.md) — the agent
