@@ -169,8 +169,8 @@ export function checkLocalAccess(dir = join(configRoot(), "local")): { bad: stri
       const lines = readFileSync(tmp, "utf16le").split(/\r?\n/);
       const bad: string[] = [];
       for (let i = 0; i + 1 < lines.length; i += 2) {
-        const aces = [...lines[i + 1].matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^)]+)\)/g)];
-        if (aces.some((a) => a[1] === "A" && a[2] !== mySid())) bad.push(`${lines[i]}: доступ есть не только у владельца`);
+        const foreign = foreignAces(lines[i + 1], mySid());
+        if (foreign.length) bad.push(`${lines[i]}: доступ есть не только у владельца (${foreign.join(", ")})`);
       }
       return { bad, links: linked };
     } finally { rmSync(tmp, { force: true }); }
