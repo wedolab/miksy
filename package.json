@@ -1,7 +1,7 @@
 {
   "name": "miksy",
   "version": "0.1.1",
-  "description": "Один источник правил, skills и MCP-серверов для AI-агентов (Claude Code, Codex, opencode, Gemini/Antigravity): слои → нативные конфиги каждого агента",
+  "description": "Один источник правил, skills и MCP-серверов для AI-агентов (Claude Code, Codex, opencode, Antigravity): слои → нативные конфиги каждого агента",
   "license": "MIT",
   "private": true,
   "type": "module",

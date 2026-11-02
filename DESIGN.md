@@ -9,7 +9,7 @@
 ## 1. Назначение
 
 Miksy — мета-слой над готовыми AI-агентами (Claude Code, Codex, opencode,
-Gemini/Antigravity). Он хранит правила, skills и MCP-серверы в одном месте и
+Antigravity). Он хранит правила, skills и MCP-серверы в одном месте и
 раскладывает их в нативные конфиги каждого агента (имя и чем miksy не является — README).
 
 Miksy — **генератор, а не рантайм**. Он не работает в фоне и не участвует в
@@ -756,7 +756,7 @@ opencode: config, precedence). (3) Конфигурация задана `MIKSY_
 | Агент | Режимы |
 |---|---|
 | Claude Code, Codex, opencode | CLI, Zed (через ACP) |
-| Gemini | CLI `agy`, Antigravity IDE и Antigravity 2.0 (графический клиент) |
+| Antigravity (`gemini`) | CLI `agy`, Antigravity IDE и Antigravity 2.0 (графический клиент) |
 
 Особенности, которые адаптер обязан проверить: рабочий каталог в IDE — открытая папка
 (проект открывается сам по себе); окружение IDE может отличаться от консольного (секреты

@@ -1,4 +1,6 @@
-# Gemini (Antigravity) — возможности и каналы
+# Antigravity — возможности и каналы
+
+Идентификатор в miksy — `gemini` (по каталогу настроек `~/.gemini`).
 
 Antigravity — агент Google в двух режимах: CLI `agy` и графический клиент (Antigravity IDE —
 форк VS Code, и Antigravity 2.0). Оба читают общие правила и skills из `~/.gemini/`, а

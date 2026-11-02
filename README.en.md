@@ -3,7 +3,7 @@
 # Miksy
 
 One source of rules, skills and MCP servers for several AI coding agents:
-**Claude Code, Codex, opencode, Gemini (Antigravity)**.
+**Claude Code, Codex, opencode, Antigravity**.
 
 > **The interface is in Russian for now.** The setup wizard, command output and the full
 > documentation ([README.md](README.md)) are Russian-only. This page is a short overview. An English
