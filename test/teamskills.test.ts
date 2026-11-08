@@ -55,7 +55,7 @@ describe("командные skills", () => {
     expect(r.skills[0].copies).toHaveLength(3);
     expect(r.skills[0].variants).toBe(2);
     expect(r.skills[0].source.path).toBe(".agents/skills/x");
-    expect(r.skills[0].seenBy).toEqual(["claude", "codex", "opencode", "gemini"]);
+    expect(r.skills[0].seenBy).toEqual(["claude", "codex", "opencode", "antigravity"]);
   });
 
   test("проверка frontmatter", () => {

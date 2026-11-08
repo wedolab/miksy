@@ -1,28 +1,30 @@
 // Общее для команд CLI: адаптеры, построение целей, генерация для цели
 import { claude } from "../adapters/claude";
 import { codex } from "../adapters/codex";
-import { gemini } from "../adapters/gemini";
+import { antigravity } from "../adapters/antigravity";
 import { opencode } from "../adapters/opencode";
 import type { Adapter, RenderedFile, RenderResult, Target } from "./adapter";
 import { createLauncher, stableBun } from "./launch";
-import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
-import { canonical, fold, inside, pathKey, samePath, slash } from "./paths";
+import { existsSync } from "node:fs";
+import { canonical, fold, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import { dirname, join, relative, resolve } from "node:path";
-import { containsProjects, ENGINE, listProjects, serviceDir, loadLayer, loadMap, configRoot, treeGroups, treeLayers } from "./load";
+import { agentId } from "./agentid";
+import { clashText, dirsOf, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, treeAbove, treeClashes, treeJoin, treeOf } from "./roots";
+import { containsProjects, ENGINE, listProjects, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers } from "./load";
 import { merge, selectGlobal, selectProject } from "./resolve";
 import { type AgentId, DEFAULT_READERS, scanTeamSkills, withTeamSkills } from "./teamskills";
 import { loadManifest, type Manifest, saveManifest, sha, type TargetState } from "./manifest";
 import { applyMoves, findMoves, HOW, type Move } from "./relocate";
 import { moveDecisions, saveMovedDecisions } from "./trust";
 import type { Action } from "./apply";
-import type { Below, Machine, Resolved } from "./types";
+import type { Below, Layer, Machine, Resolved } from "./types";
 import { bridgeEnv, refsIn, SECRET_MARK, type SkippedMcp, substitute } from "./vars";
 import { readFileSync } from "node:fs";
 import { parseToml } from "./toml";
 import { blockHash, splitInstructions } from "./instructions";
 import { MIN as MASK_MIN } from "./mask";
 
-export const ADAPTERS: Record<string, Adapter> = { claude, codex, opencode, gemini };
+export const ADAPTERS: Record<string, Adapter> = { claude, codex, opencode, antigravity };
 
 // Где каждый агент сам находит skills проекта: объявления адаптеров поверх таблицы ядра
 export const READERS: Record<AgentId, string[]> = {
@@ -31,12 +33,13 @@ export const READERS: Record<AgentId, string[]> = {
 };
 
 // Импорт командных skills — для адаптеров, где он проверен
-export const TEAM_IMPORT = new Set(["claude", "codex", "gemini"]);
+export const TEAM_IMPORT = new Set(["claude", "codex", "antigravity"]);
 
-// Агенты для команды: --agent, иначе список машины (local/machine.yaml), иначе все
+// Агенты для команды: --agent, иначе список машины (local/machine.yaml), иначе все. Прежние имена
+// (gemini) — синонимы
 export function agentsFor(machine: Machine, flag?: string): Adapter[] {
   const ids = flag ? [flag] : machine.agents ?? Object.keys(ADAPTERS);
-  return ids.map((id) => {
+  return [...new Set(ids.map(agentId))].map((id) => {
     const a = ADAPTERS[id];
     if (!a) throw new Error(`Нет адаптера «${id}». Есть: ${Object.keys(ADAPTERS).join(", ")}`);
     return a;
@@ -49,26 +52,39 @@ export interface TargetSpec {
   title: string;
 }
 
+// Ключ цели для сведений одного запуска (skills, доставленные другими агентами): каталог, а не
+// заголовок — при совпадении ветки корня с папкой другого корня заголовки могут совпасть
+export const targetKey = (t: TargetSpec) => (t.target.scope === "project" ? fold(pathKey(t.target.dir)) : "global");
+
+// Заголовок цели: место в дереве слоёв; если то же место есть на машине и в другом корне (ветка корня
+// совпала с папкой другого корня — treeClashes) — и корень
+export function titleOf(rel: string, root: Root | undefined, machine: Machine): string {
+  const title = rel || "(корень workspace)";
+  const roots = machineRoots(machine);
+  return root && rel && roots.length > 1 && dirsOf(rel, roots).length > 1 ? `${title} (${root.path})` : title;
+}
+
 export function globalTarget(machine: Machine): TargetSpec {
   const cfg = merge(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n)), machine.os);
   return { cfg, target: { scope: "global" }, title: `~ (${machine.home})` };
 }
 
-// Слои проекта: дерево layers/tree по пути проекта, затем особые привязки из map.yaml
-const layersOf = (rel: string, machine: Machine) => [...treeLayers(rel), ...selectProject(loadMap(), rel, machine.os).map((n) => loadLayer(n))];
+// Слои проекта: дерево layers/tree по месту проекта в дереве, затем особые привязки из map.yaml
+export const layersOf =(rel: string, machine: Machine) => [...treeLayers(rel), ...selectProject(loadMap(), rel, machine.os).map((n) => loadLayer(n))];
 
 // Цель без git (Р4): каталог workspace, слой дерева которого помечен target: true. Получает слои до
 // своего уровня, как проект; git не нужен. Частные случаи — каталог над проектами (группа: внутри
 // есть проекты) и рабочий каталог без git. Тип и имена в коде — Group: исторически пометка вводилась
 // для групп
-export interface Group { abs: string; rel: string; nested: boolean; git: boolean }
+export interface Group { abs: string; rel: string; nested: boolean; git: boolean; root?: Root }
 // Как назвать помеченный каталог в выводе
 export const markedKind = (t: { nested?: boolean }) => (t.nested ? "группа" : "цель без git");
 
-// Группы этой машины. Неверная пометка (нет каталога, служебный каталог, содержит дом, внутри
-// проекта, корень дерева) — предупреждение warn, слой остаётся обычным промежуточным
+// Группы этой машины: каталоги всех корней на месте помеченного слоя (ветка корня совпала с папкой
+// другого корня — два каталога). Неверная пометка (нет каталога, служебный каталог, содержит дом, внутри проекта,
+// корень дерева или корень workspace) — предупреждение warn, слой остаётся обычным промежуточным
 export function listGroups(machine: Machine, warn?: (msg: string) => void): Group[] {
-  const ws = canonical(machine.workspace);
+  const roots = machineRoots(machine);
   const home = canonical(machine.home);
   const out: Group[] = [];
   for (const g of treeGroups()) {
@@ -76,34 +92,32 @@ export function listGroups(machine: Machine, warn?: (msg: string) => void): Grou
       warn?.("пометка target: true не действует: корень дерева (layers/tree/layer.yaml) — workspace целиком не цель");
       continue;
     }
-    // Каталог workspace по пути слоя, без учёта регистра (как treeLayers)
-    let dir: string | null = ws;
-    let rel = "";
-    // Ссылка на каталог (симлинк, junction) — тоже каталог: причина отказа ниже, а не «каталога нет»
-    const isDir = (parent: string, e: Dirent) => e.isDirectory() || (e.isSymbolicLink() && (() => { try { return statSync(join(parent, e.name)).isDirectory(); } catch { return false; } })());
-    let link = false;
-    for (const seg of g.split("/")) {
-      const parent: string = dir!;
-      const hit: Dirent | undefined = existsSync(parent) ? readdirSync(parent, { withFileTypes: true }).find((e) => e.name.toLowerCase() === seg.toLowerCase() && isDir(parent, e)) : undefined;
-      if (!hit) { dir = null; break; }
-      link ||= hit.isSymbolicLink();
-      dir = `${parent}/${hit.name}`;
-      rel = rel ? `${rel}/${hit.name}` : hit.name;
+    // Каталоги корней по пути слоя, без учёта регистра (как treeLayers); ссылка на каталог (симлинк,
+    // junction) — тоже каталог: причина отказа ниже, а не «каталога нет»
+    const places = dirsOf(g, roots);
+    if (!places.length) {
+      // Каталог есть, но сам стал корнем workspace (root add … --yes): пометка в этом месте дерева не действует
+      const rooted = dirsOf(g, roots, true).find((p) => roots.some((r) => sameKey(r.path, p.dir)));
+      warn?.(rooted ? `цель ${g} (target: true): каталог ${rooted.dir} стал корнем workspace — пометка здесь не действует (слои его проектов — в ветке корня)` : `цель ${g} (target: true): каталога нет в workspace — пометка не действует`);
+      continue;
     }
-    if (!dir) { warn?.(`цель ${g} (target: true): каталога нет в workspace — пометка не действует`); continue; }
-    const abs = canonical(dir);
-    // Файлы группы в чужом репо (не корень проекта) не скрыл бы exclude; корень workspace — не проект
-    let repo: string | null = null;
-    for (let d = slash(dirname(abs)); inside(d, ws) && !samePath(d, ws); d = slash(dirname(d)))
-      if (existsSync(join(d, ".git"))) { repo = d; break; }
-    const why = !inside(abs, ws) ? `каталог ведёт через симлинк за пределы workspace (${abs})`
-      : link ? `путь идёт через симлинк (→ ${slash(relative(ws, abs))}) — пометьте каталог назначения`
-      : serviceDir(abs) ? "служебный каталог miksy"
-      : inside(home, abs) ? "каталог содержит домашний каталог"
-      : repo ? `внутри проекта ${slash(relative(ws, repo))} (файлы цели лежали бы в чужом репо без exclude)`
-      : null;
-    if (why) { warn?.(`цель ${g} (target: true): ${why} — пометка не действует`); continue; }
-    out.push({ abs, rel, nested: containsProjects(abs), git: existsSync(join(abs, ".git")) });
+    for (const { root, dir, link } of places) {
+      const ws = root.path;
+      const abs = canonical(dir);
+      // Файлы группы в чужом репо (не корень проекта) не скрыл бы exclude; корень workspace — не проект
+      let repo: string | null = null;
+      for (let d = slash(dirname(abs)); inside(d, ws) && !sameKey(d, ws); d = slash(dirname(d)))
+        if (existsSync(join(d, ".git"))) { repo = d; break; }
+      const why = !inside(abs, ws) ? `каталог ведёт через симлинк за пределы workspace (${abs})`
+        : link ? `путь идёт через симлинк (→ ${slash(relative(ws, abs))}) — пометьте каталог назначения`
+        : sameKey(abs, ws) ? `это корень workspace ${ws} — корень целью не бывает (его проекты и так получают этот слой)`
+        : serviceDir(abs) ? "служебный каталог miksy"
+        : inside(home, abs) ? "каталог содержит домашний каталог"
+        : repo ? `внутри проекта ${treeJoin(root.tree, slash(relative(ws, repo)))} (файлы цели лежали бы в чужом репо без exclude)`
+        : null;
+      if (why) { warn?.(`цель ${g} (target: true)${roots.length > 1 ? ` в ${ws}` : ""}: ${why} — пометка не действует`); continue; }
+      out.push({ abs, rel: treeJoin(root.tree, slash(relative(ws, abs))), nested: containsProjects(abs), git: existsSync(join(abs, ".git")), root });
+    }
   }
   return out;
 }
@@ -112,22 +126,91 @@ export function listGroups(machine: Machine, warn?: (msg: string) => void): Grou
 // .codex/config.toml и .agents/skills от корня до каталога сессии — во вложенной группе skills
 // групп выше видны вторично (одноимённые — дважды; проверено вживую, codex-cli 0.160)
 export function workspaceRepoNote(machine: Machine, groups: Group[]): string | null {
-  const nested = groups.filter((g) => !g.git && groups.some((h) => h !== g && inside(g.abs, h.abs)));
-  if (!nested.length || !existsSync(join(machine.workspace, ".git"))) return null;
-  return `корень workspace ${machine.workspace} — git-репо: Codex во вложенных группах без своего git (${nested.map((g) => g.rel).join(", ")}) видит и skills групп выше (одноимённые — дважды); уберите .git из корня workspace, если он не нужен`;
+  const notes = machineRoots(machine).flatMap((r) => {
+    const mine = groups.filter((g) => !g.root || sameKey(g.root.path, r.path));
+    const nested = mine.filter((g) => !g.git && mine.some((h) => h !== g && inside(g.abs, h.abs)));
+    if (!nested.length || !existsSync(join(r.path, ".git"))) return [];
+    return [`корень workspace ${r.path} — git-репо: Codex во вложенных группах без своего git (${nested.map((g) => g.rel).join(", ")}) видит и skills групп выше (одноимённые — дважды); уберите .git из корня workspace, если он не нужен`];
+  });
+  return notes.length ? notes.join("\n") : null;
 }
 
+// Особенности корней этой машины — предупреждения для projects, sync --all и doctor: недоступный
+// корень (диск не подключён); вложенный корень внутри проекта внешнего (его файлы лежали бы в чужом
+// git-репо) или внутри группы внешнего (группы считаются в пределах корня, а Claude читает
+// родительские каталоги физически — правила такой группы придут и сюда)
+export function rootNotes(machine: Machine, groups: Group[]): string[] {
+  const roots = machineRoots(machine);
+  const out: string[] = [];
+  for (const r of roots) {
+    if (!rootExists(r)) { out.push(`корень ${rootText(r)} недоступен (${r.away ?? "каталога нет"}): его проекты пропущены, записанное туда и учёт его целей не трогаются`); continue; }
+    for (const o of roots.filter((x) => x !== r && rootExists(x) && inside(r.path, x.path) && !sameKey(r.path, x.path))) {
+      for (let d = slash(dirname(r.path)); inside(d, o.path) && !sameKey(d, o.path); d = slash(dirname(d)))
+        if (existsSync(join(d, ".git"))) { out.push(`корень ${r.path} лежит внутри проекта ${d} (корень ${o.path}): файлы его целей окажутся в чужом git-репо без exclude — уберите вложенный корень или перенесите каталог`); break; }
+      for (const g of groups.filter((g) => g.root && sameKey(g.root.path, o.path) && inside(r.path, g.abs)))
+        out.push(`корень ${r.path} лежит внутри группы ${g.rel} (корень ${o.path}): группы считаются в пределах своего корня, но Claude читает родительские каталоги — в проектах этого корня будут и правила группы ${g.rel}`);
+    }
+  }
+  return out;
+}
+
+// Совпадения веток корней с папками других корней (src/roots.ts: treeClashes) — предупреждения
+export const clashNotes = (machine: Machine) => treeClashes(machineRoots(machine)).map(clashText);
+
+// Ветка корня внутри чужого места — справка с рекомендацией (не проблема). Место — предок ветки (кроме
+// корня дерева: он общий у всех корней по замыслу), у которого есть свои слои (layers/tree/<предок>/…)
+// или каталог другого корня: ветка другого корня (tree: Clients/Sub при tree: Clients) или папка основного
+// (tree: Org/Sub при папке Org). Проекты корня получают слои предка — что именно, перечисляется. Корень,
+// который физически лежит в каталоге своего места-родителя (вложенный на естественном месте), — не справка
+export function branchNote(r: Root, roots: Root[]): string | null {
+  const segs = r.tree ? r.tree.split("/") : [];
+  if (segs.length < 2) return null;
+  const ancestors = segs.slice(0, -1).map((_, i) => segs.slice(0, i + 1).join("/"));
+  if (dirsOf(ancestors[ancestors.length - 1], roots).some((d) => d.root !== r && inside(r.path, d.dir))) return null;
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const layers = treeLayers(r.tree).filter((l) => ancestors.some((a) => same(a, l.name)));
+  const dirs = ancestors.flatMap((a) => dirsOf(a, roots).filter((d) => d.root !== r)).map((d) => `${d.dir}${sameKey(d.dir, d.root.path) ? ` — корень, ветка ${d.root.tree}` : ` — папка корня ${d.root.path}`}`);
+  if (!layers.length && !dirs.length) return null;
+  const parts = (l: Layer) => [
+    l.instructions.length && `правила ${l.instructions.map((i) => i.file).join(", ")}`,
+    l.mcp.length && `MCP ${l.mcp.map((m) => m.name).join(", ")}`,
+    l.skills.length && `skills ${l.skills.map((s) => s.name).join(", ")}`,
+  ].filter(Boolean).join("; ") || "настройки слоя";
+  const inherit = layers.length
+    ? `его проекты получают и слои ${layers.map((l) => `layers/tree/${l.name} (${parts(l)})`).join(", ")}`
+    : `своих слоёв у ${ancestors.join(", ")} пока нет, но всё, что там появится, получат и его проекты`;
+  const top = segs[0];
+  return `корень ${r.path}: ветка layers/tree/${r.tree} лежит внутри места ${ancestors[ancestors.length - 1]}${dirs.length ? ` (там же: ${dirs.join("; ")})` : ""} — ${inherit}. ` +
+    `Не нужно — вынесите ветку из ${top} (например, tree: ${top}-${segs[segs.length - 1]}), а общее задайте явно слоем в map.yaml (README, «Несколько корней workspace»)`;
+}
+export const branchNotes = (machine: Machine) => {
+  const roots = machineRoots(machine);
+  return roots.flatMap((r) => { const n = branchNote(r, roots); return n ? [n] : []; });
+};
+
+// Вложенные корни — справка (не предупреждение): какой корень внутри какого и где он в дереве
+export const nestedNotes = (machine: Machine) => {
+  const roots = machineRoots(machine);
+  return roots.flatMap((r) => { const o = outerRoot(r, roots); return o ? [nestedText(r, o)] : []; });
+};
+
+// Каталог вне всех корней workspace (корень убран, workspace сменился): цель учёта, которую miksy больше
+// не обновляет
+export const outsideRoots = (dir: string, machine: Machine) => !locate(dir, machineRoots(machine));
+
 // nested — внутри есть другие проекты (не задано — проверяется обходом каталога).
-// groups — группы машины (не задано — читаются заново): цель-группа и отрезок ниже групп (Resolved.below)
+// groups — группы машины (не задано — читаются заново): цель-группа и отрезок ниже групп (Resolved.below) —
+// только группы того же корня workspace
 export function projectTarget(abs: string, rel: string, machine: Machine, nested?: boolean, groups = listGroups(machine)): TargetSpec {
   abs = canonical(abs);
   if (inside(canonical(machine.home), abs)) throw new Error(`${abs}: проектная цель содержит домашний каталог; используйте --global для дома`);
   const cfg = merge(layersOf(rel, machine), machine.os);
+  const place = locate(abs, machineRoots(machine));
   const group = groups.some((g) => fold(g.abs) === fold(abs));
-  const above = groups.filter((g) => inside(abs, g.abs) && fold(g.abs) !== fold(abs)).sort((a, b) => a.abs.length - b.abs.length);
+  const above = groups.filter((g) => inside(abs, g.abs) && fold(g.abs) !== fold(abs) && (!place || !g.root || sameKey(g.root.path, place.root.path))).sort((a, b) => a.abs.length - b.abs.length);
   if (above.length) cfg.below = belowOf(cfg, above, machine);
   const target: Target = { scope: "project", dir: abs, rel, nested: nested ?? containsProjects(abs), git: existsSync(join(abs, ".git")), ...(group && { group: true }) };
-  return { cfg, target, title: rel || "(корень workspace)" };
+  return { cfg, target, title: titleOf(rel, place?.root, machine) };
 }
 
 // Отрезок цели ниже групп: слои между ближайшей группой выше (не включая) и целью (включая).
@@ -152,7 +235,7 @@ function belowOf(cfg: Resolved, above: Group[], machine: Machine): Below {
   return { groups, layers, instructions: cfg.instructions.filter((i) => layers.includes(i.layer)), leaked: [...leaked.values()] };
 }
 
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "opencode", gemini: "Antigravity" };
+const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "opencode", antigravity: "Antigravity" };
 
 // Канал правил группы доставлен: в учёте группы — блок или own-файл правил (rulesFiles адаптера), и он
 // цел на диске: блок разбирается и его хеш совпадает с учтённым, own-файл — с учтённым хешем. Файл без
@@ -193,12 +276,15 @@ export function unsyncedGroups(adapter: Adapter, t: TargetSpec, delivered: (dir:
 // Их наследуемые файлы продолжали бы действовать на цели ниже — sync --all убирает их по учёту
 export function formerGroups(manifest: Manifest, adapter: Adapter, groups: Group[], machine: Machine): { dir: string; rel: string }[] {
   const current = new Set(groups.map((g) => fold(pathKey(g.abs))));
-  const ws = canonical(machine.workspace);
+  const roots = machineRoots(machine);
+  // Группа недоступного корня (диск не подключён) пометку не теряла — её не трогаем; вне всех корней
+  // (корень убран из workspace) — тоже: убрать записанное туда — явно, miksy clean <путь>
+  const away = roots.filter((r) => !rootExists(r));
   return Object.entries(manifest.targets)
     .filter(([id, st]) => st.group && id.startsWith(`${adapter.id}|`))
     .map(([id]) => id.slice(id.indexOf("|") + 1))
-    .filter((dir) => !current.has(fold(dir)))
-    .map((dir) => ({ dir, rel: slash(relative(ws, dir)) }));
+    .filter((dir) => !current.has(fold(dir)) && !away.some((r) => inside(dir, r.path)) && !!locate(dir, roots))
+    .map((dir) => ({ dir, rel: treeOf(dir, roots) }));
 }
 
 // Бывшая группа как цель clean: только каталог и учёт (слои не нужны)
@@ -238,8 +324,8 @@ export const targetId = (adapter: Adapter, target: Target) =>
 export function allProjects(machine: Machine, adapters: Adapter[] = Object.values(ADAPTERS), warn?: (msg: string) => void) {
   const known = adapters.flatMap((a) => a.knownDirs?.(machine) ?? []);
   const home = canonical(machine.home);
-  return listProjects(machine.workspace, known, warn).filter((p) => {
-    if (p.rel === "" || serviceDir(p.abs)) return false;
+  return listProjects(machineRoots(machine), known, warn).filter((p) => {
+    if (serviceDir(p.abs)) return false;
     if (!inside(home, p.abs)) return true;
     warn?.(`${p.rel} пропущен: проект содержит домашний каталог (для дома — --global)`);
     return false;
@@ -284,6 +370,8 @@ export function renderFor(
   deliveredSkills?: string[],
   groupRules?: (dir: string) => boolean, // группа выше доставила правила (не задано — считается, что да)
 ): { result: RenderResult; cfg: Resolved; missing: string[]; skipped: SkippedMcp[] } {
+  // ${WORKSPACE} — основной (первый) корень у целей любого корня и в глобальных настройках: смысл
+  // переменной не зависит от цели. Путь в другой корень — своей переменной в vars local/machine.yaml
   const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(t.cfg, machine, secrets, { agent: adapter.id, http: adapter.httpSecrets });
   const team = teamFor(resolved, t.target, adapter);
   const launch = launcherFor(adapter, t.target, machine);
@@ -442,13 +530,54 @@ function assertNoSecret(adapter: Adapter, f: RenderedFile, used: string[], secre
 
 // Учёт с переездами каталогов (src/relocate.ts): перенос — в памяти; sync и clean сохраняют его
 // (saveMoves). Цели workspace перечисляются, только если какой-то каталог учёта пропал
-export function loadManifestMoved(machine: Machine, groups?: Group[]): { manifest: Manifest; moves: Move[] } {
+// Каталоги под недоступным корнем (диск не подключён) не считаются пропавшими: их не переносят
+export function loadManifestMoved(machine: Machine, groups?: Group[]): { manifest: Manifest; moves: Move[]; rootsChanged: boolean } {
   const raw = loadManifest();
+  const roots = machineRoots(machine);
+  const away = roots.filter((r) => !rootExists(r));
+  const exists = (p: string) => existsSync(p) || away.some((r) => inside(p, r.path));
   const moves = findMoves(raw, configRoot(), () =>
-    [...(groups ?? listGroups(machine)).map((g) => g.abs), ...allProjects(machine).map((p) => p.abs)].map(pathKey));
-  const ws = canonical(machine.workspace);
-  moveDecisions(moves, (dir) => slash(relative(ws, dir)));
-  return { manifest: applyMoves(raw, moves), moves };
+    [...(groups ?? listGroups(machine)).map((g) => g.abs), ...allProjects(machine).map((p) => p.abs)].map(pathKey), exists);
+  moveDecisions(moves, (dir) => treeOf(dir, roots));
+  const manifest = applyMoves(raw, moves);
+  // Последний известный настоящий путь доступных корней (по пути, как он записан в machine.yaml):
+  // запишется с учётом при первой записи. Нужен, когда корень станет недоступен (src/load.ts: parseRoots)
+  // rootsChanged — запомненное разошлось с учётом на диске: sync и clean сохраняют учёт и без других изменений
+  const known = roots.filter((r) => r.given && rootExists(r));
+  const before = JSON.stringify(manifest.roots ?? {});
+  if (known.length) {
+    const memo = { ...manifest.roots };
+    for (const r of known) memo[rootMemoryKey(r.given!)] = r.path;
+    manifest.roots = Object.fromEntries(Object.entries(memo).filter(([k]) => roots.some((r) => r.given && rootMemoryKey(r.given) === k)));
+  }
+  return { manifest, moves, rootsChanged: JSON.stringify(manifest.roots ?? {}) !== before };
+}
+
+// Каталог учёта под недоступным корнем: не «пропал», а недоступен сейчас
+export const unavailable = (dir: string, machine: Machine) => machineRoots(machine).some((r) => !rootExists(r) && inside(dir, r.path));
+
+// Каталог цели, до которого не дотянуться: под недоступным корнем или вне всех корней и его нет (после
+// root remove не отличить неподключённый диск от удалённых данных). clean убирает достижимое, а учёт
+// файлов внутри оставляет — до повторного clean с диском или явного «забыть» (--forget)
+export const stranded = (dir: string, machine: Machine) => unavailable(dir, machine) || (outsideRoots(dir, machine) && !existsSync(dir));
+
+// Цели учёта, чей каталог теперь сам корень workspace (root add проекта или цели --yes): записанное туда miksy
+// раньше действует, но sync --all его больше не обновляет — корень не проект (рецензия 6x, B3). Цель-группа — не
+// здесь: её пометка в этом месте дерева больше не действует, и записанное туда sync --all убирает сам (formerGroups)
+export function rootedTargets(manifest: Manifest, machine: Machine): string[] {
+  const roots = machineRoots(machine).filter(rootExists);
+  const dirOf = (id: string) => id.slice(id.indexOf("|") + 1);
+  const groups = new Set(Object.entries(manifest.targets).filter(([, st]) => st.group).map(([id]) => fold(dirOf(id))));
+  return [...new Set(Object.keys(manifest.targets).map(dirOf))]
+    .filter((d) => d !== "global" && !groups.has(fold(d)) && existsSync(d) && roots.some((r) => rootKey(r.path) === rootKey(d))).sort();
+}
+// Основной корень: root remove его не убирает, а «добавлен по ошибке» неверно — туда писал miksy sync в самом
+// корне (0.1.x) или workspace сменили на бывший проект (микроправка перед 0.2.0)
+export const isMainRoot = (dir: string, machine: Machine) => rootKey(machineRoots(machine)[0].path) === rootKey(dir);
+export function rootedText(dir: string, machine: Machine): string {
+  if (isMainRoot(dir, machine)) return `${dir} — основной корень workspace (папка с проектами), а не проект: miksy раньше записал настройки в сам корень (например, miksy sync в нём в 0.1.x или он был проектом до смены workspace) — CLAUDE.local.md и др. действуют, но больше не обновляются. Убрать записанное: miksy clean "${dir}"`;
+  const outer = machineRoots(machine).find((r) => rootKey(r.path) !== rootKey(dir) && inside(dir, r.path));
+  return `${dir} — теперь корень workspace (папка с проектами), а не проект: записанное туда miksy раньше (CLAUDE.local.md и др.) действует, но больше не обновляется. Корень добавлен по ошибке — miksy root remove "${dir}"${outer ? ` (записанное останется; следующий miksy sync --all снова обновит его как проект корня ${outer.path})` : ""}; так и задумано — убрать записанное: miksy clean "${dir}"`;
 }
 
 export const movesText = (moves: Move[]) => moves.map((m) => `  ${m.from} → ${m.to}  (${HOW[m.how]})`);
@@ -461,10 +590,23 @@ export function saveMoves(manifest: Manifest, moves: Move[]) {
 
 // Каталог из учёта, которого больше нет (удалён или переехал и не найден): clean <прежний путь>
 // убирает записанное вне него (ключи MCP, доверие, обёртки) и его записи учёта
+// Так же — каталог, который есть, но вне всех корней workspace (корень убран из machine.yaml): sync его
+// больше не обновляет, а clean <путь> убирает записанное по учёту
 export function vanishedTarget(path: string, manifest: Manifest, machine: Machine): TargetSpec | null {
-  const abs = slash(resolve(process.cwd(), path)).replace(/(?<=.)\/+$/, "");
-  if (existsSync(abs)) return null;
-  const key = pathKey(abs);
-  if (!Object.keys(manifest.targets).some((id) => fold(id.slice(id.indexOf("|") + 1)) === fold(key))) return null;
-  return formerTarget({ dir: key, rel: slash(relative(canonical(machine.workspace), key)) });
+  const abs = trimSlash(slash(resolve(process.cwd(), driveRoot(path))));
+  if (existsSync(abs) && !outsideRoots(pathKey(abs), machine)) return null;
+  // Каталог — в написании учёта: путь, набранный в другом регистре (Windows, macOS), — та же цель,
+  // а учёт и записи внутри (splitState) сравниваются по написанию учёта
+  const typed = fold(pathKey(abs));
+  // Путь через корень, как он записан в machine.yaml, когда корень — ссылка (junction, симлинк) в никуда: учёт
+  // знает каталог по пути назначения, запомненному при последней записи (src/load.ts: parseRoots)
+  const via = machineRoots(machine).flatMap((r) => {
+    if (!r.given) return [];
+    const given = rootMemoryKey(r.given);
+    return fold(r.path) !== given && inside(typed, given) ? [fold(trimSlash(slash(join(r.path, relative(given, typed)))))] : [];
+  });
+  const id = Object.keys(manifest.targets).find((id) => [typed, ...via].includes(fold(id.slice(id.indexOf("|") + 1))));
+  if (!id) return null;
+  const key = id.slice(id.indexOf("|") + 1);
+  return formerTarget({ dir: key, rel: treeOf(key, machineRoots(machine)) });
 }

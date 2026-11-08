@@ -9,7 +9,15 @@ opencode — агент с CLI (`opencode run`, `opencode mcp list`, `opencode d
 
 - opencode 1.18.19, 2.0.32, 2.1.4 — Windows 11;
 - opencode 1.19.1 — macOS 26.6;
-- Zed (ACP) — Windows.
+- opencode 1.19.5, затем 2.2.5 — Linux (Ubuntu 24.04; официальный установщик, `~/.opencode/bin`);
+- Zed (ACP) — Windows: «OpenCode» из реестра ACP (2.2.5).
+
+miksy пишет настройки в формате **2.x**. `doctor` и мастер `setup` предупреждают, если используется
+1.x: версия узнаётся без запуска opencode (2.x при запуске поднимает фоновый сервис) — по пакету npm
+(`opencode-ai` — 1.x, `@opencode/cli` — 2.x), каталогу Homebrew (`Cellar/opencode/<версия>`) или, у
+официального установщика (`~/.opencode/bin/opencode`), по команде `opencode2` рядом: установщик 2.x
+(`opencode.ai/v2/install`) всегда пишет её маленьким скриптом, установщик 1.x (`opencode.ai/install`)
+— нет. Установщики проверены по их тексту (2026-11-07).
 
 Источники: документация `opencode.ai/docs` (rules, config) и живые проверки (см. «История
 проверок»).
@@ -31,7 +39,7 @@ opencode — агент с CLI (`opencode run`, `opencode mcp list`, `opencode d
 | Формат сервера | `mcp.<имя>`: `type: "local"\|"remote"`, `command` — массив, `environment` (не `env`), `headers`, `enabled: false` | Пишет форму `mcp.<имя>`; `agents.opencode` слоя может дополнить или выключить (`skip`) | Вживую: 1.18.19 и 2.0.32 Windows, 1.19.1 macOS |
 | stdio с секретом | `command` запускает `.cmd`/sh напрямую | `{"type":"local","command":["<local/run/opencode/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh>"]}` | Вживую: 1.18.19 и 2.0.32 Windows (без окон), 1.19.1 macOS |
 | HTTP с секретом в заголовке | `{file:путь}` в `headers` — opencode читает файл сам | `"Authorization": "Bearer {file:<local/secrets/ИМЯ>}"`; только для секрета, файл которого создаёт этот sync | Вживую: 1.18.19, 2.0.32, 2.1.4 Windows, 1.19.1 macOS |
-| HTTP с секретом в URL | — | Мост `src/bridge.ts` через stdio-обёртку (как у Gemini) | Вживую: 2.0.32 Windows, 1.19.1 macOS |
+| HTTP с секретом в URL | — | Мост `src/bridge.ts` через stdio-обёртку (как у Antigravity) | Вживую: 2.0.32 Windows, 1.19.1 macOS |
 | Каталоги-группы | Конфиги и skills родительских каталогов наследуются (одноимённое — ближний) | `inherits: { skills: true, mcp: true }`: каждая цель получает полную цепочку правил, MCP и skills | Вживую: 2.0.32 Windows, 1.19.1 macOS (`test/live/groups.ts`) |
 | Реестр проектов | Нет; лог `~/.local/share/opencode/log/opencode.log` пишет каталог каждого запуска | Источник `knownDirs` для `sync --all` | Вживую |
 
@@ -111,7 +119,15 @@ opencode — агент с CLI (`opencode run`, `opencode mcp list`, `opencode d
 - CLI на Windows: каталог проекта для `opencode run` берётся из `PWD`, а не из cwd процесса —
   запускать с `PWD` = проект.
 - Zed (ACP), Windows: каталог проекта определяется верно; stdio-обёртки `.cmd` (bun, npx)
-  запускаются без окон консоли.
+  запускаются без окон консоли. opencode через ACP видит `AGENTS.md` проекта и глобальные правила
+  (2026-11-02).
+- Реестр ACP (`agentclientprotocol/registry`): записи «OpenCode» и «OpenCode V2» на 2026-11-02
+  одинаковы — обе 2.2.5, одни и те же бинарники (разница — только источник: GitHub или opencode.ai);
+  до обновления реестра 2026-10-30 «OpenCode» был 1.x. Сессии 1.x и 2.x лежат в разных таблицах одной
+  базы: 1.x на базе, переведённой 2.x, падает («Database is not empty and has no session table»).
+- Linux: для `linux-x86_64` реестр даёт обычную сборку, не `-baseline` — на процессоре без AVX2
+  opencode через ACP может упасть; тогда своя запись `agent_servers` в Zed, запускающая установленный
+  `opencode acp`.
 
 ## Не поддерживается
 
@@ -130,3 +146,6 @@ opencode — агент с CLI (`opencode run`, `opencode mcp list`, `opencode d
   `bun test/live/r1.ts opencode`.
 - 2026-10-25: 2.0.32 Windows, 1.19.1 macOS — каталоги-группы, `test/live/groups.ts`.
 - Длинные значения и кавычки в `{file:}` — `bun test/live/g2.ts wrappers` (2.1.4 Windows).
+- 2026-11-01…02: Linux (Ubuntu 24.04) — 1.19.5 от официального установщика (предупреждения о 1.x не
+  было: версия по установщику не распознавалась — исправлено в 0.2.0), затем 2.2.5, `doctor` чистый;
+  Zed ACP на Windows — правила проекта и глобальные видны.

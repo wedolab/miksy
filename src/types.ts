@@ -1,3 +1,5 @@
+import type { Root } from "./roots";
+
 export type Os = "windows" | "macos" | "linux";
 
 export interface McpServer {
@@ -65,7 +67,10 @@ export interface Tool {
 }
 
 export interface Machine {
-  workspace: string;
+  workspace: string; // основной (первый) корень: ${WORKSPACE} у целей любого корня и в глобальных настройках
+  // Все корни workspace (local/machine.yaml: workspace — строка или список); loadMachine задаёт всегда,
+  // без него — один корень workspace (machineRoots)
+  roots?: Root[];
   os: Os;
   home: string;
   vars: Record<string, string>;

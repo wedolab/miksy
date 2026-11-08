@@ -38,7 +38,9 @@ miksy-config/
 ```
 
 A project gets every layer along its path, top to bottom; a lower layer adds to and overrides the
-upper ones. Secrets are referenced as `${NAME}` and stored in `local/secrets.env` — agent configs get
+upper ones. Projects in several unrelated places (a second disk, a cloud storage folder) are listed as
+several workspace roots, each with its own branch of the same layer tree: `miksy root add E:/Clients --tree Clients`
+(or `{ path: "E:/Clients", tree: Clients }` in `local/machine.yaml`). Secrets are referenced as `${NAME}` and stored in `local/secrets.env` — agent configs get
 wrappers, not the values.
 
 Miksy only touches what it wrote itself: your own and your team's files stay as they are, and if it
@@ -46,8 +48,8 @@ has to replace a file, it keeps the original and restores it when you remove mik
 
 ## Requirements
 
-- **Agents:** Claude Code, Codex, opencode **2.x**, Antigravity — any of them; miksy configures only the
-  ones you have installed. Works in the terminal and in editors that run agents through ACP (Zed);
+- **Agents:** Claude Code, Codex, opencode **2.x**, Antigravity (`claude`, `codex`, `opencode`,
+  `antigravity` in the config) — any of them; miksy configures only the ones you have installed. Works in the terminal and in editors that run agents through ACP (Zed);
   Antigravity gets them in its IDE and CLI (`agy`), not yet through ACP in Zed.
 - **OS:** Windows, macOS and Linux (Ubuntu 24.04) are tested on real machines and in CI.
 - **git** and **[Bun](https://bun.sh)** 1.3.14 or newer (the installer offers to install Bun).
@@ -88,8 +90,10 @@ reads Russian fine and can explain the steps to you in English.
 |---|---|
 | `miksy setup` | setup wizard; rerun to continue or to pick up newly installed agents |
 | `miksy sync --global`, `miksy sync --all` | write your settings to the agents (home folder / all projects); `--dry-run` shows the plan |
+| `miksy sync` | the same for the project (or `target: true` folder) you are in, also from its subfolders |
+| `miksy root add [<path>]` | add another folder with projects as a workspace root (`--tree <branch>`); `miksy root` lists roots |
 | `miksy doctor` | checks that everything is written and nothing has drifted (changes nothing) |
-| `miksy explain <path>` | what a folder gets and from which layer |
+| `miksy explain [<path>]` | what a folder (the current one by default) gets and from which layer; `--global` — home folder settings |
 | `miksy update` | update miksy to the latest release (`--check` only checks) |
 
 ## More

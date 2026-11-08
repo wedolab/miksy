@@ -97,8 +97,8 @@ test("С8: exclude каталогом не скрывает чужой конф�
   put(`${f.dir}/rule.md`, "layer rule\n");
   put(`${f.dir}/.agents/plugins/miksy/rules/AGENTS.md`, "чужие заметки\n");
   const cfg = { ...none, instructions: [{ layer: "x", item: { file: "rule.md", path: `${f.dir}/rule.md` } }] };
-  const { result } = renderFor(ADAPTERS.gemini, { cfg, target: f.target, title: "t" }, f.machine, {});
-  const actions = plan(result, f.target, f.machine, emptyState(), false, "gemini");
+  const { result } = renderFor(ADAPTERS.antigravity, { cfg, target: f.target, title: "t" }, f.machine, {});
+  const actions = plan(result, f.target, f.machine, emptyState(), false, "antigravity");
   expect(actions.some((a) => a.kind === "conflict" && a.abs.endsWith("rules/AGENTS.md"))).toBe(true);
   apply(actions, emptyState());
   expect(f.git("check-ignore", "-q", ".agents/plugins/miksy/plugin.json").exitCode).toBe(0);

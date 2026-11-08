@@ -35,7 +35,9 @@ description: Как добавлять и менять правила, MCP-се�
 | часть организации / проект | `<workspace>/Org/Team/...` | `layers/tree/Org/Team/...` |
 
 Дерево `layers/tree/` повторяет workspace: имена каталогов — как в workspace
-(регистр не важен). Каталога нет — создай.
+(регистр не важен). Каталога нет — создай. Корней workspace бывает несколько (`workspace:` списком в
+`local/machine.yaml`, у каждого — место `tree`, например `Clients`): каталог слоя — по **месту в
+дереве**, его показывает `miksy explain <путь>` («Место в дереве»).
 
 Пользователь хочет, чтобы правила и MCP работали и в самом каталоге над проектами
 (сессия в `<workspace>/Org`, а не в проекте) — это **цель-группа**: `target: true` в
@@ -82,8 +84,9 @@ env:
 
 Удалённый сервер: `url:` и при необходимости `headers:`
 (`Authorization: Bearer ${ORG_SERVICE_TOKEN}`). Пути машины — через
-`${WORKSPACE}`, `${HOME}` или переменные из `local/machine.yaml`.
-Не подключать конкретному агенту: `agents: { gemini: skip }`.
+`${WORKSPACE}` (основной корень workspace), `${HOME}` или переменные из `local/machine.yaml`
+(путь в другой корень workspace — своей переменной в `vars`).
+Не подключать конкретному агенту: `agents: { antigravity: skip }` (агенты — claude, codex, opencode, antigravity).
 
 Значение секрета пользователь кладёт в `local/secrets.env` конфигурации miksy
 (`ORG_GITLAB_TOKEN=…`). Если он дал значение тебе — запиши туда сам, но не

@@ -60,7 +60,8 @@ EOF
   const run = (f: ReturnType<typeof sandbox>, script: string, stdin: string, repo = f.bare) => {
     const r = Bun.spawnSync(["/bin/sh", script, "--yes"], {
       cwd: f.dir, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe",
-      env: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin:/usr/sbin:/sbin`, MIKSY_REPO: repo, SHELL: "/bin/zsh" },
+      // git установщика не читает настройки машины (test/preload.ts)
+      env: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin:/usr/sbin:/sbin`, MIKSY_REPO: repo, SHELL: "/bin/zsh", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${f.home}/.gitconfig` },
     });
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
@@ -83,6 +84,26 @@ EOF
     expect(again.code).toBe(0);
     expect(again.out).not.toContain("Куда скачать");
     expect(again.out).toContain("✓ git, Bun 1.3.14");
+  }, 60000);
+
+  // Терминал — через script (псевдотерминал): bash 4+ читает ответ с построчным редактированием, путь по
+  // умолчанию уже в строке — «X» дописывается к нему. Без bash 4+ (macOS /bin/bash 3.2) или script — пропуск
+  const bash = Bun.which("bash");
+  const pty = Bun.which("script");
+  const bash4 = !!bash && Number(Bun.spawnSync([bash, "-c", "echo ${BASH_VERSINFO[0]}"]).stdout.toString().trim()) >= 4;
+  test.if(!!pty && bash4)("bash с терминалом: «Куда скачать» — путь по умолчанию в строке, его можно править (read -e -i)", () => {
+    const f = sandbox();
+    put(`${f.bin}/bun`, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.3.14; exit 0; fi\necho "$(pwd) $*" > "$HOME/bun-args"\n`);
+    chmodSync(`${f.bin}/bun`, 0o755);
+    copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
+    const argv = process.platform === "darwin"
+      ? [pty!, "-q", "/dev/null", bash!, `${f.dl}/install.sh`, "--yes"]
+      : [pty!, "-qec", `${bash} ${f.dl}/install.sh --yes`, "/dev/null"];
+    const r = Bun.spawnSync(argv, {
+      cwd: f.dir, stdin: Buffer.from("X\r"), stdout: "pipe", stderr: "pipe",
+      env: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin:/usr/sbin:/sbin`, MIKSY_REPO: f.bare, SHELL: bash!, TERM: "xterm" },
+    });
+    expect(existsSync(`${f.home}/Projects/miksyX/src/cli.ts`) ? "" : `не склонирован в ~/Projects/miksyX; вывод:\n${r.stdout}${r.stderr}`).toBe("");
   }, 60000);
 
   test("две установки Bun (PATH и ~/.bun/bin) — какая используется, совет оставить одну; ничего не удаляется", () => {
@@ -156,7 +177,7 @@ describe.skipIf(!win)("install.ps1", () => {
     const git = dirname(Bun.which("git")!);
     const r = Bun.spawnSync([`${sys}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "--yes"], {
       cwd: f.dir, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe",
-      env: { USERPROFILE: f.home, HOME: f.home, SystemRoot: sys, PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      env: { USERPROFILE: f.home, HOME: f.home, SystemRoot: sys, PATHEXT: ".COM;.EXE;.BAT;.CMD", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${f.home}/.gitconfig`,
         PATH: [f.bin.replaceAll("/", "\\"), `${sys}\\System32`, `${sys}\\System32\\WindowsPowerShell\\v1.0`, git].join(";"), MIKSY_REPO: repo },
     });
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };

@@ -5,12 +5,14 @@
 // adopt) — через run в этом же процессе, действия с системой (установка программ, PATH, git) — через
 // System: тесты подменяют все три. Без Ask (--yes, нет терминала) — только безопасная часть.
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { canonical, homeDir, samePath, slash } from "./paths";
+import { canonical, driveRoot, homeDir, samePath, slash, trimSlash } from "./paths";
 import { basename, delimiter, dirname, join, posix, relative, win32 } from "node:path";
 import { ensurePrivateLocal } from "./secretfiles";
-import { currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, parseYaml } from "./load";
+import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
+import { locate, machineRoots, type Root, rootKey, suggestTree, treeAbove, treeJoin } from "./roots";
+import { agentId } from "./agentid";
 import { backup } from "./backup";
-import { writeAtomic } from "./manifest";
+import { loadManifest, writeAtomic } from "./manifest";
 import type { Ask } from "./ask";
 import type { TargetReport } from "./commands";
 import { doctor } from "./doctor";
@@ -25,7 +27,7 @@ const AGENT_COMMANDS: Record<string, string[]> = {
   claude: ["claude"],
   codex: ["codex"],
   opencode: ["opencode"],
-  gemini: ["agy", "antigravity"],
+  antigravity: ["agy", "antigravity"],
 };
 
 // Каталоги настроек агента в домашнем каталоге: агент бывает только в редакторе (Zed), без команды в PATH
@@ -33,7 +35,7 @@ const AGENT_DIRS: Record<string, string[]> = {
   claude: [".claude"],
   codex: [".codex"],
   opencode: [".config/opencode"],
-  gemini: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"],
+  antigravity: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"],
 };
 
 // Какие агенты есть на машине: команда в PATH или (отдельно) только каталог настроек
@@ -115,15 +117,16 @@ export function ourShim(text: string): boolean {
   return text === shimText("windows", cmd[1].replaceAll("%%", "%"), cli[1].replaceAll("%%", "%"));
 }
 
-// Все ${VAR} из MCP всех слоёв: имя → слои, где встречается
-export function referencedVars(root: string): Map<string, Set<string>> {
+// Все ${VAR} из MCP слоёв: имя → слои, где встречается. applies — слой (путь от layers/: global,
+// env-macos, tree, tree/Org/Team) к чему-то применяется на этой машине; остальные не спрашиваются
+export function referencedVars(root: string, applies: (layer: string) => boolean = () => true): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   const walk = (dir: string, layer: string) => {
     if (!existsSync(dir)) return;
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) walk(p, ["mcp", "instructions", "skills"].includes(e.name) ? layer : layer ? `${layer}/${e.name}` : e.name);
-      else if (/\.ya?ml$/.test(e.name) && dir.endsWith("mcp")) {
+      else if (/\.ya?ml$/.test(e.name) && dir.endsWith("mcp") && applies(layer)) {
         const s = parseYaml(readFileSync(p, "utf8")) as McpServer;
         for (const m of JSON.stringify([s.command, s.args, s.env, s.url, s.headers]).matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g))
           if (m[1] !== "HOME" && m[1] !== "WORKSPACE") out.set(m[1], (out.get(m[1]) ?? new Set()).add(layer.replace(/^tree\/?/, "") || "workspace"));
@@ -134,13 +137,53 @@ export function referencedVars(root: string): Map<string, Set<string>> {
   return out;
 }
 
+// Слои, которые на этой машине к чему-то применяются: глобальные и привязки map.yaml этой ОС, корень
+// дерева и слои дерева, у которых есть каталог в корнях машины (doctor: остальные «ни к чему не
+// применяются»). roots нет (машина ещё не настроена) — все
+export function applicableLayers(config: string, os: Os, roots: Root[] | null): (layer: string) => boolean {
+  if (!roots) return () => true;
+  const map = loadMap(config);
+  const forOs = (e: { os?: Os | Os[] }) => !e.os || [e.os].flat().includes(os);
+  const named = new Set([...map.global, ...map.layers].filter(forOs).map((e) => e.use));
+  const unused = orphanTreeDirs(roots, config).map((o) => o.path);
+  return (layer) => layer === "tree" ? true
+    : layer.startsWith("tree/") ? !unused.some((u) => treeAbove(u, layer.slice(5)))
+    : named.has(layer);
+}
+
+// Строки rc-файла оболочки, которые уже добавляют каталог в PATH: export PATH="…:$PATH", PATH=…,
+// fish_add_path …; $HOME, ${HOME}, ~ и переменные, заданные в этом же файле выше (установщик Bun пишет
+// export BUN_INSTALL="$HOME/.bun" и export PATH="$BUN_INSTALL/bin:$PATH"), раскрываются
+export function rcAddsDir(text: string, dir: string, home: string): boolean {
+  const vars: Record<string, string> = { HOME: home };
+  const expand = (s: string) => s.trim().replace(/^~(?=\/|$)/, home).replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (m, k: string) => vars[k] ?? m);
+  const norm = (p: string) => slash(p).replace(/\/+$/, "");
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const path = line.match(/^(?:export\s+)?PATH=(["']?)(.*)\1\s*(?:#.*)?$/) ?? line.match(/^fish_add_path\s+(?:-\w+\s+)*()(\S+)/);
+    if (path) { if (path[2].split(":").map(expand).some((p) => norm(p) === norm(dir))) return true; continue; }
+    const def = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(["']?)(.*)\2\s*(?:#.*)?$/);
+    if (def) vars[def[1]] = expand(def[3]);
+  }
+  return false;
+}
+
+// Корни из machine.yaml (строка или список) — для показа, без проверки: путь и место в дереве
+function rootsShown(v: unknown): string[] {
+  const items = typeof v === "string" ? [v] : Array.isArray(v) ? v : [];
+  return items.flatMap((it) => typeof it === "string" ? [it.trim()]
+    : it && typeof it === "object" && typeof (it as { path?: unknown }).path === "string"
+      ? [`${(it as { path: string }).path.trim()}${typeof (it as { tree?: unknown }).tree === "string" && (it as { tree: string }).tree ? ` → layers/tree/${(it as { tree: string }).tree}` : ""}`] : []);
+}
+
 // Ответ на вопрос о workspace. prompt Bun возвращает null и на пустой Enter, и на конец ввода:
 // null — значение по умолчанию; три null подряд (ввод закрыт) — workspace не выбран, без зацикливания
 export function chooseWorkspace(suggested: string | null, read: () => string | null, confirm: (ws: string, why: string) => boolean, home: string, cwd: string): string | null {
   for (let empty = 0; empty < 3; ) {
     const raw = read();
     empty = raw === null ? empty + 1 : 0;
-    const answer = raw?.trim() || suggested;
+    const answer = (raw && unquote(raw)) || suggested;
     if (!answer) continue;
     const ws = expandPath(answer, home, cwd);
     const why = unsafeWorkspace(ws, home);
@@ -149,20 +192,65 @@ export function chooseWorkspace(suggested: string | null, read: () => string | n
   return null;
 }
 
-// Путь из ответа пользователя: ~ — домашний каталог, относительный — от текущего каталога
+// Корень недоступен так, что создавать его нельзя (нет диска, ссылка в никуда, не каталог) — причина; каталога
+// просто нет (создастся) или он есть — null
+const unreachable = (path: string): string | null => { const a = rootAway(path).away; return a && a !== "каталога нет" ? a : null; };
+
+// Ответ без кавычек вокруг («Копировать как путь» Проводника, путь из терминала)
+const unquote = (s: string) => s.trim().replace(/^(["'])(.*)\1$/s, "$2").trim();
+
+// Путь из ответа пользователя: ~ — домашний каталог, относительный — от текущего каталога; кавычки вокруг — прочь
 export function expandPath(input: string, home: string, cwd: string): string {
-  const p = input.trim().replace(/^~(?=$|[\\/])/, home);
-  return slash(paths(p, cwd).resolve(cwd, p)).replace(/(?<=.)\/+$/, "");
+  const bare = unquote(input);
+  // «X:» — корень диска X:/, а не текущий каталог диска; косая в конце — прочь, кроме корня
+  const p = driveRoot(bare.replace(/^~(?=$|[\\/])/, home));
+  return trimSlash(slash(paths(p, cwd).resolve(cwd, p)));
 }
 
 // Правила путей по виду пути (C:\…, \\server — Windows), а не по ОС, где идёт проверка
 const isWin = (p: string) => /^[A-Za-z]:|^\\\\/.test(p);
 const paths = (p: string, base = p) => (isWin(p) || (!p.startsWith("/") && isWin(base)) ? win32 : posix);
 
+// Ближайший git-репо вверх от каталога (сам каталог или предок), иначе null
+export function repoAbove(dir: string): string | null {
+  for (let d = dir; ; d = slash(dirname(d))) {
+    if (existsSync(join(d, ".git"))) return d;
+    if (slash(dirname(d)) === d) return null;
+  }
+}
+
+// Как git-репо вне workspace сделать проектом: корнем — папка, в которой он лежит; если она — диск, дом или
+// каталог всех пользователей, — перенести репо в папку с проектами (рецензия 6x, B3)
+export function outsideRepoAdvice(repo: string, home: string, roots: Root[]): string {
+  const parent = slash(dirname(repo));
+  return parent !== repo && !unsafeWorkspace(parent, home)
+    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add "${parent}" (её проекты — git-репо внутри)`
+    : `перенесите его в папку с проектами — корень workspace (${roots.map((r) => r.path).join(", ")}) или новую папку, которую добавите корнем (miksy root add "<папка>")`;
+}
+
+// Каталог, который сам проект, — в корни workspace (root add, вопрос мастера setup «Есть ещё папки с проектами?»):
+// git-репо (без проектов внутри), проект или цель target: true (group) другого корня, каталог с записанным miksy
+// (recorded). Корнем он станет папкой с проектами: настройки проекта miksy в него писать не будет, записанное раньше
+// перестанет обновляться. Текст — что будет и что лучше; иначе null
+export function projectRootText(dir: string, home: string, roots: Root[], o: { group?: boolean; recorded?: boolean } = {}): string | null {
+  const repo = existsSync(join(dir, ".git"));
+  const at = locate(dir, roots);
+  const place = at && at.rel !== "" ? at : null;
+  const group = !!(place && o.group);
+  if (!group && !o.recorded && (!repo || (!place && containsProjects(dir)))) return null;
+  const kind = group ? `цель (target: true) корня ${place!.root.path}` : repo && place ? `проект корня ${place.root.path}` : repo ? "git-репо" : "каталог, в который miksy уже записывал настройки";
+  const advice = place ? ` Он и так в workspace и получает настройки: miksy sync "${dir}"; свои правила для него — в layers/tree/${place.tree}/instructions/`
+    : repo ? ` Чтобы он стал проектом, ${outsideRepoAdvice(dir, home, roots)}` : "";
+  // Группа: её пометка в этом месте дерева перестанет действовать — записанное sync --all уберёт сам, как у снятой
+  const before = group ? `, пометка target: true (layers/tree/${place!.tree}/layer.yaml) перестанет действовать, и следующий miksy sync --all уберёт записанное в него miksy`
+    : o.recorded ? ", а записанное в него раньше (CLAUDE.local.md и др.) останется и перестанет обновляться" : "";
+  return `${dir} — ${kind}: корнем workspace он станет папкой с проектами, а не проектом — настройки проекта miksy в него писать не будет${before}.${advice}${advice ? "." : ""}`;
+}
+
 // Workspace, который нельзя брать без явного подтверждения: sync --all пройдёт по всему дереву
 export function unsafeWorkspace(path: string, home: string): string | null {
   const norm = (p: string) => {
-    const s = slash(paths(p).resolve(p)).replace(/(?<=.)\/+$/, "");
+    const s = trimSlash(slash(paths(p).resolve(p)));
     return isWin(p) ? s.toLowerCase() : s;
   };
   const up = (p: string) => norm(paths(p).dirname(p));
@@ -431,22 +519,46 @@ export function setup(o: SetupOptions): number {
   step(2, "Workspace и агенты", "каталог с вашими проектами и агенты этой машины — настройки получат только они.");
   const machinePath = join(local, "machine.yaml");
   const hadMachine = existsSync(machinePath);
-  let previous: { workspace?: string; vars?: Record<string, string>; agents?: string[]; trust?: { codex?: boolean; claude?: boolean } } = {};
+  let previous: { workspace?: unknown; vars?: Record<string, string>; agents?: string[]; trust?: { codex?: boolean; claude?: boolean } } = {};
   if (o.force && hadMachine) {
     try { previous = (parseYaml(readFileSync(machinePath, "utf8")) ?? {}) as typeof previous; }
     catch { throw new Error(`${machinePath}: YAML не разбирается — ручные vars не будут потеряны, исправьте файл`); }
   }
-  const kept = typeof previous.workspace === "string" && previous.workspace.trim() ? expandPath(previous.workspace, home, process.cwd()) : null;
+  // workspace в файле — строка или список корней: первый — основной, остальные — ещё корни ({ path, tree })
+  const prevRoots: unknown[] = typeof previous.workspace === "string" ? [previous.workspace] : Array.isArray(previous.workspace) ? previous.workspace : [];
+  const rootOf = (it: unknown): { path: string; tree: string } | null => {
+    const raw = typeof it === "string" ? { path: it } : it && typeof it === "object" ? (it as { path?: unknown; tree?: unknown }) : null;
+    const tree = checkTree(typeof raw?.tree === "string" ? raw.tree : "");
+    return raw && typeof raw.path === "string" && raw.path.trim() && tree !== null ? { path: expandPath(raw.path, home, process.cwd()), tree } : null;
+  };
+  const first = prevRoots.length ? rootOf(prevRoots[0]) : null;
+  const kept = first?.path ?? null;
+  // Ветка основного корня и форма записи (список) — как были
+  const keptTree = first?.tree ?? "";
+  // Ветка основного корня после выбора: прежняя; основным стал бывший дополнительный — его ветка
+  let mainTree = keptTree;
+  const listForm = Array.isArray(previous.workspace);
+  // Ещё корни из файла (setup --force): остаются; убрать — правкой local/machine.yaml
+  const extra: { path: string; tree: string }[] = prevRoots.slice(1).map(rootOf).filter((r): r is { path: string; tree: string } => !!r);
   const suggested = kept ?? defaultWorkspace(engine, home);
   let workspace: string | null = suggested;
   if (ask && (!hadMachine || o.force)) {
     workspace = chooseWorkspace(suggested, () => ask.line(`Корень workspace (каталог с проектами)${suggested ? ` [${suggested}]` : ""}:`),
       (ws, why) => ask.yes(`${ws} — ${why}: sync --all обойдёт все каталоги внутри. Точно взять его?`), home, process.cwd());
+    // Основным стал один из дополнительных корней — из дополнительных он уходит (иначе один каталог дважды)
+    const main = workspace;
+    const was = main ? extra.findIndex((r) => rootKey(r.path) === rootKey(main)) : -1;
+    if (was >= 0) {
+      mainTree = extra[was].tree;
+      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; прежний основной ${kept} из workspace уходит (вернуть — miksy root add)` : ""}`);
+      extra.splice(was, 1);
+    }
+    if (workspace) moreRoots(ask, workspace);
   } else if (!workspace) {
     log(`Workspace по умолчанию не определить: движок лежит прямо в ${slash(dirname(engine))}.`);
   }
 
-  const keptAgents = Array.isArray(previous.agents) && previous.agents.every((a) => typeof a === "string") ? previous.agents : null;
+  const keptAgents = Array.isArray(previous.agents) && previous.agents.every((a) => typeof a === "string") ? [...new Set(previous.agents.map(agentId))] : null;
   // Без --force machine.yaml не перезаписывается, но новых агентов в нём можно дописать
   let listed: string[] | null = null;
   let current: { workspace?: unknown; vars?: unknown } | null = null;
@@ -454,10 +566,12 @@ export function setup(o: SetupOptions): number {
     try {
       const doc = parseYaml(readFileSync(machinePath, "utf8")) as { agents?: unknown; workspace?: unknown; vars?: unknown } | null;
       current = doc;
+      // Прежние имена агентов (gemini) — те же агенты: не «новые»
       if (Array.isArray(doc?.agents) && doc.agents.every((a) => typeof a === "string")) listed = doc.agents;
     } catch { /* разбор и ошибка — ниже, как раньше */ }
   }
-  const known = keptAgents ?? listed ?? [];
+  const listedIds = listed ? listed.map(agentId) : null;
+  const known = keptAgents ?? listedIds ?? [];
   const detected = detectAgents(home, (c) => sys.which(c));
   const viaDir = detected.dirOnly.filter((d) => !known.includes(d.id)).filter((d) => {
     if (ask) return ask.yes(`${d.id}: команды нет в PATH, но есть ${d.dir} — настраивать этого агента (например, он у вас в редакторе)?`);
@@ -470,7 +584,15 @@ export function setup(o: SetupOptions): number {
   const vars: Record<string, string> = { ...previous?.vars };
   const machineVars = current && current.vars && typeof current.vars === "object" ? Object.keys(current.vars) : [];
   const missingTools: { name: string; tool: Tool; layers: string[] }[] = [];
-  const needed = referencedVars(config);
+  // Корни этой машины (для слоёв, которые здесь к чему-то применяются): из файла или выбранные сейчас
+  // Путь, который не раскрывается (нет диска, ссылка в никуда), — как записан: такой корень недоступен
+  const real = (p: string) => { try { return canonical(p); } catch { return slash(p); } };
+  const rootsNow = (): Root[] | null => {
+    if (hadMachine && !o.force) { try { return machineRoots(loadMachine(config)); } catch { return null; } }
+    return workspace ? [{ path: real(workspace), tree: mainTree }, ...extra.map((r) => ({ path: real(r.path), tree: r.tree }))] : null;
+  };
+  const applies = applicableLayers(config, os, rootsNow());
+  const needed = referencedVars(config, applies);
   const tools = machineTools(config);
   for (const [name, how] of Object.entries(tools)) {
     if (!needed.has(name)) continue;
@@ -481,22 +603,30 @@ export function setup(o: SetupOptions): number {
   }
 
   // machine.yaml уже есть и не перезаписывается — показываем его workspace, а не предложенный по умолчанию
-  const inFile = hadMachine && !o.force && typeof current?.workspace === "string" && current.workspace.trim() ? current.workspace.trim() : null;
-  if (inFile) log(`Workspace: ${inFile}  (из local/machine.yaml)`);
-  else log(workspace ? `Workspace: ${workspace}${existsSync(workspace) ? "" : "  (каталога ещё нет — будет создан)"}` : "Workspace: не выбран — local/machine.yaml не будет записан");
+  const inFile = hadMachine && !o.force ? rootsShown(current?.workspace) : [];
+  if (inFile.length) {
+    log(`Workspace: ${inFile[0]}  (из local/machine.yaml)`);
+    for (const r of inFile.slice(1)) log(`  ещё корень: ${r}`);
+  } else log(workspace ? `Workspace: ${workspace}${existsSync(workspace) ? "" : unreachable(workspace) ? `  (сейчас недоступен — ${unreachable(workspace)}; создаваться не будет, miksy пропустит его, пока он не появится)` : "  (каталога ещё нет — будет создан)"}` : "Workspace: не выбран — local/machine.yaml не будет записан");
+  if (!inFile.length && workspace) for (const r of extra) log(`  ещё корень: ${r.path}${r.tree ? ` → layers/tree/${r.tree}` : ""}${existsSync(r.path) ? "" : "  (каталога сейчас нет — пропускается, пока не появится)"}`);
   log(`Агенты: ${agents.length ? agents.join(", ") : "не найдено ни одного (claude, codex, opencode, agy)"}${keptAgents ? " (из текущего local/machine.yaml)" : ""}`);
   const absent = Object.keys(AGENT_COMMANDS).filter((a) => !agents.includes(a) && !known.includes(a) && !found.includes(a));
   if (ask && absent.length) log(`  не найдены: ${absent.join(", ")} — miksy их не ставит; как поставить — README, раздел «Установка агентов». Поставите — запустите setup снова`);
   if (newAgents.length) log(`  найдены ещё: ${newAgents.join(", ")} — не добавлены; нужны — допишите в agents в local/machine.yaml`);
   if (kept && workspace !== kept) log(`  workspace меняется: было ${kept}`);
+  if (mainTree && workspace && !inFile.length) log(`  ветка основного корня в дереве слоёв: layers/tree/${mainTree}`);
   for (const k of Object.keys(vars)) log(`${k}: задано`);
   const layout = workspace && layoutWarning(workspace, canonical(engine), config);
   if (layout) log(`\n• ${layout}`);
 
-  // local/machine.yaml
+  // local/machine.yaml: один корень — строкой (как раньше), несколько — списком; место в дереве — tree
   const yaml = [
     "# Настройки этой машины. Создано miksy setup — можно править вручную.",
-    `workspace: ${JSON.stringify(workspace)}`,
+    ...(extra.length || mainTree || listForm ? [
+      "# Корни workspace: первый — основной; tree — ветка корня в дереве слоёв layers/tree (у основного можно не указывать — корень дерева)",
+      "workspace:",
+      ...[{ path: workspace, tree: mainTree }, ...extra].map((r) => (r.tree ? `  - { path: ${JSON.stringify(r.path)}, tree: ${JSON.stringify(r.tree)} }` : `  - ${JSON.stringify(r.path)}`)),
+    ] : [`workspace: ${JSON.stringify(workspace)}`]),
     "vars:",
     ...Object.entries(vars).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`),
     "# Агенты, установленные на этой машине: для них работают sync/clean/doctor без --agent",
@@ -508,7 +638,7 @@ export function setup(o: SetupOptions): number {
     log("\n• local/machine.yaml не записан: workspace не выбран (запустите setup в терминале или пропишите workspace вручную)");
   } else if (hadMachine && !o.force) {
     // Новые агенты и найденные программы дописываются, остальное в файле не меняется
-    const added = listed ? found.filter((a) => !listed!.includes(a)) : [];
+    const added = listedIds ? found.filter((a) => !listedIds.includes(a)) : [];
     const text = readFileSync(machinePath, "utf8");
     const line = /^agents:[ \t]*\[[^\]\r\n]*\][ \t]*$/m;
     const newVars = Object.entries(vars).filter(([k]) => !machineVars.includes(k));
@@ -522,7 +652,12 @@ export function setup(o: SetupOptions): number {
     else log(`\n• local/machine.yaml уже есть — не трогаю (перезаписать: setup --force). Найдено сейчас:\n${yaml.replace(/^/gm, "    ")}`);
     for (const [k, v] of newVars) addVar(machinePath, config, k, v, log);
   } else if (agree(`Записать local/machine.yaml (workspace, агенты${Object.keys(vars).length ? ", пути к программам" : ""})?`, true)) {
-    mkdirSync(workspace, { recursive: true });
+    // Каталога нет — создать; недоступен (нет диска, ссылка в никуда) — не создавать (об этом сказано выше):
+    // файл записывается, корень miksy пропустит, пока он не появится
+    if (!unreachable(workspace)) {
+      try { mkdirSync(workspace, { recursive: true }); }
+      catch (e) { log(`• каталог основного корня ${workspace} не создать (${(e as NodeJS.ErrnoException).code ?? (e as Error).message}) — miksy пропустит его, пока он не появится`); }
+    }
     backup(machinePath, config);
     writeAtomic(machinePath, yaml);
     log("✓ local/machine.yaml записан");
@@ -624,7 +759,9 @@ export function setup(o: SetupOptions): number {
         return null;
       }
       for (;;) {
-        const url = a.line("Адрес git-репо конфигурации (Enter — отмена):");
+        // Адрес или путь к репо: кавычки вокруг — прочь, как у остальных путей мастера
+        const raw = a.line("Адрес git-репо конфигурации (Enter — отмена):");
+        const url = raw && unquote(raw);
         if (!url) return null;
         mkdirSync(dirname(dest), { recursive: true });
         if (sys.git(["clone", url, dest]) === 0) {
@@ -636,7 +773,8 @@ export function setup(o: SetupOptions): number {
       }
     }
     if (choice !== "2") return null;
-    const where = expandPath(a.line(`Где хранить конфигурацию [${def}]:`) ?? def, home, process.cwd());
+    const said = a.line(`Где хранить конфигурацию [${def}]:`);
+    const where = expandPath(said && unquote(said) ? said : def, home, process.cwd());
     const dir = fromExample(where);
     if (a.yes("Сделать конфигурацию git-репо и записать первый коммит (local/ в git не попадёт — он в .gitignore)?")) {
       const ok = sys.git(["init", "-q"], dir) === 0 && sys.git(["add", "-A"], dir) === 0
@@ -753,7 +891,9 @@ export function setup(o: SetupOptions): number {
       if (!rc) return log(`• каталога ${dir} нет в PATH. Добавьте в настройки своей оболочки строку:\n    ${line}`);
       const file = join(home, rc);
       const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-      if (text.includes(dir) || text.includes(shown)) log(`✓ ${dir} уже прописан в ~/${rc} — откройте новое окно терминала`);
+      // По содержимому rc-файла, а не только PATH процесса: установщик Bun уже мог прописать каталог
+      // (export PATH="$BUN_INSTALL/bin:$PATH") — второй строки не нужно
+      if (text.includes(dir) || text.includes(shown) || rcAddsDir(text, dir, home)) log(`✓ ${dir} уже прописан в ~/${rc} — откройте новое окно терминала`);
       else if (ask!.yes(`Каталога ${dir} нет в PATH — дописать в ~/${rc} строку ${line}?`, true)) {
         appendFileSync(file, `${text && !text.endsWith("\n") ? "\n" : ""}# miksy\n${line}\n`);
         log(`✓ дописано в ~/${rc} — в новых окнах терминала команда miksy найдётся (в этом: source ~/${rc})`);
@@ -820,11 +960,55 @@ export function setup(o: SetupOptions): number {
     }
   }
 
-  // Секреты, на которые ссылаются слои, без значения в local/secrets.env (пути к программам — не секреты)
+  // Секреты, на которые ссылаются слои этой машины, без значения в local/secrets.env (пути к программам —
+  // не секреты; слои, которые здесь ни к чему не применяются, — не спрашиваются)
   function missingSecrets(): [string, Set<string>][] {
     const secrets = loadSecrets(config);
     const machineVarNames = new Set([...Object.keys(tools), ...Object.keys(machine?.vars ?? {})]);
-    return [...referencedVars(config)].filter(([n]) => !machineVarNames.has(n) && !(n in secrets));
+    const here = applicableLayers(config, os, machine ? machineRoots(machine) : rootsNow());
+    return [...referencedVars(config, here)].filter(([n]) => !machineVarNames.has(n) && !(n in secrets));
+  }
+
+  // Ещё корни workspace после основного: путь и место в дереве слоёв. Повтор (тот же каталог —
+  // junction, симлинк) и неверное место — не добавляются; каталога сейчас нет — добавляется (диск
+  // подключат позже), miksy пропускает его, пока он не появится
+  function moreRoots(a: Ask, main: string) {
+    for (let i = 0; i < 20; i++) {
+      const raw = a.line(`Есть ещё папки с проектами (другой диск, облачная папка)? Путь${extra.length ? " ещё одной" : ""} (Enter — нет):`);
+      // Пустой ответ, в том числе пустые кавычки, — «нет» (рецензия 6z, п. 5)
+      if (!raw || !unquote(raw)) return;
+      const path = expandPath(raw, home, process.cwd());
+      if ([main, ...extra.map((r) => r.path)].some((p) => rootKey(p) === rootKey(path))) { log(`  ${path} — уже указан (тот же каталог) — не добавляю`); continue; }
+      const why = unsafeWorkspace(path, home);
+      if (why && !a.yes(`${path} — ${why}: sync --all обойдёт все каталоги внутри. Точно взять его?`)) continue;
+      // Каталог, который сам проект (git-репо, проект или цель target: true основного корня, каталог с записанным
+      // miksy): объяснение и верный совет — как у root add; взять — только по явному «да» (рецензия 6y, B1)
+      if (existsSync(path)) {
+        let recorded = false;
+        try { recorded = Object.keys(loadManifest(join(config, "local", "state", "manifest.json")).targets).some((id) => rootKey(id.slice(id.indexOf("|") + 1)) === rootKey(path)); } catch { /* учёта нет */ }
+        const real = (p: string) => { try { return canonical(p); } catch { return slash(p); } };
+        const roots = [{ path: real(main), tree: mainTree }, ...extra.map((r) => ({ path: real(r.path), tree: r.tree }))];
+        // Цель target: true — пометка в слое дерева на месте каталога (рецензия 6z, п. 1)
+        const at = locate(real(path), roots);
+        let group = false;
+        try { group = !!at && at.rel !== "" && treeGroups(config).some((g) => g.toLowerCase() === treeJoin(at.root.tree, at.rel).toLowerCase()); } catch { /* слои не разбираются — проверит doctor */ }
+        const project = projectRootText(real(path), home, roots, { recorded, group });
+        if (project) {
+          log(`  ${project}`);
+          if (!a.yes(`Всё равно сделать ${path} корнем workspace?`, false)) continue;
+        }
+      }
+      // Ветка обязательна и своя у каждого корня: иначе правила одной ветки молча доставались бы папкам с
+      // тем же именем в другом корне
+      const taken = [mainTree, ...extra.map((r) => r.tree)].filter(Boolean);
+      const suggestion = suggestTree(path, taken);
+      const answer = a.line(`Ветка этой папки в дереве слоёв — её слои будут в layers/tree/<ветка>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
+      const tree = checkTree(answer);
+      if (!tree) { log(`  «${answer}» — не ветка дерева (имена каталогов через «/», без «..» и имён ${[...LAYER_PARTS].join(", ")}) — папка не добавлена`); continue; }
+      if (taken.some((t) => t.toLowerCase() === tree.toLowerCase())) { log(`  ветка ${tree} уже у другой папки — выберите другое имя; папка не добавлена`); continue; }
+      extra.push({ path, tree });
+      log(`  ✓ ещё корень: ${path}${tree ? ` → layers/tree/${tree}` : ""}${existsSync(path) ? "" : " (каталога сейчас нет — miksy пропускает его, пока он не появится)"}`);
+    }
   }
 
   function secretsReport() {

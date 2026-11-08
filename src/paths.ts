@@ -7,6 +7,16 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 
 export const slash = (p: string) => p.replaceAll("\\", "/");
 
+// Косая в конце пути — прочь, кроме корня (/, X:/): «X:» без косой на Windows — текущий каталог диска X,
+// а не его корень
+export const trimSlash = (p: string) => p.replace(/(?<=[^/:])\/+$/, "");
+// «X:» (буква диска без косой) — корень диска X:/, а не текущий каталог диска
+export const driveRoot = (p: string) => p.replace(/^([A-Za-z]:)$/, "$1/");
+
+// Путь каталога внутри dir по имени: корень диска (D:/, /) — без двойной косой (D://x не совпал бы с
+// D:/x при сравнении путей)
+export const child = (dir: string, name: string) => (dir.endsWith("/") ? dir + name : `${dir}/${name}`);
+
 // macOS бывает регистрозависимой: существующее написание определяет realpath.
 export const fold = (p: string) => (process.platform === "win32" ? p.toLowerCase() : p);
 export function pathKey(p: string): string {
@@ -16,6 +26,9 @@ export function pathKey(p: string): string {
   catch { return slash(resolve(p)); }
 }
 export const samePath = (a: string, b: string) => fold(canonical(a)) === fold(canonical(b));
+// То же без отказа: путь, который не раскрывается (недоступный корень workspace — нет диска, ссылка в
+// никуда), сравнивается как записан. Для корней и каталогов обхода, не для границ записи
+export const sameKey = (a: string, b: string) => fold(pathKey(a)) === fold(pathKey(b));
 
 // Own-файл MCP нужен ради keep (пропущенный сервер, записанный раньше), только если он уже записан
 // miksy: на первом sync сохранять нечего, пустой файл лишь конфликтовал бы с файлом пользователя

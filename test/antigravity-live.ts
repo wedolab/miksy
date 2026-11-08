@@ -1,10 +1,10 @@
 // Живая проверка Antigravity CLI без обращения к модели за пределами smoke-проверок
 // и с безопасным изолированным тестовым окружением (настоящие файлы ~/.gemini не меняются):
-// bun test/gemini-live.ts
+// bun test/antigravity-live.ts
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { gemini } from "../adapters/gemini";
+import { antigravity } from "../adapters/antigravity";
 import type { Machine, Resolved } from "../src/types";
 
 const out = tmpdir();
@@ -84,8 +84,8 @@ try {
     notes: [],
   };
 
-  const globalResult = gemini.render(cfgGlobal, { scope: "global" }, machine);
-  const projectResult = gemini.render(cfgProject, { scope: "project", dir: project, rel: "project" }, machine);
+  const globalResult = antigravity.render(cfgGlobal, { scope: "global" }, machine);
+  const projectResult = antigravity.render(cfgProject, { scope: "project", dir: project, rel: "project" }, machine);
 
   // 4. Запись сгенерированных файлов
   for (const f of [...globalResult.files, ...projectResult.files]) {
@@ -163,4 +163,4 @@ try {
 }
 
 // Фаза 2а: обёртки секретов, helper/{file:}/мост — настоящим miksy sync в песочнице (test/live/r1.ts)
-await (await import("./live/r1")).main("gemini");
+await (await import("./live/r1")).main("antigravity");

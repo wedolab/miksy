@@ -56,10 +56,13 @@ export function describeEngine(engine = ENGINE): string {
   return text;
 }
 
-// Учёт записан более новой версией движка (на другой копии движка уже обновились): только сообщение
+// Учёт записан более новой версией движка: на другой копии движка уже обновились или этот откатили. Только
+// сообщение, запись не блокируется: рецепт отката (README, «Откатиться на прежнюю версию») заканчивается
+// sync прежней версией, а учёт совместим вперёд — чужое не перезаписывается, лишнее поле прежняя версия
+// отбрасывает. Сравниваются номера X.Y.Z: сборка main «0.2.0-3-g…» — та же 0.2.0, не новее
 export function newerLedger(recorded: string | undefined, engine = ENGINE): string | null {
   const mine = packageVersion(engine);
   const theirs = recorded && baseVersion(recorded);
   if (!theirs || mine === "?" || compareVersions(theirs, mine) <= 0) return null;
-  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}: обновите движок (miksy update)`;
+  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}. Обновились на другой копии движка — обновите и эту: miksy update. Откатились нарочно — сделайте шаги из README, «Откатиться на прежнюю версию»: без них часть записанного будет конфликтами (ничего не потеряется)`;
 }

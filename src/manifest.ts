@@ -7,6 +7,7 @@ import { splitToml } from "./toml";
 import type { TrustRecord } from "./trust";
 import { busyError } from "./locks";
 import { packageVersion } from "./version";
+import { agentId } from "./agentid";
 
 // Что miksy записал на этой машине — по каждой цели (агент + глобально/проект)
 export interface TargetState {
@@ -23,7 +24,18 @@ export interface TargetState {
   servers?: Record<string, string[]>; // MCP-сервер → секреты его записанной версии (keep сохраняет и их файлы)
   approvals?: Record<string, string[]>; // .claude/settings.local.json → серверы .mcp.json, одобренные miksy
   group?: true; // цель записана как цель-группа: после снятия пометки sync --all убирает её файлы
+  // Доверие этой цели ставил miksy (Claude): остаётся, когда miksy снял доверие (команда добавила исполняемые
+  // настройки и ждёт решения пользователя и т. п.), — ответы пользователя в окне Claude по-прежнему его (trust.ts:
+  // dialogOwn); clean снимает. Записью учёта не считается
+  everTrusted?: true;
 }
+
+// Отметка «проект забыт» (clean --forget, root remove --forget, «да» на вопрос «забыть?»): учёт этой машины помнит
+// только факт и, для Claude, ставил ли miksy доверие проекту — без файлов, хешей и оригиналов. Только в таких
+// проектах miksy убирает свои файлы без учёта, которые больше не пишет (apply.ts: «больше не нужен» по уликам):
+// в общей облачной папке у каждой машины свой учёт, и файл miksy другой машины выглядит так же. Снимает первый
+// sync или clean, дошедший до проекта (не --dry-run)
+export type ForgottenMark = { trusted?: true };
 
 export interface Manifest {
   version: 1;
@@ -34,6 +46,11 @@ export interface Manifest {
   // Версия движка, который последним записал учёт (package.json): учёт более новой версии — doctor и
   // sync предупреждают «обновите движок». Поля нет — учёт до 0.1.0
   engine?: string;
+  // Корни workspace: ключ — путь, как записан в machine.yaml (rootMemoryKey), значение — последний известный
+  // настоящий путь. Корень-ссылка недоступен — его цели учёта остаются «недоступными», а не «пропавшими»
+  roots?: Record<string, string>;
+  // Забытые проекты: цель (агент|каталог, как ключ targets) → отметка (ForgottenMark)
+  forgotten?: Record<string, ForgottenMark>;
 }
 
 export const manifestPath = () => join(configRoot(), "local", "state", "manifest.json");
@@ -41,6 +58,39 @@ export const manifestPath = () => join(configRoot(), "local", "state", "manifest
 export const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export const emptyState = (): TargetState => ({ files: {}, merges: {}, exclude: {} });
+
+// Учёт цели — на записи внутри каталога dir (far) и остальные (near: ключи в домашних конфигах, доверие,
+// обёртки в local/run). Без обращения к диску. clean каталога, до которого не дотянуться, убирает near, а
+// far оставляет — по нему miksy узнает свои файлы, когда диск вернётся — или забывает (--forget)
+const PARTS = ["files", "merges", "exclude", "toml", "blocks", "originals", "links", "aliases", "approvals"] as const;
+export function splitState(st: TargetState, dir: string): { near: TargetState; far: TargetState } {
+  const near = emptyState(), far = emptyState();
+  const pick = (p: string) => (inside(p, dir) ? far : near);
+  for (const part of PARTS)
+    for (const [p, v] of Object.entries(st[part] ?? {})) ((pick(p)[part] ??= {}) as Record<string, unknown>)[p] = structuredClone(v);
+  for (const [k, v] of Object.entries(st.trust ?? {})) {
+    let file = "";
+    try { file = String((JSON.parse(k) as unknown[])[0] ?? ""); } catch { /* ключ не разобрать — достижимое */ }
+    (pick(file).trust ??= {})[k] = structuredClone(v);
+  }
+  if (st.secrets) near.secrets = [...st.secrets];
+  if (st.servers) near.servers = structuredClone(st.servers);
+  if (st.group) near.group = far.group = true;
+  if (st.everTrusted) near.everTrusted = true;
+  return { near, far };
+}
+// Сколько путей учёта лежит внутри каталога (файлы, блоки, слияния, exclude, одобрения)
+export const strandedPaths = (st: TargetState) =>
+  new Set([...Object.keys(st.files), ...Object.keys(st.blocks ?? {}), ...Object.keys(st.merges), ...Object.keys(st.exclude), ...Object.keys(st.toml ?? {}), ...Object.keys(st.approvals ?? {})]);
+// Два непересекающихся состояния — в одно
+export function joinStates(a: TargetState, b: TargetState): TargetState {
+  const out = structuredClone(a);
+  for (const part of PARTS) if (b[part] && Object.keys(b[part]!).length) out[part] = { ...(out[part] ?? {}), ...structuredClone(b[part]) } as never;
+  if (b.trust && Object.keys(b.trust).length) out.trust = { ...out.trust, ...structuredClone(b.trust) };
+  if (b.group) out.group = true;
+  if (b.everTrusted) out.everTrusted = true;
+  return out;
+}
 
 export class ManifestError extends Error {}
 
@@ -64,6 +114,7 @@ function validState(state: unknown): state is TargetState {
   if (state.servers !== undefined && (!record(state.servers) || !Object.values(state.servers).every(names))) return false;
   if (state.approvals !== undefined && (!record(state.approvals) || !Object.values(state.approvals).every(names))) return false;
   if (state.group !== undefined && state.group !== true) return false;
+  if (state.everTrusted !== undefined && state.everTrusted !== true) return false;
   if (state.blocks !== undefined && (!record(state.blocks) || !Object.values(state.blocks).every((v) => typeof v === "string"))) return false;
   if (state.originals !== undefined && (!record(state.originals) || !Object.values(state.originals).every((v) => record(v) && typeof v.path === "string" && typeof v.hash === "string"))) return false;
   for (const t of Object.values(state.toml ?? {})) if (t.definitions !== undefined && (!record(t.definitions) || !Object.values(t.definitions).every((v) => typeof v === "string"))) return false;
@@ -77,6 +128,7 @@ export function loadManifest(path = manifestPath()): Manifest {
     m = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : { version: 1, targets: {} };
     if (m?.version !== 1 || !m.targets || typeof m.targets !== "object" || Array.isArray(m.targets)) throw new Error();
     if (m.secretFiles !== undefined && !names(m.secretFiles)) throw new Error();
+    if (m.forgotten !== undefined && (!record(m.forgotten) || !Object.entries(m.forgotten).every(([id, v]) => id.includes("|") && record(v) && [undefined, true].includes(v.trusted)))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
       if (!id.includes("|") || !validState(state)) throw new Error();
     }
@@ -86,13 +138,15 @@ export function loadManifest(path = manifestPath()): Manifest {
   return normalizeManifest(m);
 }
 
-// Ключи — канонические пути (старые написания и перенесённые каталоги сливаются в одну запись)
+// Ключи — канонические пути (старые написания и перенесённые каталоги сливаются в одну запись) и
+// нынешние имена агентов: записи прежнего имени (gemini|…) переходят к новому (antigravity|…) со всем
+// владением — записанное не становится чужим
 export function normalizeManifest(m: Manifest, entries: [string, TargetState][] = Object.entries(m.targets)): Manifest {
   const targets: Manifest["targets"] = {};
   for (const [id, state] of entries) {
     const split = id.indexOf("|");
     const dir = id.slice(split + 1);
-    const key = id.slice(0, split + 1) + (dir === "global" ? dir : pathKey(dir));
+    const key = `${agentId(id.slice(0, split))}|${dir === "global" ? dir : pathKey(dir)}`;
     // Две записи одной цели (старые написания пути) сливаются тем же отображением, что и пути внутри
     targets[key] = mergeStates(targets[key] ?? emptyState(), state);
   }
@@ -100,7 +154,16 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
   // пустым — иначе следующая загрузка снова вывела бы его из секретов целей и захватила бы файлы,
   // которые miksy не создавал (Г8)
   const secretFiles = m.secretFiles ?? [...new Set(Object.values(targets).flatMap((t) => t.secrets ?? []))].sort();
-  return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }), targets, secretFiles };
+  const roots = record(m.roots) ? Object.fromEntries(Object.entries(m.roots).filter(([, v]) => typeof v === "string")) : undefined;
+  // Отметки «проект забыт» — под тем же ключом, что цель учёта
+  const forgotten: Record<string, ForgottenMark> = {};
+  for (const [id, v] of Object.entries(m.forgotten ?? {})) {
+    const split = id.indexOf("|");
+    const key = `${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`;
+    forgotten[key] = { ...(forgotten[key]?.trusted || v.trusted ? { trusted: true as const } : {}) };
+  }
+  return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
+    ...(Object.keys(forgotten).length > 0 && { forgotten }) };
 }
 
 // Хеш записи, для которой при миграции нашлись разные значения и ни одно не совпало с диском:
@@ -134,6 +197,7 @@ function mergeStates(into: TargetState, from: TargetState): TargetState {
   for (const [p, list] of Object.entries(from.approvals ?? {})) (into.approvals ??= {})[pathKey(p)] = [...new Set([...(into.approvals[pathKey(p)] ?? []), ...list])].sort();
   if (from.trust) into.trust = { ...into.trust, ...structuredClone(from.trust) };
   if (from.group) into.group = true;
+  if (from.everTrusted) into.everTrusted = true;
   return into;
 }
 

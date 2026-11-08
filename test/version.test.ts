@@ -73,7 +73,10 @@ describe("совместимость: учёт записан более нов�
     expect(newerLedger(m.engine)).toBeNull();
     writeFileSync(path, JSON.stringify({ ...m, engine: "99.0.0" }));
     const doc = f.run(["doctor"]);
-    expect(doc.out).toMatch(/Справочно:[\s\S]*Версия: учёт miksy \(local\/state\/manifest\.json\) записан более новой версией движка — 99\.0\.0, а этот движок — [\d.]+: обновите движок \(miksy update\)/);
+    expect(doc.out).toMatch(/Справочно:[\s\S]*Версия: учёт miksy \(local\/state\/manifest\.json\) записан более новой версией движка — 99\.0\.0, а этот движок — [\d.]+\. Обновились на другой копии движка — обновите и эту: miksy update\. Откатились нарочно — сделайте шаги из README, «Откатиться на прежнюю версию»/);
+    // Сборка main той же версии (0.2.0-3-g…) — не новее
+    expect(newerLedger(`${VERSION}-3-gabc1234`)).toBeNull();
+    expect(newerLedger(`${VERSION} (коммит abc1234, есть правки)`)).toBeNull();
     const dry = f.run(["sync", "--global", "--dry-run"]);
     expect(dry.code).toBe(0);
     expect(dry.out).toContain("предупреждение: учёт miksy (local/state/manifest.json) записан более новой версией движка — 99.0.0");

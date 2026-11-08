@@ -7,7 +7,7 @@ import { ADAPTERS, renderFor } from "../src/registry";
 import { compare } from "../src/sync";
 import { cliFixture, put } from "./helpers";
 
-for (const id of ["codex", "opencode", "gemini"]) for (const last of [false, true]) test(`R2: ${id} keep own, последний=${last}`, () => {
+for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false, true]) test(`R2: ${id} keep own, последний=${last}`, () => {
   const f = cliFixture();
   const target = { scope: "project" as const, dir: `${f.ws}/Org/p1`, rel: "Org/p1" };
   const machine = { home: f.home, workspace: f.ws, os: "linux" as const, vars: {} };

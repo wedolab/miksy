@@ -29,8 +29,13 @@ Object.assign(process.env, {
 });
 // Внешние пути, которые ведут мимо HOME: команда miksy (setup пишет в $BUN_INSTALL/bin),
 // каталоги XDG, конфиги агентов. Подпроцессы тестов наследуют окружение — убираем здесь
+// Так же — переменные git, которые указывают на чужой репо, индекс или каталог (IDE, хуки git) или задают
+// настройки git окружением машины (GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_CONFIG_PARAMETERS — как «-c»)
 for (const k of Object.keys(process.env))
-  if (/^(BUN_INSTALL|CODEX_HOME|CLAUDE_CONFIG_DIR|OPENCODE_CONFIG(_DIR)?|GEMINI_CLI_HOME|XDG_[A-Z_]+)$/.test(k)) delete process.env[k];
+  if (/^(BUN_INSTALL|CODEX_HOME|CLAUDE_CONFIG_DIR|OPENCODE_CONFIG(_DIR)?|GEMINI_CLI_HOME|XDG_[A-Z_]+|GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|NAMESPACE|CEILING_DIRECTORIES|CONFIG|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_COUNT|CONFIG_KEY_\d+|CONFIG_VALUE_\d+|CONFIG_PARAMETERS))$/i.test(k)) delete process.env[k];
+// git в тестах (и движок под тестом) не читает настройки машины: системный конфиг выключен, глобальный — пустой
+// файл песочницы (а не ~/.gitconfig пользователя: глобальный gitignore прятал бы файлы, которые тест проверяет)
+Object.assign(process.env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(home, ".gitconfig") });
 if (!inside(homeDir(), canonical(sandbox))) throw new Error("Тесты остановлены: домашний каталог вне песочницы");
 if (!inside(configRoot(), canonical(sandbox))) throw new Error("Тесты остановлены: конфигурация вне песочницы");
 installGuard(real, [sandbox, systemTmp]);

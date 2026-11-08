@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import type { Action } from "./apply";
 import type { RenderResult, Target } from "./adapter";
 import type { Machine } from "./types";
-import type { TargetState } from "./manifest";
+import type { ForgottenMark, TargetState } from "./manifest";
 import { sha, writeAtomic } from "./manifest";
 import { canonical, fold, pathKey, slash } from "./paths";
 import { protectedBy, trackedPaths } from "./git";
@@ -18,7 +18,9 @@ import { type Move, movePath } from "./relocate";
 // показывает): по умолчанию доверие Claude и Codex ставится цели, куда miksy доставил конфигурацию
 // агента, включая группы. Исключение — цель с исполняемыми настройками агента команды
 // (executableSettings): доверие только при trust: { <агент>: true } в слое или после «да» пользователя
-// (вопрос в конце ручного sync, miksy trust); ответ запоминается в local/trust.json. false в
+// (вопрос в конце ручного sync, miksy trust); ответ запоминается в local/trust.json (отпечаток — без ответов
+// пользователя в окне Claude: они его, когда доверие ставил miksy, слой разрешает или пользователь уже сказал «да» —
+// dialogOwn; круг 6x). false в
 // local/machine.yaml — окончательный, слой может только запретить. Своё доверие miksy снимает, когда
 // пропало основание: clean, запрет, появились исполняемые настройки без решения, отказ пользователя,
 // miksy больше ничего не доставляет агенту.
@@ -131,22 +133,38 @@ function codexConfig(file: string, rel: string): Inspected {
 const CANDIDATES: Record<TrustAgent, { rel: string; read: (file: string, rel: string, skip?: (doc: any) => any) => Inspected; noGit?: boolean }[]> = {
   claude: [
     { rel: ".claude/settings.json", read: claudeSettings, noGit: true },
-    { rel: ".claude/settings.local.json", read: claudeSettings },
+    { rel: ".claude/settings.local.json", read: claudeSettings, noGit: true },
     { rel: ".mcp.json", read: mcpJson, noGit: true },
   ],
-  codex: [{ rel: ".codex/config.toml", read: codexConfig }],
+  codex: [{ rel: ".codex/config.toml", read: codexConfig, noGit: true }],
 };
 
 // Что из файлов цели — своё (по учёту): own-файлы miksy (хеш на диске = записанный), одобрения
-// miksy в settings.local.json; trusted — доверие цели поставил miksy (в доверенном проекте Claude
-// сам пишет в settings.local.json ответы пользователя из своих диалогов)
-export type OwnFiles = { files?: Record<string, string>; approvals?: string[]; trusted?: boolean };
-export const ownFiles = (prev: TargetState, dir: string): OwnFiles => ({
+// miksy в settings.local.json; dialog — ответы пользователя в окне Claude в неотслеживаемом settings.local.json
+// (DIALOG) — его: их нет в вопросе о доверии, и доверию они не мешают (dialogOwn)
+// written — файлы, которые этот же план записывает (--force поверх правки): после записи они его, и вопроса о
+// содержимом, которого уже не будет, нет (рецензия 6z, п. 3)
+export type OwnFiles = { files?: Record<string, string>; approvals?: string[]; dialog?: boolean; written?: string[] };
+export const ownFiles = (prev: TargetState, dir: string, dialog = false): OwnFiles => ({
   files: prev.files,
   approvals: prev.approvals?.[pathKey(join(dir, ".claude/settings.local.json"))] ?? [],
-  trusted: Object.keys(prev.trust ?? {}).length > 0,
+  dialog,
 });
+// Доверие этой цели ставил miksy: стоит сейчас (учёт доверия), стояло раньше (TargetState.everTrusted: снято, пока
+// исполняемые настройки команды ждут решения пользователя, и т. п.) или стояло до «забыть» (отметка «проект забыт»)
+export const trustedByMiksy = (prev: TargetState, mark?: ForgottenMark) =>
+  Object.keys(prev.trust ?? {}).length > 0 || prev.everTrusted === true || mark?.trusted === true;
+// Ответы пользователя в окне Claude («да, больше не спрашивать», одобрения серверов .mcp.json) — его, если доверие
+// ставил miksy (trustedByMiksy), в слое trust: true для Claude или пользователь уже сказал «да» на вопрос miksy о
+// доверии Claude этому проекту (даже если с тех пор команда что-то поменяла — тогда в вопросе только её изменения).
+// Иначе (папку скопировали у кого-то, она общая с коллегой) — они в вопросе. Отпечаток решения от этого не зависит:
+// ответов Claude в нём нет никогда (executableSettings)
+export const dialogOwn = (prev: TargetState, dir: string, layer: boolean, mark?: ForgottenMark) =>
+  trustedByMiksy(prev, mark) || layer || loadDecisions()[pathKey(dir)]?.claude?.answer === "yes";
 
+// Заголовок ответов в окне Claude в вопросе о доверии (когда они не свои пользователя: доверие ставил не miksy, «да»
+// не было, — папку скопировали, она общая с коллегой или это первая запись miksy)
+export const DIALOG_TITLE = "ответы в окне Claude («да, больше не спрашивать» и т. п.) — ваши или того, кто работал в этой папке:";
 // Ключи settings.local.json, которые Claude пишет сам по ответу пользователя в своих диалогах
 // («всегда разрешать», /add-dir, одобрение серверов .mcp.json)
 const DIALOG = (doc: any) => {
@@ -172,34 +190,58 @@ function teamFiles(dir: string, rels: string[]): Set<string> {
 // Исполняемые настройки агента в каталоге.
 // git-цель: файлы команды (в индексе, в том числе за ссылкой) — целиком; неотслеживаемые (решение
 // 2026-10-27, Г3, вариант а) — тоже, кроме своего по учёту (own): own-файл miksy с записанным хешем
-// (.codex/config.toml), одобрения miksy в settings.local.json, а в доверенном miksy проекте —
-// ответы пользователя в диалогах Claude (DIALOG) там же.
-// Без git (группа, подкаталог группы) — .claude/settings.json и .mcp.json на диске (settings.local.json
-// Claude пишет сам, свой .codex/config.toml пишет miksy).
+// (.codex/config.toml), одобрения miksy в settings.local.json и ответы пользователя в окне Claude (DIALOG) там же:
+// в отпечаток решения они не входят никогда (иначе «да» совпадало бы только при том же состоянии доверия miksy —
+// качели, рецензия 6w), в показ (вопрос) — когда они не свои пользователя (own.dialog, dialogOwn).
+// Без git (группа, подкаталог группы) — .claude/settings.json и .mcp.json на диске целиком, settings.local.json —
+// как неотслеживаемый в git-цели (одобрения miksy и ответы пользователя в окне Claude — по own; хуки, env и прочие
+// исполняемые ключи — всегда: папка может быть общей с коллегой, рецензия 6x, A1), .codex/config.toml — тоже как
+// неотслеживаемый: свой только с записанным хешем (рецензия 6y, A1).
 // fingerprint — от полной структуры (FP): команда изменила настройки — решение спрашивается заново;
+// legacy — отпечаток прежнего расчёта (0.1.x и круги до 6x: ответы Claude входили в него, когда доверие ставил не
+// miksy), если он другой: «да» с ним принимается и переносится на новый (trustPlan: renew);
 // files — учтённые файлы (для показа: полное содержимое — в них)
-export function executableSettings(dir: string, git: boolean, agent: TrustAgent, own: OwnFiles = {}): { lines: string[]; fingerprint: string; files: string[] } | null {
+export function executableSettings(dir: string, git: boolean, agent: TrustAgent, own: OwnFiles = {}): { lines: string[]; fingerprint: string; files: string[]; legacy?: string } | null {
   const list = CANDIDATES[agent].filter((c) => (git || c.noGit) && existsSync(join(dir, c.rel)));
   if (!list.length) return null;
   const team = git ? teamFiles(dir, list.map((c) => c.rel)) : new Set<string>();
-  const found: { rel: string; lines: string[]; data: unknown }[] = [];
+  const found: [string, unknown][] = [], past: [string, unknown][] = [], lines: string[] = [], files: string[] = [];
   for (const c of list) {
     const abs = join(dir, c.rel);
-    let skip: ((doc: any) => any) | undefined;
-    if (git && !team.has(c.rel)) {
+    const show = (r: Inspected) => { if (r) { lines.push(...r.lines); files.push(abs.replaceAll("\\", "/")); } };
+    // Неотслеживаемый файл: в git-цели — не в индексе; без git — settings.local.json (личный файл Claude: ответы
+    // пользователя в окне Claude и одобрения miksy в нём — как в git-проекте; остальное — исполняемые настройки) и
+    // .codex/config.toml (свой — только с записанным хешем: правка или подмена после доверия miksy — чужое, как в
+    // git-проекте; рецензия 6y, A1)
+    if (git ? !team.has(c.rel) : c.rel !== ".claude/settings.json" && c.rel !== ".mcp.json") {
       const recorded = own.files?.[pathKey(abs)];
-      if (recorded && recorded === sha(readFileSync(abs, "utf8"))) continue;
-      if (c.rel === ".claude/settings.local.json") skip = (doc) => {
-        if (Array.isArray(doc.enabledMcpjsonServers)) doc.enabledMcpjsonServers = doc.enabledMcpjsonServers.filter((n: unknown) => !own.approvals?.includes(n as string));
-        if (Array.isArray(doc.enabledMcpjsonServers) && !doc.enabledMcpjsonServers.length) delete doc.enabledMcpjsonServers;
-        return own.trusted ? DIALOG(doc) : doc;
-      };
+      if (own.written?.includes(pathKey(abs)) || (recorded && recorded === sha(readFileSync(abs, "utf8")))) continue;
+      if (c.rel === ".claude/settings.local.json") {
+        const mine = (doc: any) => {
+          if (Array.isArray(doc.enabledMcpjsonServers)) doc.enabledMcpjsonServers = doc.enabledMcpjsonServers.filter((n: unknown) => !own.approvals?.includes(n as string));
+          if (Array.isArray(doc.enabledMcpjsonServers) && !doc.enabledMcpjsonServers.length) delete doc.enabledMcpjsonServers;
+          return doc;
+        };
+        const core = c.read(abs, c.rel, (doc) => DIALOG(mine(doc)));
+        const full = c.read(abs, c.rel, mine);
+        if (core) found.push([c.rel, core.data]);
+        if (full) past.push([c.rel, full.data]);
+        // Ответы в окне Claude в показе (не свои пользователя) — отдельной строкой: это не настройки команды
+        if (own.dialog || !full) show(core);
+        else {
+          const dialog = full.lines.filter((l) => !core?.lines.includes(l));
+          show({ lines: [...(core?.lines ?? []), ...(dialog.length ? [DIALOG_TITLE, ...dialog.map((l) => `  ${l}`)] : [])], data: full.data });
+        }
+        continue;
+      }
     }
-    const r = c.read(abs, c.rel, skip);
-    if (r) found.push({ rel: c.rel, ...r });
+    const r = c.read(abs, c.rel);
+    if (r) { found.push([c.rel, r.data]); past.push([c.rel, r.data]); }
+    show(r);
   }
-  if (!found.length) return null;
-  return { lines: found.flatMap((f) => f.lines), fingerprint: fingerprint(found.map((f) => [f.rel, f.data])), files: found.map((f) => join(dir, f.rel).replaceAll("\\", "/")) };
+  if (!lines.length) return null;
+  const fp = fingerprint(found), legacy = fingerprint(past);
+  return { lines, fingerprint: fp, files, ...(legacy !== fp && { legacy }) };
 }
 
 // Серверы командного .mcp.json (git-цель — отслеживаемый, в том числе за ссылкой; без git — на диске):
@@ -258,6 +300,17 @@ export function saveDecision(p: PendingTrust, answer: "yes" | "no") {
   if (p.agent === "claude" && answer === "yes" && p.mcp) entry.mcpjson = { answer, fingerprint: p.mcp.fingerprint, date };
   writeAtomic(decisionsPath(), JSON.stringify({ version: 1, decisions: all }, null, 2) + "\n", { sensitive: true });
 }
+// «Да» прежнего расчёта (executableSettings: legacy) — на новый отпечаток: ответ и дата те же. sync сохраняет
+// (doctor и --dry-run — нет: «да» принимается и без переноса)
+export type TrustRenew = { dir: string; agent: DecisionKind; from: string; to: string };
+export function renewDecision(r: TrustRenew): boolean {
+  const all = loadDecisions();
+  const d = all[pathKey(r.dir)]?.[r.agent];
+  if (d?.answer !== "yes" || d.fingerprint !== r.from) return false;
+  d.fingerprint = r.to;
+  writeAtomic(decisionsPath(), JSON.stringify({ version: 1, decisions: all }, null, 2) + "\n", { sensitive: true });
+  return true;
+}
 
 // Список «нужно решение» для вывода sync/doctor/trust
 export function pendingText(list: PendingTrust[]): string[] {
@@ -281,7 +334,7 @@ export function askTrust(p: PendingTrust, read: (question: string) => string | n
 // ФС, когда git-корня нет) — их исполняемые настройки применились бы без вопроса. Вложенные группы
 // и git-репо (свой корень доверия) не обходятся; глубина и число каталогов ограничены
 const SKIP_DIRS = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", "dist", "build", "target"]);
-export function inheritedExec(group: string, otherGroups: string[], limit = 20000): { dir: string; lines: string[] }[] {
+export function inheritedExec(group: string, otherGroups: string[], dialog = false, limit = 20000): { dir: string; lines: string[] }[] {
   const out: { dir: string; lines: string[] }[] = [];
   const skip = new Set(otherGroups.map((g) => pathKey(g)));
   let seen = 0;
@@ -293,7 +346,7 @@ export function inheritedExec(group: string, otherGroups: string[], limit = 2000
       if (!e.isDirectory() || SKIP_DIRS.has(e.name) || e.name === ".claude" || e.name === ".miksy") continue;
       const sub = `${dir}/${e.name}`;
       if (existsSync(join(sub, ".git")) || skip.has(pathKey(sub))) continue;
-      const exec = executableSettings(sub, false, "claude");
+      const exec = executableSettings(sub, false, "claude", { dialog });
       if (exec) out.push({ dir: sub, lines: exec.lines });
       walk(sub, depth + 1);
     }
@@ -307,12 +360,16 @@ export function inheritedExec(group: string, otherGroups: string[], limit = 2000
 const ADD = "будет добавлено при sync";
 
 // refuse — защита git из плана (gitRefusal: файл команды, в том числе за ссылкой; вложенное репо; сбой
-// git): одобрения пишутся только туда, куда план пишет остальные файлы
+// git): одобрения пишутся только туда, куда план пишет остальные файлы. excluded — строки блока miksy этого
+// агента в .git/info/exclude проекта (улика своих одобрений, когда учёт их забыл). mark — отметка «проект забыт»
+// (доверие до «забыть» ставил miksy — ответы пользователя в окне Claude его). renew — «да» прежнего расчёта на новый
 export function trustPlan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, actions: Action[], agent: string,
-  refuse: (path: string) => string | null = (p) => (protectedBy(p) ? "файл отслеживается git" : null)):
-  { actions: Action[]; missing: string[]; pending?: PendingTrust; advice: string[] } {
+  refuse: (path: string) => string | null = (p) => (protectedBy(p) ? "файл отслеживается git" : null), excluded: string[] = [], mark?: ForgottenMark):
+  { actions: Action[]; missing: string[]; pending?: PendingTrust; advice: string[]; renew?: TrustRenew; own?: OwnFiles } {
   const out: Action[] = [], missing: string[] = [], advice: string[] = [];
   let pending: PendingTrust | undefined;
+  let renew: TrustRenew | undefined;
+  let own: OwnFiles | undefined;
   if (target.scope !== "project" || !["codex", "claude"].includes(agent)) return { actions: out, missing, advice };
   const a = agent as TrustAgent;
   const clean = result.clean === true;
@@ -346,14 +403,56 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
           actions.some((x) => x.kind === "merge" && x.own.length && JSON.stringify(x.key) === JSON.stringify(f.key))
           || ((prev.merges[pathKey(file)]?.[JSON.stringify(f.key)] ?? []).some((n) => Object.hasOwn(f.data as object, n)) && trustValue(doc, f.key.slice(0, 2)) !== undefined)));
     // Исполняемые настройки агента и решение о них
+    // Свои — и файлы miksy без учёта, узнанные этим планом (учёт был забыт — clean --forget, диск вернулся):
+    // берётся обратно, перезаписывается, конфликтует с нынешним выводом или убирается как ненужный. Иначе их
+    // прежний текст выглядел бы чужим конфигом агента: вопрос о доверии к своему же файлу, а доверие — только
+    // со следующего sync. Хеш — того, что на диске сейчас
+    const known = Object.fromEntries(actions.flatMap((x) => (x.known && x.kind !== "approve" && existsSync(x.abs) ? [[pathKey(x.abs), sha(readFileSync(x.abs, "utf8"))]] : [])));
     const local = join(target.dir, ".claude/settings.local.json").replaceAll("\\", "/");
-    const mine = ownFiles(prev, target.dir);
-    const exec = clean || off ? null : executableSettings(target.dir, !!target.git, a, mine);
-    const decisions = exec ? loadDecisions()[pathKey(target.dir)] : undefined;
-    const decision = decisions?.[a];
+    const written = actions.filter((x) => x.kind === "write").map((x) => pathKey(x.abs));
+    // Одобрения серверов .mcp.json, которые записал miksy, когда учёт их забыл: файл одобрений под точной строкой
+    // блока miksy claude в exclude (её miksy пишет, только пока в файле его одобрения), не файл git; кандидаты —
+    // одобренные в файле серверы командного .mcp.json. Своими они станут, только если miksy одобрил бы их сейчас
+    // (basis ниже): одобрения пишет и сам Claude, когда пользователь одобряет сервер в его окне
+    const recordedApprovals = prev.approvals?.[pathKey(local)] ?? [];
+    let regained: string[] = [];
+    if (a === "claude" && !clean && !off && !recordedApprovals.length && excluded.includes("/.claude/settings.local.json") && existsSync(local) && !(target.git && refuse(local))) {
+      const { doc, bad } = readJsonFile(local);
+      const servers = !bad && doc && typeof doc === "object" && !Array.isArray(doc) && doc.enableAllProjectMcpServers !== true ? mcpJsonServers(target.dir, !!target.git) : null;
+      const names = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+      if (servers) regained = names(doc.enabledMcpjsonServers).filter((n) => servers.names.includes(n) && !names(doc.disabledMcpjsonServers).includes(n));
+    }
+    // Исполняемые настройки агента, решения пользователя о них и основание одобрить серверы .mcp.json — при
+    // данных своих одобрениях. Ответы пользователя в окне Claude — его (dialogOwn): доверие ставил miksy, слой
+    // trust: true или «да» пользователя доверию Claude здесь (решения грузятся, только когда есть что решать)
+    const ownDialog = a === "claude" && (trustedByMiksy(prev, mark) || fromLayer?.item === true);
+    const judge = (approvals: string[]) => {
+      const st = { ...prev, files: { ...prev.files, ...known }, approvals: { ...prev.approvals, ...(approvals.length > 0 && { [pathKey(local)]: approvals }) } };
+      const see = (dialog: boolean) => (clean || off ? null : executableSettings(target.dir, !!target.git, a, { ...ownFiles(st, target.dir, dialog), written }));
+      let exec = see(ownDialog);
+      const decisions = exec ? loadDecisions()[pathKey(target.dir)] : undefined;
+      if (exec && a === "claude" && !ownDialog && decisions?.claude?.answer === "yes") exec = see(true);
+      const decision = decisions?.[a];
+      // «Да» прежнего расчёта (с ответами Claude в отпечатке) — принимается и переносится на новый
+      const old = !!exec?.legacy && decision?.answer === "yes" && decision.fingerprint === exec.legacy;
+      const approved = fromLayer?.item === true || (decision?.answer === "yes" && (decision.fingerprint === exec?.fingerprint || old));
+      const mcp = a === "claude" && exec ? mcpJsonServers(target.dir, !!target.git) : null;
+      const basis = approved || (decisions?.mcpjson?.answer === "yes" && decisions.mcpjson.fingerprint === mcp?.fingerprint);
+      return { exec, decisions, decision, approved, mcp, basis, old };
+    };
+    let j = judge(regained);
+    if (regained.length && !j.basis) { regained = []; j = judge([]); }
+    const { exec, decisions, decision, approved, mcp } = j;
+    // Свои файлы и одобрения для просмотра miksy trust <проект> (src/commands.ts) — то, что план берёт: учёт и
+    // узнанные после «забыть», кроме конфликтных (рецензия 6y, A4). Шапку «Сгенерировано miksy» мог оставить кто
+    // угодно (копия папки, архив): такой файл sync не берёт и доверия по нему не ставит (конфликт — не доставка), а
+    // просмотр показывает его чужим, и решение о нём можно записать. Вопроса sync о нём нет (рецензия 6w, п. 3:
+    // свой файл после «забыть» при изменившихся слоях — конфликт без вопроса, --force — доверие в том же запуске)
+    const conflicting = new Set(actions.filter((x) => x.kind === "conflict").map((x) => pathKey(x.abs)));
+    const accepted = Object.fromEntries(Object.entries(known).filter(([k]) => !conflicting.has(k)));
+    own = { files: { ...prev.files, ...accepted }, approvals: regained.length ? regained : (prev.approvals?.[pathKey(local)] ?? []) };
+    if (j.old && exec) renew = { dir: target.dir, agent: a, from: decision!.fingerprint, to: exec.fingerprint };
     const declined = decision?.answer === "no";
-    const approved = fromLayer?.item === true || (decision?.answer === "yes" && decision.fingerprint === exec?.fingerprint);
-    const mcp = a === "claude" && exec ? mcpJsonServers(target.dir, !!target.git) : null;
     if (exec && !approved) pending = { dir: target.dir, rel: target.rel, agent: a, fingerprint: exec.fingerprint, lines: exec.lines, files: exec.files, ...(declined && { declined: true }), ...(mcp && { mcp: { fingerprint: mcp.fingerprint } }) };
 
     // Одобрение серверов командного .mcp.json: Claude (2.1.311) читает его из .claude/settings.local.json
@@ -363,8 +462,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
     // отклонённые им самим) не трогаются; своё одобрение снимается, когда основания нет
     const approvals = () => {
       if (a !== "claude") return;
-      const ours = mine.approvals!;
-      if (!mcp && !ours.length) return;
+      if (!mcp && !recordedApprovals.length) return;
       const exists = existsSync(local);
       const settings = exists ? readJsonFile(local) : { doc: {} };
       if (settings.bad || !settings.doc || typeof settings.doc !== "object" || Array.isArray(settings.doc)) {
@@ -378,17 +476,19 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const gitWhy = target.git ? refuse(local) : null;
       const team = !!gitWhy;
       const mcpDecision = decisions?.mcpjson;
-      const basis = fromLayer?.item === true || (decision?.answer === "yes" && decision.fingerprint === exec?.fingerprint)
-        || (mcpDecision?.answer === "yes" && mcpDecision.fingerprint === mcp?.fingerprint);
+      const basis = j.basis;
       const eligible = trusted && !clean && !off && !team && doc.enableAllProjectMcpServers !== true;
       const want = eligible && basis && mcp ? mcp.names.filter((n) => !disabled.includes(n)) : [];
+      // Свои — по учёту и узнанные (только те, что miksy одобряет сейчас; остальные в файле — чужие, не снимаются)
+      const back = regained.filter((n) => want.includes(n) && enabled.includes(n));
+      const ours = [...new Set([...recordedApprovals, ...back])];
       const add = want.filter((n) => !enabled.includes(n));
       const own = [...new Set([...ours.filter((n) => want.includes(n) && enabled.includes(n)), ...add])].sort();
       const remove = ours.filter((n) => !want.includes(n) && enabled.includes(n));
-      if (add.length || remove.length || JSON.stringify([...ours].sort()) !== JSON.stringify(own)) {
+      if (add.length || remove.length || JSON.stringify([...recordedApprovals].sort()) !== JSON.stringify(own)) {
         const refusal = escapes(local, target.dir) || gitWhy;
         if (refusal && (add.length || remove.length)) out.push({ kind: "conflict", abs: local, why: `${refusal} — одобрение серверов .mcp.json не меняю` });
-        else out.push({ kind: "approve", abs: local, add, remove, own, beforeHash: sha(exists ? readFileSync(local, "utf8") : ""), roots: [target.dir] });
+        else out.push({ kind: "approve", abs: local, add, remove, own, beforeHash: sha(exists ? readFileSync(local, "utf8") : ""), roots: [target.dir], ...(back.length > 0 && { known: true }) });
       }
       if (team && mcp && !clean) advice.push(`Claude: ${target.rel || target.dir}/.claude/settings.local.json — ${gitWhy}: одобрение серверов .mcp.json miksy туда не пишет (отслеживаемый файл Claude не читает); одобрите серверы в Claude (/mcp)`);
       const unapproved = mcp && eligible && !basis ? mcp.names.filter((n) => !enabled.includes(n) && !disabled.includes(n)) : [];
@@ -398,7 +498,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
     // Почему доверия быть не должно (null — должно)
     const why: string | null = clean ? "clean" : off ? offWhy
       : exec && !approved ? (declined ? "пользователь отказал в доверии (miksy trust)"
-        : `нужно решение пользователя: исполняемые настройки агента команды (${exec.lines.length}) — miksy trust ${target.rel || target.dir}`)
+        : `нужно решение пользователя: исполняемые настройки агента не от miksy (${exec.lines.length}) — miksy trust ${target.rel || target.dir}`)
       : !exec && !rendered ? "miksy не доставляет конфигурацию для этого агента (командный файл или нечего доставлять)"
       : null;
     if (why !== null) {
@@ -457,7 +557,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
   // Итог согласован с планом: предупреждение о headersHelper — только если доверия после sync не будет
   if (helpers.length && !trusted && !clean)
     advice.push(`Claude: проект не доверенный — headersHelper (${helpers.join(", ")}) не выполнится, сервер получит 401; причина — в «нет доверия» выше`);
-  return { actions: out, missing, ...(pending && { pending }), advice };
+  return { actions: out, missing, ...(pending && { pending }), advice, ...(renew && { renew }), ...(own && { own }) };
 }
 
 export function codexProjectKey(dir: string, machine: Machine, existing: string[]): string {

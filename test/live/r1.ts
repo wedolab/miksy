@@ -2,7 +2,7 @@
 // (временные HOME, workspace, конфигурация miksy, искусственные секреты), затем агент запускает
 // то, что записал miksy: stdio-обёртки, helper заголовков / {file:} / мост. Настоящие конфиги
 // агентов и miksy не читаются и не меняются. Не входит в bun test.
-//   bun test/live/r1.ts <claude|codex|opencode|gemini>     (или из test/<агент>-live.ts)
+//   bun test/live/r1.ts <claude|codex|opencode|antigravity>     (или из test/<агент>-live.ts)
 // Проверяется: значения секретов не лежат ни в одном записанном файле; серверы стартуют и видят
 // значения (заглушка пишет только длину и sha); HTTP-заглушка получает верный Authorization (и key
 // в URL — через мост); после выхода агента серверы не остаются; на Windows у серверов нет окна.
@@ -10,6 +10,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realp
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { agentId } from "../../src/agentid";
 
 const win = process.platform === "win32";
 const HERE = resolve(import.meta.dir);
@@ -271,7 +272,7 @@ async function opencode(box: Box) {
   record("opencode: форма mcp.<имя>, HTTP — {file:}", !!oc.mcp?.p_http && !oc.mcp.servers && /\{file:/.test(oc.mcp.p_http.headers?.Authorization ?? ""), oc.mcp?.p_http);
 }
 
-async function gemini(box: Box) {
+async function antigravity(box: Box) {
   const model = process.env.AGY_MODEL ?? "gemini-3.8-flash-low";
   const plugin = JSON.parse(readFileSync(`${box.project}/.agents/plugins/miksy/mcp_config.json`, "utf8"));
   record("Antigravity: HTTP с секретом в плагине — мост (stdio)", !!plugin.mcpServers.p_http?.command && !plugin.mcpServers.p_http.url, plugin.mcpServers.p_http);
@@ -288,13 +289,13 @@ async function gemini(box: Box) {
   record("Antigravity: вызов инструмента через мост (g_http, p_http, g_url)", p.code === 0 ? called.length === 3 : null, { called, code: p.code });
 }
 
-export async function main(agent: string, port = 4790 + ["claude", "codex", "opencode", "gemini"].indexOf(agent)) {
+export async function main(agent: string, port = 4790 + ["claude", "codex", "opencode", "antigravity"].indexOf(agentId(agent))) {
   const box = setup(agent, port);
   try {
     if (agent === "claude") await claude(box);
     else if (agent === "codex") await codex(box);
     else if (agent === "opencode") await opencode(box);
-    else if (agent === "gemini") await gemini(box);
+    else if (agentId(agent) === "antigravity") await antigravity(box);
     else throw new Error(`неизвестный агент ${agent}`);
     await Bun.sleep(2000);
     checkStdio(box, ["g_stdio", "p_stdio"]);

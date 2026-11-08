@@ -1,5 +1,5 @@
 import type { Launcher } from "./launch";
-import type { PendingTrust } from "./trust";
+import type { OwnFiles, PendingTrust, TrustRenew } from "./trust";
 import type { HttpDelivery, SkippedMcp } from "./vars";
 import type { Machine, Resolved } from "./types";
 
@@ -47,6 +47,11 @@ export interface RenderResult {
   trust?: Resolved["trust"];
   // Доверие ждёт решения пользователя (исполняемые настройки агента) — заполняет plan (src/trust.ts)
   trustPending?: PendingTrust;
+  // «Да» прежнего расчёта отпечатка — перенести на новый (sync сохраняет; src/trust.ts: renewDecision)
+  trustRenew?: TrustRenew;
+  // Свои файлы и одобрения цели, как их считал план доверия (с файлами miksy, узнанными после «забыть»): по ним
+  // смотрит miksy trust <проект>
+  trustOwn?: OwnFiles;
 }
 
 // Что агент видит сейчас из ручных конфигов — для сравнения при миграции

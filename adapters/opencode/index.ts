@@ -6,6 +6,9 @@ import { skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { serverSecrets } from "../../src/vars";
 import { configsOf, currentGlobal, currentProject, strictJson } from "./current";
+import { miksyOpencodeJson } from "../../src/marks";
+import { teamCollection } from "../../src/git";
+import { miksyExcludeLines } from "../../src/apply";
 
 export const HEADER = (layers: string[]) =>
   `<!-- Сгенерировано miksy (слои: ${layers.join(" → ")}). Не править вручную — изменения вносить в конфигурацию miksy (слои). -->`;
@@ -134,7 +137,21 @@ export const opencode: Adapter = {
     // Занят чужим корневым конфигом — только mcp поимённо, инструкции — warning.
     const rootJson = join(anchor, "opencode.json");
     const rootJsonc = join(anchor, "opencode.jsonc");
-    const managed = existsSync(rootJson) && isOwned(rootJson, ctx);
+    // Свой — по учёту. Учёта нет, но это собственный opencode.json miksy (учёт забыт — clean --forget, диск
+    // вернулся): только $schema, instructions → .opencode/miksy.md и mcp, и либо серверы в нём — только те, что
+    // miksy пишет сейчас (чужой сервер внутри — файл чужой: метка сама по себе не делает его своим), либо файл
+    // уже скрыт строкой «/opencode.json» блока miksy opencode в .git/info/exclude — её miksy пишет только для
+    // своего файла (набор серверов мог измениться, пока диск был отключён: такой файл — свой, отличие —
+    // конфликт и --force). Отслеживаемый git — всегда файл команды, как бы он ни выглядел (сбой git — тоже не свой)
+    const forgotten = () => {
+      try {
+        const text = readFileSync(rootJson, "utf8");
+        if (!miksyOpencodeJson(text) || teamCollection(anchor, "opencode.json")) return false;
+        return Object.keys((JSON.parse(text) as { mcp?: object }).mcp ?? {}).every((n) => n in servers)
+          || miksyExcludeLines(anchor, "opencode").includes("/opencode.json");
+      } catch { return false; }
+    };
+    const managed = existsSync(rootJson) && (isOwned(rootJson, ctx) || forgotten());
     const rootFree = !existsSync(rootJson) && !existsSync(rootJsonc);
     const ours = managed || rootFree;
     // Конфиги-соседи, которые тоже загрузятся (в ours-ветке rootJson — наш, в чужой — оба корневых учтены)

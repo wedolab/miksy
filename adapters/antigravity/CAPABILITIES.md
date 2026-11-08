@@ -1,15 +1,18 @@
 # Antigravity — возможности и каналы
 
-Идентификатор в miksy — `gemini` (по каталогу настроек `~/.gemini`).
+Идентификатор в miksy — `antigravity` (прежнее `gemini` — синоним во всех входных данных). Каталог
+настроек самого агента — `~/.gemini`.
 
 Antigravity — агент Google в двух режимах: CLI `agy` и графический клиент (Antigravity IDE —
 форк VS Code, и Antigravity 2.0). Оба читают общие правила и skills из `~/.gemini/`, а
-настройки MCP и состояние хранят раздельно. Адаптер `gemini` пишет в оба режима.
+настройки MCP и состояние хранят раздельно. Адаптер `antigravity` пишет в оба режима.
 
 Проверено на версиях:
 
 - `agy` 1.3.3, 1.4.2, 1.4.3–1.4.7 — Windows 11; `agy` 1.4.0, 1.4.2, 1.4.7 — macOS 26.6;
-- Antigravity IDE и Antigravity 2.0 — Windows.
+  `agy` 1.4.12 — Linux (Ubuntu 24.04; процессор без AES-NI/AVX — через обёртку qemu, не miksy);
+- Antigravity IDE и Antigravity 2.0 — Windows;
+- ACP-адаптер `antigravity-acp` 1.4.5 (Zed) — Windows и Linux: настройки miksy не получает (ниже).
 
 Источники: документация `https://antigravity.google/docs` (customizations, rules, skills,
 MCP, plugins), встроенные руководства CLI
@@ -24,7 +27,8 @@ MCP, plugins), встроенные руководства CLI
 | Возможность | Механизм агента (файл/ключ) | Как использует miksy | Проверено |
 |---|---|---|---|
 | Глобальные правила | `~/.gemini/GEMINI.md` — always-on, общий для CLI и IDE (`globalMemoriesPathSegments` в IDE) | Управляемый блок `<!-- miksy:begin … -->`; текст до и после блока (в том числе память агента) сохраняется | Вживую: agy 1.4.2 Windows — маркеры до/внутри/после блока, «запомни» дописывает в конец файла, блок цел |
-| Правила проекта | `AGENTS.md`, `GEMINI.md` в корне; `rules/` плагина | Own-файл `.agents/plugins/miksy/rules/AGENTS.md`; командный `AGENTS.md` не трогается, агент читает оба | Вживую: agy 1.3.3 и 1.4.2 Windows; агент соблюдает правила обоих файлов |
+| Правила проекта | `AGENTS.md`, `GEMINI.md` в корне; `rules/` плагина | Own-файл `.agents/plugins/miksy/rules/AGENTS.md`; командный `AGENTS.md` не трогается, агент читает оба | Вживую: agy 1.3.3 и 1.4.2 Windows; агент соблюдает правила обоих файлов; `agy -p` 1.4.7 Windows и 1.4.12 Linux — правило «## MCP» в контексте |
+| Подсказка о MCP | Инструменты MCP — не отдельные, а через общий `call_mcp_tool`; сервер плагина — `<плагин>_<имя>` | У цели с MCP в конце `rules/AGENTS.md` — раздел «MCP-серверы проекта (Antigravity)»: «вызываются через `call_mcp_tool`, имя сервера — `miksy_<имя>`» со списком; MCP без правил — файл правил с одной подсказкой | Причина — вживую: интерактивный agy 1.4.7 Windows (Gemini 3.8 Flash) без подсказки отвечал «инструмент не подключён», с подсказкой вызвал `miksy_context7` |
 | Плагин проекта | `.agents/plugins/<имя>/` с `plugin.json`; обнаруживается автоматически, включён по умолчанию | Свой плагин `.agents/plugins/miksy/` (`plugin.json` = `{"name":"miksy"}`), создаётся, если есть правила, skills или MCP | Вживую: agy (Windows), IDE и 2.0 (Windows); macOS — в изолированном HOME без входа плагин не загружается |
 | Skills глобально | `~/.gemini/config/skills/<имя>/SKILL.md` (единственный рабочий путь) | Own-файлы там же | Вживую: agy 1.4.2 Windows |
 | Skills проекта | `.agents/skills/<имя>/` (командные), `skills/` плагина | Own-файлы `.agents/plugins/miksy/skills/<имя>/`; агент активирует skill по запросу | Вживую: agy 1.3.3 Windows |
@@ -32,8 +36,8 @@ MCP, plugins), встроенные руководства CLI
 | MCP глобально, CLI | `~/.gemini/config/mcp_config.json` → `mcpServers` (сюда пишет `agy mcp add`); также `~/.gemini/antigravity-cli/mcp_config.json` | Merge по именам в `~/.gemini/config/mcp_config.json` | Вживую: agy 1.4.2 Windows, macOS |
 | MCP глобально, IDE | `~/.gemini/antigravity-ide/mcp_config.json` → `mcpServers` | Merge по именам в этот же файл (одновременно с CLI) | Разбор бандла IDE |
 | MCP проекта | `mcp_config.json` плагина; также `.agents/mcp_config.json` | Own-файл `.agents/plugins/miksy/mcp_config.json` | Вживую: agy (Windows), IDE и 2.0 (Windows), вызов инструмента моделью |
-| Формат сервера | stdio: `command`, `args`, `env`; HTTP (Streamable): `url`, `headers`; `disabled` | Пишет эти поля; `agents.gemini` слоя может дополнить или выключить (`skip`) | Вживую: `agy mcp list` |
-| stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал) | `command` — обёртка `local/run/gemini/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []` | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
+| Формат сервера | stdio: `command`, `args`, `env`; HTTP (Streamable): `url`, `headers`; `disabled` | Пишет эти поля; `agents.antigravity` слоя может дополнить или выключить (`skip`) | Вживую: `agy mcp list` |
+| stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал) | `command` — обёртка `local/run/antigravity/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []` | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
 | HTTP с секретом | То же | Мост: `command` — обёртка `<сервер>-bridge-<хеш>.cmd\|.sh` (stdio-сервер, пересылающий на HTTP) | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 и 1.4.7 macOS (`tools/list`); вызов инструмента — Windows; IDE Windows |
 | Каталоги-группы | Без git `AGENTS.md` и плагин читаются только из каталога сессии, вниз не наследуются | Группа получает свой плагин с полным набором слоёв до своего уровня, разности нет | Чтение — вживую agy 1.4.2 Windows; поведение группы заново не проверялось |
 | Реестр проектов | `~/.gemini/projects.json` | Источник `knownDirs` для `sync --all` | По коду |
@@ -46,7 +50,11 @@ MCP, plugins), встроенные руководства CLI
 | Правила | блок в `~/.gemini/GEMINI.md` | `.agents/plugins/miksy/rules/AGENTS.md` (own) |
 | Skills | `~/.gemini/config/skills/<имя>/` (own) | `.agents/plugins/miksy/skills/<имя>/` (own) |
 | MCP | `~/.gemini/config/mcp_config.json` и `~/.gemini/antigravity-ide/mcp_config.json` (merge `mcpServers`) | `.agents/plugins/miksy/mcp_config.json` (own) |
-| Обёртки секретов | `local/run/gemini/global/` | `local/run/gemini/<проект>-<хеш>/` |
+| Обёртки секретов | `local/run/antigravity/global/` | `local/run/antigravity/<проект>-<хеш>/` |
+
+До 0.2.0 обёртки лежали в `local/run/gemini/`, а учёт вёлся под `gemini|…`: учёт переходит к новому
+имени при загрузке, первый `sync` после обновления переписывает обёртки в новый каталог, прежние
+удаляет и заменяет блок `miksy:gemini` в `.git/info/exclude` блоком `miksy:antigravity`.
 
 - Шапка сгенерированных файлов: «Сгенерировано miksy (слои: …). Не править вручную —
   изменения вносить в конфигурацию miksy (слои).»
@@ -80,7 +88,8 @@ MCP, plugins), встроенные руководства CLI
 
 - Серверы плагина агент видит с префиксом `<плагин>_<сервер>`: `context7` из плагина
   `miksy` — `miksy_context7`. Имена инструментов не меняются; модель вызывает их через
-  `call_mcp_tool(ServerName=…, ToolName=…)`.
+  `call_mcp_tool(ServerName=…, ToolName=…)`. Панель MCP в `agy` показывает `✓ miksy_context7`, но
+  модель Flash без подсказки этого не сопоставляет — отсюда подсказка в правилах плагина (выше).
 - Серверы стартуют асинхронно. Первый промпт сессии может уйти без секции `mcp_servers` (в логе
   `~/.gemini/antigravity-cli/log/cli-*.log` — `empty component: prompt section "mcp_servers"`);
   инструменты доступны со второго сообщения. В IDE агент иногда долго ищет способ вызова.
@@ -90,6 +99,28 @@ MCP, plugins), встроенные руководства CLI
 - Legacy HTTP+SSE (протокол 2024-11-05) не поддерживается — нужен Streamable HTTP endpoint
   (документация).
 - Удалённый OAuth-сервер в проверке не поднялся — вероятно, нужна авторизация в Antigravity.
+
+## Через ACP в Zed
+
+ACP-адаптер Antigravity в Zed — **отдельная программа** `antigravity-acp` (1.4.5 на 2026-11-02:
+`agy_acp_server.par` — Python, и движок `localharness_external`; Zed скачивает её в
+`~/.local/share/zed/external_agents/registry/antigravity-acp/`), а не `agy`. Свой каталог настроек —
+`~/.gemini/antigravity-acp/` (`settings.json` со способом входа, `trusted_workspaces.json`), вход —
+отдельный от `agy` (`oauth-personal`).
+
+- **Правила** — не грузит никакие: ни плагин проекта, ни `AGENTS.md`/`GEMINI.md`/`.agents/rules/*.md`
+  проекта (даже в доверенной папке), ни глобальные `~/.gemini/GEMINI.md`. Проверено маркерами: Windows
+  (локальный проект) и Linux (Ubuntu 24.04, Zed Remote и локально), 2026-11-01…02. Движок файлы правил
+  знает, но адаптер, видимо, ждёт их от клиента (`_meta.antigravity.systemPrompt.append`), а Zed их не
+  передаёт.
+- **MCP** — по коду адаптера только глобальный `~/.gemini/config/mcp_config.json` и серверы, переданные
+  клиентом (Zed передаёт `mcpServers: []`); проектных `.agents/mcp_config.json` и плагинов в коде нет.
+  Вживую не проверено.
+- Итог: через ACP в Zed настройки miksy до Antigravity не доходят, и писать их некуда; в терминале
+  Zed (`agy`) — доходят. Документация Antigravity: плагины читает только CLI; IDE и расширения —
+  правила проекта и глобальные. При новой версии адаптера — повторить пробу маркерами.
+- Linux: на процессоре без AES-NI/AVX скачанный Zed бинарник падает (`go/sigill-fail-fast`) — лечится
+  обёрткой qemu, как `agy`; к miksy не относится.
 
 ## Мост для HTTP с секретом
 
@@ -141,8 +172,13 @@ OAuth не нужен.
   (сервер из слоя проекта виден только в нём).
 - 2026-10-17…20: agy 1.4.2 Windows, 1.4.0 macOS, IDE и 2.0 Windows — пути чтения, подстановки,
   обёртки, маркеры блока; на Windows для модели нужен VPN («User location is not supported»).
-- 2026-10-24: секреты без значений в конфигах — `bun test/live/r1.ts gemini`, IDE —
+- 2026-10-24: секреты без значений в конфигах — `bun test/live/r1.ts antigravity`, IDE —
   `test/live/gui-antigravity.ts prep|report`, память моста — `test/live/bridge-memory.ts`.
 - Отказы моста — `bun test/live/g1.ts bridge` (agy 1.4.7, Windows и macOS, 15/15);
   длинные значения и кавычки — `bun test/live/g2.ts wrappers` (Windows).
-- Базовая проверка адаптера — `bun test/gemini-live.ts` (все вызовы `agy` с временным HOME).
+- 2026-11-01: Linux (Ubuntu 24.04), `agy -p` 1.4.12 — правила и MCP плагина (`miksy_context7`:
+  resolve-library-id, query-docs) и в git-репо, и в папке-группе; `agy plugin list`/`mcp list` проектные
+  плагины не показывают ни на Windows, ни на Linux — не показатель.
+- 2026-11-01…02: интерактивный agy 1.4.7 Windows — нужна подсказка `call_mcp_tool` (выше); ACP-адаптер
+  1.4.5 в Zed (Windows, Linux) — настроек miksy не видит.
+- Базовая проверка адаптера — `bun test/antigravity-live.ts` (все вызовы `agy` с временным HOME).

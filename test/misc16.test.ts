@@ -11,10 +11,10 @@ const none = { layers: [], instructions: [], skills: [], notes: [], mcp: [] };
 const secretMcp = { layer: "x", item: { name: "s", command: "echo", env: { TOKEN: "${TOKEN}" } } };
 const machineOf = (f: { home: string; ws: string }) => ({ home: f.home, workspace: f.ws, os: "linux" as const, vars: {} });
 
-test("С16: пропущенный сервер на первом sync не создаёт пустой own-файл Codex/Gemini", () => {
+test("С16: пропущенный сервер на первом sync не создаёт пустой own-файл Codex/Antigravity", () => {
   const f = cliFixture();
   const target = { scope: "project" as const, dir: `${f.ws}/Org/p1`, rel: "Org/p1" };
-  for (const id of ["codex", "gemini"]) {
+  for (const id of ["codex", "antigravity"]) {
     const { result } = renderFor(ADAPTERS[id], { cfg: { ...none, mcp: [secretMcp] }, target, title: "t" }, machineOf(f), {});
     expect(result.files).toEqual([]);
   }
@@ -34,7 +34,7 @@ test("С19: пустой ~/.gemini/config/mcp_config.json — глобальны
   const f = cliFixture();
   put(`${f.home}/.gemini/config/mcp_config.json`, "");
   const cfg = { ...none, mcp: [{ layer: "x", item: { name: "plain", command: "echo" } }] };
-  const { result } = renderFor(ADAPTERS.gemini, { cfg, target: { scope: "global" }, title: "t" }, machineOf(f), {});
+  const { result } = renderFor(ADAPTERS.antigravity, { cfg, target: { scope: "global" }, title: "t" }, machineOf(f), {});
   expect(result.files.some((x) => x.path === ".gemini/config/mcp_config.json")).toBe(true);
   expect(result.warnings.join("\n")).not.toContain("не парсится");
 });

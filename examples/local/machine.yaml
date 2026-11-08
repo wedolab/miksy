@@ -1,9 +1,14 @@
 # Настройки этой машины. Обычно их создаёт miksy setup.
 workspace: ~/Projects      # корень workspace (на Windows, например, D:/work)
+# Несколько не связанных корней — списком (или miksy root add <путь> --tree <ветка>); первый — основной,
+# у остальных tree — своя ветка дерева слоёв layers/tree (обязательна):
+# workspace:
+#   - ~/Projects
+#   - { path: "/Volumes/Data/Clients", tree: Clients }
 vars:                      # пути к программам, на которые ссылаются ваши MCP: ${ИМЯ}
   PYTHON: /usr/bin/python3
 # Агенты, установленные на этой машине: для них работают sync/clean/doctor без --agent
-agents: [claude, codex, opencode, gemini]
+agents: [claude, codex, opencode, antigravity]
 # Доверие проектам, куда miksy доставил конфигурацию (по умолчанию включено).
 # false здесь — окончательно для машины: слой его не включит
 # trust: { claude: false, codex: false }

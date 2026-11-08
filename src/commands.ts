@@ -1,25 +1,28 @@
 // Команды miksy: разбор аргументов и выполнение в этом процессе. CLI (src/cli.ts) и мастер setup
 // (src/setup.ts) вызывают runCommand; вопросы — через Ask (в терминале — prompt, в тестах — сценарий)
-import { existsSync, readdirSync, realpathSync, rmdirSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
-import { fold, inside, pathKey, samePath, slash } from "./paths";
+import { existsSync, readdirSync, readFileSync, realpathSync, rmdirSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { canonical, fold, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
-import { AGENT_NOTE, AGENT_TITLE, askTrust, executableSettings, mcpJsonServers, ownFiles, type PendingTrust, pendingText, saveDecision, type TrustAgent } from "./trust";
-import { KEEP_RUNS, runDir } from "./backup";
+import { AGENT_NOTE, AGENT_TITLE, askTrust, dialogOwn, executableSettings, mcpJsonServers, ownFiles, type PendingTrust, pendingText, renewDecision, saveDecision, type TrustAgent, trustedByMiksy } from "./trust";
+import { backup, KEEP_RUNS, runDir } from "./backup";
 import { parseArgs, UsageError } from "./args";
-import { adoptMcp, adoptSkill, fromNative, layerDir, mcpYaml } from "./adopt";
+import { adoptMcp, adoptSkill, elsewhereText, fromNative, layerDir, mcpYaml } from "./adopt";
 import { doctor } from "./doctor";
 import { foreignMcp, foreignSkills } from "./foreign";
-import { setup, unsafeWorkspace } from "./setup";
+import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsafeWorkspace } from "./setup";
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
-import { containsProjects, ENGINE, findProject, ignoredLayerParts, ignoredText, layerSecrets, listProjects, loadMachine, loadMap, loadSecrets, configRoot, unknownKeys } from "./load";
+import { checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { finishUpdate, update } from "./update";
 import { engineVersion, newerLedger } from "./version";
-import { emptyState, type Manifest, otherOwners, saveManifest, type TargetState } from "./manifest";
-import { ADAPTERS, agentsFor, allProjects, allTargets, formerGroups, formerTarget, globalTarget, type Group, groupRulesDelivered, ledgerSkills, listGroups, markedKind, literalHints, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, saveMoves, type TargetSpec, targetId, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
+import { emptyState, joinStates, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
+import { ADAPTERS, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
+import { merge } from "./resolve";
+import { clashText, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, suggestTree, treeClashes, treeOf } from "./roots";
+import { type RootItem, rootItems, rewriteRoots } from "./rootfile";
 import { prepareSandbox, syncOut } from "./sync";
 import { applyMark, layerPath, markPlan, plainDirs, plainText, targetDir } from "./target";
 import { type AgentId, formatTeamSkills, scanTeamSkills } from "./teamskills";
@@ -43,21 +46,32 @@ export const USAGE = `miksy — раскладывает ваши правила
   miksy sync --global          домашние настройки агентов (~/.claude, ~/.codex и т. д.) из слоёв
                                layers/global и layers/env-<ОС>: действуют во всех каталогах.
                                Когда меняли эти слои
-  miksy sync --all             все проекты workspace (git-репо) и каталоги с пометкой target: true —
-                               из слоёв layers/tree по их пути. Когда меняли layers/tree
-  miksy sync <путь>            то же для одного проекта или каталога (например, нового)
+  miksy sync --all             все проекты workspace (git-репо во всех его корнях) и каталоги с
+                               пометкой target: true — из слоёв layers/tree по их месту в дереве.
+                               Когда меняли layers/tree
+  miksy sync [<путь>]          то же для одного проекта или каталога (например, нового); без пути —
+                               проект текущего каталога (и из его подпапки)
     --dry-run                  только показать, что будет записано
     --force                    заменить и файлы, правленные вручную или чужие (с копией)
-    --agent <имя>              один агент: ${Object.keys(ADAPTERS).join(", ")} (без флага — агенты из
-                               local/machine.yaml)
+    --agent <имя>              один агент: ${Object.keys(ADAPTERS).join(", ")}
+                               (без флага — агенты из local/machine.yaml)
   miksy clean <путь> | --global | --all
-                               убрать всё, что miksy записал, — вернуть как было до него
+                               убрать всё, что miksy записал, — вернуть как было до него.
+                               Папки нет (диск не подключён) — уберёт, до чего дотянется;
+                               данных больше нет — --forget: забыть записанное туда
 
 Проекты и каталоги
   miksy projects               какие каталоги workspace получают настройки
-  miksy explain [<путь>]       что получит каталог (без пути — домашние настройки) и из какого слоя
+  miksy explain [<путь>]       что получит каталог (без пути — текущий) и из какого слоя;
+                               --global — домашние настройки агентов
   miksy target [<путь>]        каталог без git (без пути — текущий) получает настройки, как проект:
                                пометка target: true в его слое. --remove — снять пометку
+  miksy root add [<путь>]      ещё одна папка с проектами — корень workspace (без пути — текущий
+                               каталог); --tree <ветка> — её место в дереве слоёв layers/tree;
+                               каталог, который сам проект (git-репо), корнем станет папкой
+                               с проектами — miksy объяснит и спросит (--yes — без вопроса).
+                               miksy root remove <путь> — убрать корень (--forget — как у clean);
+                               miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
 
 Настройки, добавленные агенту напрямую (claude mcp add и т. п.)
@@ -120,6 +134,9 @@ let runAgents = new Set<string>();
 let allMode = false;
 // Получила ли группа правила в этом запуске (--dry-run: по плану; иначе — по учёту после записи)
 let groupRulesRun = new Map<string, boolean>();
+// clean каталога, до которого не дотянуться (диск не подключён): каталог → забыть записанное туда (--forget
+// или «да» на вопрос) или оставить в учёте до возвращения диска
+let forgetDirs = new Map<string, boolean>();
 
 // Состояние одного запуска sync/clean: мастер setup выполняет несколько команд в одном процессе
 function resetRun() {
@@ -132,6 +149,7 @@ function resetRun() {
   runAgents = new Set();
   allMode = false;
   groupRulesRun = new Map();
+  forgetDirs = new Map();
 }
 const groupKey = (adapter: Adapter, dir: string) => `${adapter.id}|${fold(pathKey(dir))}`;
 const groupRules = (adapter: Adapter, manifest: Manifest) => (dir: string) =>
@@ -159,7 +177,7 @@ const groupChanged = (st: TargetState, cmd: "sync" | "clean", t: TargetSpec) => 
 
 // Skills, которые в цели уже доставили другие агенты: этого запуска — по его результатам, остальные — по учёту
 const skillsDelivered = (t: TargetSpec, manifest: Manifest) =>
-  [...(deliveredSkills.get(t.title) ?? []), ...(t.target.scope === "project" ? ledgerSkills(manifest, t.target.dir, runAgents) : [])];
+  [...(deliveredSkills.get(targetKey(t)) ?? []), ...(t.target.scope === "project" ? ledgerSkills(manifest, t.target.dir, runAgents) : [])];
 
 // Файлы local/secrets, созданные miksy (Manifest.secretFiles): только их prune может удалить
 // (created — реально созданные этим запуском; существовавший файл пользователя не захватывается)
@@ -187,10 +205,35 @@ function runTarget(
 ): number {
   let result: RenderResult = { files: [], warnings: [], ...(cmd === "clean" && { clean: true }) };
   const id = targetId(adapter, t.target);
-  const prev = manifest.targets[id] ?? emptyState();
+  // Каталог цели недоступен: clean убирает только достижимое (near); записи внутри каталога (far) остаются
+  // в учёте или забываются
+  const forget = cmd === "clean" && t.target.scope === "project" ? forgetDirs.get(fold(pathKey(t.target.dir))) : undefined;
+  const whole = manifest.targets[id] ?? emptyState();
+  const parts = forget === undefined ? null : splitState(whole, (t.target as { dir: string }).dir);
+  const far = parts && !forget ? parts.far : null;
+  const prev = parts ? parts.near : whole;
+  // Состояние цели после clean: снятое достижимое + оставленное на недоступном диске
+  const withFar = (st: TargetState) => (far ? joinStates(st, far) : st);
+  // Отметка «проект забыт» (manifest.ts: ForgottenMark): план с ней убирает ненужные файлы miksy без учёта; снимает
+  // её первый sync или clean, дошедший до проекта (каталог доступен: clean недоступного каталога без записей на нём
+  // до проекта не доходит — рецензия 6x)
+  const reached = forget === undefined && t.target.scope === "project" && !stranded(t.target.dir, machine);
+  const mark = reached ? manifest.forgotten?.[id] : undefined;
+  // Снять отметки каталога: свою и агентов, которых больше нет в agents (их цели sync не обходит — отметка ждала бы
+  // их возвращения и сработала бы через месяцы). true — учёт изменился
+  const unmark = () => {
+    if (!reached || "dry-run" in flags || !manifest.forgotten) return false;
+    const dir = fold(id.slice(id.indexOf("|") + 1));
+    const agents = new Set(agentsFor(machine).map((a) => a.id));
+    const done = Object.keys(manifest.forgotten).filter((k) => k === id
+      || (fold(k.slice(k.indexOf("|") + 1)) === dir && !agents.has(k.slice(0, k.indexOf("|")))));
+    for (const k of done) delete manifest.forgotten[k];
+    if (!Object.keys(manifest.forgotten).length) delete manifest.forgotten;
+    return done.length > 0;
+  };
   // Файлы других целей: один канонический файл — один владелец (общая ссылка каталогов skills)
   const owners = otherOwners(manifest, id);
-  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners);
+  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners, mark);
   let actions: ReturnType<typeof plan>;
   let secrets: Record<string, string> = {};
   try {
@@ -211,6 +254,8 @@ function runTarget(
   }
   const p = result.trustPending;
   if (cmd === "sync" && p && !p.declined) pendingTrust.set(`${fold(pathKey(p.dir))}|${p.agent}`, { p, adapter, t });
+  // «Да», сохранённое прежним расчётом отпечатка, — на новый (doctor и --dry-run не сохраняют)
+  if (cmd === "sync" && result.trustRenew && !("dry-run" in flags)) renewDecision(result.trustRenew);
   if (cmd === "sync") result.warnings.push(...literalHints(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id));
   observe?.({ agent: adapter.id, title: t.title, scope: t.target.scope, ...(t.target.scope === "project" && { dir: t.target.dir }), actions, warnings: result.warnings });
   let conflicts = actions.filter((a) => a.kind === "conflict").length;
@@ -236,27 +281,37 @@ function runTarget(
   }
 
   if (!actions.length && !secretPlan.length) {
-    deliveredSkills.set(t.title, [...(deliveredSkills.get(t.title) ?? []), ...deliveredSkillNames(result, actions, t.target)]);
+    deliveredSkills.set(targetKey(t), [...(deliveredSkills.get(targetKey(t)) ?? []), ...deliveredSkillNames(result, actions, t.target)]);
     // При --all цель без изменений печатается, только если есть предупреждения — чтобы было видно, чьи они
     if (!quiet || result.warnings.length) console.log(`${t.title}: изменений нет`);
     for (const w of result.warnings) console.log("  предупреждение: " + w);
     // Учёт нужных секретов — и без изменений файлов (учёт прежней версии их не знал)
     const st = manifest.targets[id];
     const names = runSecrets.get(id)!;
+    // Достижимого нет, а записанное на недоступном диске забывается
+    if (st && forget && !("dry-run" in flags)) {
+      if (hasRecords(prev)) manifest.targets[id] = prev;
+      else delete manifest.targets[id];
+      markForgotten(manifest, id, adapter, whole, parts!.far);
+      saveManifest(manifest);
+      return 0;
+    }
+    let dirty = unmark();
     if (st && !("dry-run" in flags) && (JSON.stringify(st.secrets ?? []) !== JSON.stringify(names) || JSON.stringify(st.servers ?? {}) !== JSON.stringify(servers) || groupChanged(st, cmd, t))) {
       if (names.length) st.secrets = names;
       else delete st.secrets;
       setServers(st, servers);
       markGroup(st, cmd, t);
-      saveManifest(manifest);
+      dirty = true;
     }
+    if (dirty) saveManifest(manifest);
     return 0;
   }
   console.log(`${t.title}${isGroup(cmd, t) ? ` (${markedKind(t.target)})` : ""}  [${t.cfg.layers.join(" → ") || "—"}]\n` + [...secretPlan, ...actions.map(describe)].join("\n"));
   for (const w of result.warnings) console.log("  предупреждение: " + w);
   for (const n of wanted) secretsDone.add(n);
   if ("dry-run" in flags) {
-    deliveredSkills.set(t.title, [...(deliveredSkills.get(t.title) ?? []), ...deliveredSkillNames(result, actions, t.target)]);
+    deliveredSkills.set(targetKey(t), [...(deliveredSkills.get(targetKey(t)) ?? []), ...deliveredSkillNames(result, actions, t.target)]);
     return conflicts;
   }
   // Файлы секретов — до конфигов агента: opencode с {file:} на ещё не созданный файл не стартует
@@ -275,7 +330,7 @@ function runTarget(
     const done = applyPlanned(makePlan, prev, actions, (again) =>
       console.log("  файл изменился во время sync — план пересчитан:\n" + again.map(describe).join("\n")));
     state = done.state;
-    deliveredSkills.set(t.title, [...(deliveredSkills.get(t.title) ?? []), ...deliveredSkillNames(result, done.actions, t.target)]);
+    deliveredSkills.set(targetKey(t), [...(deliveredSkills.get(targetKey(t)) ?? []), ...deliveredSkillNames(result, done.actions, t.target)]);
     writtenMerges.push(done);
     conflicts = done.actions.filter((a) => a.kind === "conflict").length;
   } catch (e) {
@@ -293,12 +348,63 @@ function runTarget(
   else delete state.secrets;
   setServers(state, conflicts || failed ? unionServers(prev.servers, servers) : servers);
   markGroup(state, cmd, t);
-  if (Object.keys(state.files).length || Object.keys(state.blocks ?? {}).length || Object.keys(state.trust ?? {}).length || Object.keys(state.approvals ?? {}).length || Object.keys(state.merges).length || Object.keys(state.exclude).length || Object.keys(state.toml ?? {}).length || (cmd === "sync" && conflicts) || (cmd === "clean" && conflicts && state.group))
+  // Доверие ставил miksy (сейчас, раньше или до «забыть») — помнится, пока цель в учёте; clean снимает
+  if (cmd === "clean") delete state.everTrusted;
+  else if (adapter.id === "claude" && t.target.scope === "project" && (trustedByMiksy(prev, mark) || Object.keys(state.trust ?? {}).length > 0)) state.everTrusted = true;
+  state = withFar(state);
+  if (hasRecords(state) || (cmd === "sync" && conflicts) || (cmd === "clean" && conflicts && state.group))
     manifest.targets[id] = state;
   else delete manifest.targets[id];
+  if (forget) markForgotten(manifest, id, adapter, whole, parts!.far);
+  else if (!failed) unmark();
   saveManifest(manifest);
   return conflicts + failed;
 }
+
+// «Забыть» (forget): учёт помнит только факт «проект забыт» и, для Claude, ставил ли miksy доверие (ответы
+// пользователя в окне Claude — его, trust.ts: dialogOwn) — если на недоступном диске было что забывать
+function markForgotten(manifest: Manifest, id: string, adapter: Adapter, whole: TargetState, far: TargetState) {
+  if (!hasRecords(far)) return;
+  (manifest.forgotten ??= {})[id] = adapter.id === "claude" && trustedByMiksy(whole) ? { trusted: true } : {};
+}
+
+// Цели clean, чей каталог недоступен (src/registry.ts: stranded), сколько записанного miksy лежит внутри и у скольких
+// из этих файлов есть оригинал — копия прежнего файла пользователя в local/backups/originals/
+type Stranded = { dir: string; count: number; originals: number };
+function strandedTargets(targets: TargetSpec[], manifest: Manifest, adapters: Adapter[], machine: Machine): Stranded[] {
+  const out: Stranded[] = [];
+  for (const t of targets) {
+    if (t.target.scope !== "project" || !stranded(t.target.dir, machine)) continue;
+    const dir = t.target.dir;
+    const far = adapters.map((a) => splitState(manifest.targets[targetId(a, t.target)] ?? emptyState(), dir).far);
+    const paths = new Set(far.flatMap((st) => [...strandedPaths(st)]));
+    const originals = new Set(far.flatMap((st) => Object.keys(st.originals ?? {}))).size;
+    if (paths.size) out.push({ dir, count: paths.size, originals });
+  }
+  return out;
+}
+// После «забыть» — как вернуть файлы под учёт, если диск найдётся: sync проекта (совпадающие с нынешним
+// выводом miksy узнает и возьмёт сам, изменённые — --force), не нужны — затем clean. sync работает только
+// в workspace: проект вне всех корней — сначала вернуть его папку корнем (root add). root remove --forget
+// печатает подсказку один раз на корень (regainRoot) — с путём и веткой корня
+let regainRoot: Root | null = null;
+// Аргумент команды в подсказке: с пробелами и прочим — в кавычках
+const shellArg = (s: string) => (/^[\w./-]+$/.test(s) ? s : `"${s}"`);
+const syncBack = (dir: string) => `miksy sync "${dir}" — файлы miksy, совпадающие с нынешними, он возьмёт обратно сам, изменённые — с miksy sync "${dir}" --force (бэкап будет); если они не нужны — после этого miksy clean "${dir}"`;
+export const strandedText = (s: Stranded, forgot: boolean, dryRun: boolean, machine?: Machine) => {
+  if (!forgot)
+    return `На недоступном диске ${dryRun ? "останется" : "осталось"} записанное miksy — ${s.count} файлов в ${s.dir}: подключите диск и повторите miksy clean "${s.dir}"; данных больше нет — miksy clean "${s.dir}" --forget.`;
+  // «Забыть» значит забыть: оригиналы (miksy когда-то заменил файлы пользователя) сами на место не вернутся
+  const copies = s.originals ? ` Копии ваших прежних файлов (${s.originals}), которые miksy когда-то заменил, ${dryRun ? "останутся" : "остаются"} в ${slash(join(configRoot(), "local", "backups", "originals"))}/ — сами на место не вернутся.` : "";
+  const done = `${dryRun ? "План: записанное" : "Записанное"} в ${s.dir} (${s.count} файлов на недоступном диске) ${dryRun ? "будет забыто" : "забыто"}.${copies}`;
+  if (regainRoot && locate(s.dir, [regainRoot])) return done;
+  if (machine && outsideRoots(s.dir, machine))
+    return `${done} Если диск найдётся: сначала верните корнем workspace папку, в которой лежит этот проект (miksy root add "<папка>" --tree <ветка>), затем ${syncBack(s.dir)}.`;
+  return `${done} Если диск найдётся: ${syncBack(s.dir)}.`;
+};
+
+// Есть ли в учёте цели что-то записанное (иначе запись цели не нужна)
+const hasRecords = (st: TargetState) => [st.files, st.blocks, st.trust, st.approvals, st.merges, st.exclude, st.toml].some((x) => x && Object.keys(x).length);
 
 // Пустые каталоги обёрток после clean/удаления серверов
 function removeEmptyDirs(dir: string): boolean {
@@ -314,8 +420,8 @@ function removeEmptyDirs(dir: string): boolean {
 function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest: Manifest): number {
   const id = targetId(adapter, t.target);
   const prev = manifest.targets[id] ?? emptyState();
-  const r = renderFor(adapter, t, machine, loadSecrets(), prev, deliveredSkills.get(t.title));
-  const planned = plan(r.result, t.target, machine, prev, false, adapter.id, otherOwners(manifest, id));
+  const r = renderFor(adapter, t, machine, loadSecrets(), prev, deliveredSkills.get(targetKey(t)));
+  const planned = plan(r.result, t.target, machine, prev, false, adapter.id, otherOwners(manifest, id), manifest.forgotten?.[id]);
   const actions = planned.filter((a) => a.kind === "trust" || a.kind === "approve" || (a.kind === "conflict" && /\/(\.codex\/config\.toml|\.claude\.json|\.claude\/settings\.local\.json)$/.test(a.abs)));
   // Файл одобрений скрыт от git вместе с одобрением — до его создания (Г10)
   const ex = t.target.scope === "project" ? approvalExclude(planned, t.target.dir) : null;
@@ -327,6 +433,8 @@ function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest:
   console.log(actions.map(describe).join("\n"));
   try {
     const { state } = apply(actions, prev);
+    // Доверие ставил miksy (сейчас, раньше или до «забыть») — помнится и после отказа (trust --deny)
+    if (adapter.id === "claude" && t.target.scope === "project" && (trustedByMiksy(prev, manifest.forgotten?.[id]) || Object.keys(state.trust ?? {}).length > 0)) state.everTrusted = true;
     manifest.targets[id] = state;
     saveManifest(manifest);
   } catch (e) {
@@ -353,6 +461,76 @@ function decideTrust(list: { p: PendingTrust; adapter: Adapter; t: TargetSpec }[
   return conflicts;
 }
 
+// Каталоги, где агенты уже работали (их реестры проектов): тоже проекты, и без git
+const agentDirs = (machine: Machine) => new Set(Object.values(ADAPTERS).flatMap((a) => a.knownDirs?.(machine) ?? []).flatMap((d) => { try { return [fold(pathKey(d))]; } catch { return []; } }));
+
+// Каталог для root add, который сам проект: git-репо (без проектов внутри), проект или цель target: true другого
+// корня, каталог с записанным miksy. Текст — общий с мастером setup (projectRootText); иначе null
+function projectRoot(dir: string, machine: Machine, roots: Root[]): string | null {
+  const at = locate(dir, roots);
+  const group = at && at.rel !== "" ? listGroups(machine).some((g) => sameKey(g.abs, dir)) : false;
+  const recorded = Object.keys(loadManifestMoved(machine).manifest.targets).some((id) => fold(id.slice(id.indexOf("|") + 1)) === fold(pathKey(dir)));
+  return projectRootText(dir, machine.home, roots, { group, recorded });
+}
+
+// Цель одного sync (и sync --out): по пути или (без пути) по текущему каталогу.
+// Без пути — только то, что и так цель: проект (git-репо или каталог, где работал агент) или его
+// подпапка, цель target: true или её подпапка (ближайшая цель вверх). Корень workspace, каталог без git,
+// который не цель, и каталог вне workspace — ошибка с подсказкой, без записи: новую цель создают явно.
+// Явный путь — как раньше: проект вверх до git, иначе сам каталог; plain — он не цель (sync --all его
+// не обновит) — предупредить
+function syncProject(path: string | undefined, machine: Machine, out: boolean): { p: Project; plain: boolean } {
+  const roots = machineRoots(machine);
+  const list = roots.map((r) => r.path).join(", ");
+  const how = out ? "sync --out без пути показывает" : "sync без пути пишет";
+  const rootError = (abs: string) => new UsageError(`${abs} — корень workspace, а не проект: ${path === undefined || path === "." ? `${out ? "sync --out" : "sync"} без пути (и с путём «.»)` : "sync <путь>"} — для одного проекта. Все проекты — miksy sync --all, домашние настройки агентов — miksy sync --global`);
+  const groups = listGroups(machine);
+  const known = agentDirs(machine);
+  const isGroup = (d: string) => groups.find((g) => sameKey(g.abs, d));
+  if (path === undefined) {
+    const cwd = slash(realpathSync.native(process.cwd()));
+    // Служебные каталоги miksy (копии и бэкапы в out/, local/, dist/ движка и конфигурации) — не проекты:
+    // их пропускают projects, sync --all и target
+    if (serviceDir(cwd))
+      throw new UsageError(`${cwd} — служебный каталог miksy (копии, бэкапы, сборки): настройки сюда не пишутся. Проект — miksy ${out ? "sync <путь проекта> --out <каталог>" : "sync <путь проекта>"}; все проекты — miksy sync --all`);
+    const at = locate(cwd, roots);
+    if (!at) {
+      // Совет — по месту: каталог, в котором лежит корень (D:\ при корне D:/ai), домашний или корень диска
+      // корнем делать не стоит — им стал бы весь диск или дом
+      // В git-репо (или его подкаталоге) — что сделает его проектом: корень — папка, где он лежит (корнем сам репо
+      // стал бы папкой с проектами, а не проектом, — рецензия 6x, B3)
+      const holds = roots.find((r) => inside(r.path, cwd));
+      const unsafe = unsafeWorkspace(cwd, machine.home);
+      // Репо — дом или диск целиком (dotfiles и т. п.) — не проект: подсказка как вне git
+      const above = holds ? null : repoAbove(cwd);
+      const repo = above && !unsafeWorkspace(above, machine.home) ? above : null;
+      const hint = holds ? `в нём лежит корень workspace ${holds.path} — перейдите в каталог проекта внутри него`
+        : repo ? `${sameKey(repo, cwd) ? "это git-репо" : `каталог лежит в git-репо ${repo}`} вне workspace. Чтобы miksy писал в него настройки проекта, ${outsideRepoAdvice(repo, machine.home, roots)}`
+        : unsafe ? `корнем его делать не стоит (${unsafe})`
+        // Корень — папка с проектами: без проектов внутри root add . дал бы «Проектов в нём: 0» (рецензия 6y)
+        : containsProjects(cwd) ? "сделать этот каталог корнем workspace — miksy root add ."
+        : `проектов (git-репо) в нём нет, а корень workspace — папка с проектами. Сделать его проектом — git init в нём, затем ${outsideRepoAdvice(cwd, machine.home, roots)}; если сюда вы будете класть проекты — miksy root add .`;
+      throw new UsageError(`${cwd} — каталог вне workspace (${list}); ${how} настройки проекта, в каталоге которого вы находитесь. Здесь: ${hint}; ${out ? "домашние настройки агентов в песочницу — miksy sync --global --out <каталог>" : "домашние настройки агентов — miksy sync --global"}`);
+    }
+    // Корень, содержащий домашний каталог, отклоняет projectTarget — своим сообщением (про дом)
+    if (!at.rel) {
+      if (inside(machine.home, cwd)) return { p: findProject(cwd, roots), plain: false };
+      throw rootError(cwd);
+    }
+    for (let d = cwd; inside(d, at.root.path) && !sameKey(d, at.root.path); d = slash(dirname(d))) {
+      if (existsSync(join(d, ".git"))) return { p: findProject(d, roots), plain: false };
+      const g = isGroup(d);
+      if (g) return { p: { abs: g.abs, rel: g.rel, nested: g.nested, root: at.root }, plain: false };
+      if (known.has(fold(d)) && !containsProjects(d)) return { p: findProject(d, roots), plain: false };
+    }
+    throw new UsageError(`${cwd} — не проект: каталог без git и не цель${containsProjects(cwd) ? " (внутри — проекты)" : ""}; ${how} настройки только проекту или цели. Сделать его проектом — git init, целью без git — miksy target; все проекты — miksy sync --all`);
+  }
+  const p = findProject(path, roots);
+  if (roots.some((r) => sameKey(r.path, p.abs)) && !inside(machine.home, p.abs)) throw rootError(p.abs);
+  const plain = !existsSync(join(p.abs, ".git")) && !isGroup(p.abs) && !known.has(fold(pathKey(p.abs)));
+  return { p, plain };
+}
+
 // Одна команда miksy: код выхода (0 — успех, 1 — проблемы doctor, 3 — конфликты). Ошибки — исключения
 // (UsageError — код 2, Cancelled — отказ в подтверждении). io.ask — вопросы (по умолчанию — терминал,
 // если он есть); io.observe — план каждой цели sync/clean. Кеш git — на одну команду (если включён)
@@ -371,32 +549,60 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
   switch (cmd) {
     case "explain": {
       const machine = loadMachine();
+      const roots = machineRoots(machine);
       let title: [string, string][];
       let cfg: Resolved;
-      // Каталог вне workspace получает только глобальные настройки — их и показываем
-      const abs = positional[0] ? slash(realpathSync.native(resolve(positional[0]))) : "";
-      const outside = abs && !inside(abs, slash(realpathSync.native(machine.workspace)));
-      if (outside) {
+      // Без пути — текущий каталог (как sync); --global — домашние настройки агентов. Каталог вне всех
+      // корней workspace получает только глобальные настройки — их и показываем
+      if (positional[0] !== undefined && !existsSync(driveRoot(positional[0]))) findProject(positional[0], roots); // понятная ошибка «каталога нет»
+      const abs = "global" in flags ? "" : slash(realpathSync.native(resolve(driveRoot(positional[0] ?? "."))));
+      // Без пути в служебном каталоге miksy — как у sync: это не проект
+      if (abs && positional[0] === undefined && serviceDir(abs))
+        throw new UsageError(`${abs} — служебный каталог miksy (копии, бэкапы, сборки): настроек он не получает. Что получит проект — miksy explain <путь проекта>`);
+      const place = abs ? locate(abs, roots) : null;
+      const many = roots.length > 1 || roots.some((r) => r.tree);
+      // Вложенный корень — справка: внутри какого корня он лежит
+      const rootRows = (r: Root, tree: string): [string, string][] => {
+        const outer = outerRoot(r, roots);
+        return many ? [["Корень", `${r.path}${outer ? ` (внутри корня ${outer.path})` : ""}`], ["Место в дереве", `layers/tree${tree ? `/${tree}` : ""}`]] : [];
+      };
+      if (!abs) {
+        ({ cfg } = globalTarget(machine));
+        title = [["Цель", `домашний каталог агентов (${machine.home})`], ["ОС", machine.os]];
+      } else if (!place) {
         ({ cfg } = globalTarget(machine));
         title = [["Каталог", abs], ["Цель",`вне workspace — только глобальные настройки (${machine.home})`], ["ОС", machine.os]];
-      } else if (positional[0]) {
-        const p = findProject(positional[0], machine.workspace);
+      } else if (!place.rel) {
+        // Сам корень — не цель: показываем слои, общие для его проектов
+        cfg = merge(layersOf(place.tree, machine), machine.os);
+        title = [["Корень workspace", place.abs], ...rootRows(place.root, place.tree).slice(1), ["Цель", "корень — не цель; это слои, общие для его проектов (каждый проект получит ещё свои)"], ["ОС", machine.os]];
+      } else {
+        // Без пути — как sync без пути (подпапка цели — сама цель); каталог без git, который не цель, —
+        // его слои с пометкой, что настроек он не получает
+        let p = findProject(abs, roots);
+        let plain = !existsSync(join(p.abs, ".git"));
+        if (plain) {
+          try { ({ p, plain } = syncProject(positional[0], machine, false)); }
+          catch (e) { if (!(e instanceof UsageError)) throw e; }
+        }
         const t = projectTarget(p.abs, p.rel, machine, p.nested);
         cfg = t.cfg;
-        title = [[t.target.scope === "project" && t.target.group ? (t.target.nested ? "Цель-группа" : "Цель без git") : "Проект", p.rel || "(корень workspace)"], ["Каталог", p.abs], ["ОС", machine.os]];
+        title = [[t.target.scope === "project" && t.target.group ? (t.target.nested ? "Цель-группа" : "Цель без git") : plain ? "Каталог без git" : "Проект", t.title], ["Каталог", p.abs], ...rootRows(p.root, p.rel), ["ОС", machine.os]];
+        // Ветка корня внутри чужого места — справка с рекомендацией
+        const note = branchNote(p.root, roots);
+        if (note) title.push(["Ветка корня", note]);
+        if (plain)
+          title.push(["Цель", `не проект и не цель — sync --all его не обновит (sync <путь> запишет разово); сделать целью — miksy target, проектом — git init`]);
         // Ниже группы: агенты, читающие правила родительских каталогов (Claude), получают здесь только отрезок
         const below = cfg.below;
         if (below) title.push(
           ["Группа выше", below.groups.map((g) => g.rel).join(" → ")],
           ["Claude здесь", `правила только слоёв ${below.layers.join(" → ") || "—"} (остальные — из файлов групп выше)`]);
-      } else {
-        ({ cfg } = globalTarget(machine));
-        title = [["Цель", `домашний каталог агентов (${machine.home})`], ["ОС", machine.os]];
       }
       title.unshift(["Конфигурация", configRoot().replaceAll("\\", "/")]);
       title.unshift(["Движок miksy", ENGINE.replaceAll("\\", "/")]);
       console.log(formatResolved(title, cfg, machine, loadSecrets()));
-      if (positional[0] && !outside) console.log("\n(+ глобальные слои — см. `miksy explain` без пути)");
+      if (place) console.log("\n(+ глобальные слои — см. `miksy explain --global`)");
       break;
     }
 
@@ -405,7 +611,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const mine = agentsFor(machine, flags.agent).map((a) => a.id) as AgentId[];
       const list = "all" in flags
         ? allProjects(machine, undefined, (w) => console.log("предупреждение: " + w))
-        : positional[0] ? [findProject(positional[0], machine.workspace)]
+        : positional[0] ? [findProject(positional[0], machineRoots(machine))]
         : (() => { throw new UsageError("укажите путь проекта или --all"); })();
       let total = 0, broken = 0, unseen = 0;
       for (const p of list) {
@@ -426,11 +632,16 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const groups = listGroups(machine, warn);
       const repoNote = workspaceRepoNote(machine, groups);
       if (repoNote) warn(repoNote);
+      for (const n of [...rootNotes(machine, groups), ...clashNotes(machine)]) warn(n);
+      const roots = machineRoots(machine);
+      // Вложенный корень — справка у самого корня
+      if (roots.length > 1 || roots.some((r) => r.tree))
+        console.log(`Корни workspace (${roots.length}):\n${roots.map((r) => { const o = outerRoot(r, roots); return `  ${rootText(r)}${o ? `  (внутри корня ${o.path})` : ""}${rootExists(r) ? "" : "  — недоступен"}`; }).join("\n")}\n`);
       const gdirs = new Set(groups.map((g) => fold(g.abs)));
       const list = allProjects(machine, flags.agent ? agentsFor(machine, flags.agent) : undefined, warn).filter((p) => !gdirs.has(fold(pathKey(p.abs))));
       const rows = [
-        ...groups.map((g) => ({ rel: g.rel, note: `   (${markedKind(g)}: target: true в layer.yaml${g.git ? ", git-репо" : ""})` })),
-        ...list.map((p) => ({ rel: p.rel, note: p.nested ? "   (внутри есть другие проекты — CLAUDE.local.md сюда не пишется)" : "" })),
+        ...groups.map((g) => ({ rel: titleOf(g.rel, g.root, machine), note: `   (${markedKind(g)}: target: true в layer.yaml${g.git ? ", git-репо" : ""})` })),
+        ...list.map((p) => ({ rel: titleOf(p.rel, p.root, machine), note: p.nested ? "   (внутри есть другие проекты — CLAUDE.local.md сюда не пишется)" : "" })),
       ].sort((a, b) => a.rel.localeCompare(b.rel));
       for (const r of rows) console.log(r.rel + r.note);
       console.log(`\nВсего: ${list.length}${groups.length ? `; помечено целями (target: true): ${groups.length}` : ""}`);
@@ -450,8 +661,19 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         if (keys.length) console.log(`предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): ${keys.join(", ")}\n`);
       }
 
+      // Одна цель sync — проект по пути или (без пути) текущего каталога: проверка до учёта и записи
+      const single = cmd === "sync" && !("all" in flags) && !("global" in flags) ? syncProject(positional[0], machine, "out" in flags) : null;
+      const one = single?.p ?? null;
+      if (cmd === "clean" && !positional[0] && !("all" in flags) && !("global" in flags))
+        throw new UsageError("clean убирает записанное — только явно: укажите путь проекта, --global или --all");
+      if (single?.plain && !("out" in flags))
+        console.log(`предупреждение: ${one!.rel} — каталог без git и не цель: sync --all его не обновит (и doctor не проверит). Сделать целью — miksy target "${one!.abs}"\n`);
+      // Ветка этой цели совпала с веткой другого корня: её слои получат обе папки
+      if (one) for (const c of treeClashes(machineRoots(machine)).filter((c) => inside(one.abs, c.dir) || inside(one.abs, c.root.path)))
+        console.log(`предупреждение: ${clashText(c)}\n`);
+
       if (cmd === "sync" && "out" in flags) {
-        const p = positional[0] ? findProject(positional[0], machine.workspace) : null;
+        const p = one;
         const t = p ? projectTarget(p.abs, p.rel, machine, p.nested) : globalTarget(machine);
         const secrets = loadSecrets();
         const { manifest } = loadManifestMoved(machine);
@@ -473,18 +695,22 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
 
       // sync --all пишет во все репо workspace: при неверном workspace (корень, ~) — подтверждение до обхода
       const writeAll = cmd === "sync" && "all" in flags && !("dry-run" in flags);
-      const unsafe = unsafeWorkspace(machine.workspace, machine.home);
-      if (writeAll && unsafe) confirm(`workspace ${machine.workspace} — ${unsafe}: sync --all запишет конфиги во все git-репо внутри`, flags);
+      const roots = machineRoots(machine);
+      const unsafe = roots.flatMap((r) => { const why = unsafeWorkspace(r.path, machine.home); return why ? [`${r.path} — ${why}`] : []; });
+      if (writeAll && unsafe.length) confirm(`workspace ${unsafe.join("; ")}: sync --all запишет конфиги во все git-репо внутри`, flags);
 
       const warn = (w: string) => console.log("предупреждение: " + w);
       allMode = "all" in flags;
       runGroups = "global" in flags ? [] : listGroups(machine, allMode ? warn : undefined);
       const repoNote = allMode && workspaceRepoNote(machine, runGroups);
       if (repoNote) warn(repoNote);
+      if (allMode) for (const n of [...rootNotes(machine, runGroups), ...clashNotes(machine)]) warn(n);
       // Учёт — с переездами каталогов: sync и clean сохраняют перенос до записи целей
-      const { manifest, moves } = loadManifestMoved(machine, "global" in flags ? undefined : runGroups);
+      const { manifest, moves, rootsChanged } = loadManifestMoved(machine, "global" in flags ? undefined : runGroups);
       const newer = newerLedger(manifest.engine);
       if (newer) console.log(`предупреждение: ${newer}\n`);
+      // Проект (цель), который стал корнем workspace: записанное в него раньше не висит молча
+      if (allMode) for (const d of rootedTargets(manifest, machine)) warn(rootedText(d, machine));
       if (moves.length) {
         console.log(`${"dry-run" in flags ? "План: учёт miksy переедет вслед за каталогами" : "Учёт miksy перенесён вслед за каталогами"}:\n${movesText(moves).join("\n")}\n`);
         if (!("dry-run" in flags)) saveMoves(manifest, moves);
@@ -492,8 +718,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const targets = allMode
         ? allTargets(machine, runGroups, warn)
         : "global" in flags ? [globalTarget(machine)]
-        : positional[0] ? [(cmd === "clean" && vanishedTarget(positional[0], manifest, machine)) || (() => { const p = findProject(positional[0], machine.workspace); return projectTarget(p.abs, p.rel, machine, p.nested, runGroups); })()]
-        : (() => { throw new UsageError("укажите путь проекта, --global или --all"); })();
+        : one ? [projectTarget(one.abs, one.rel, machine, one.nested, runGroups)]
+        : [vanishedTarget(positional[0], manifest, machine) || (() => { const p = findProject(positional[0], roots); return projectTarget(p.abs, p.rel, machine, p.nested, runGroups); })()];
 
       const adapters = agentsFor(machine, flags.agent);
       runAgents = new Set(adapters.map((a) => a.id));
@@ -505,15 +731,24 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const marked = targets.filter((t) => t.target.scope === "project" && t.target.group);
         const groupTitles = marked.filter((t) => t.target.scope === "project" && t.target.nested).map((t) => t.title);
         const bareTitles = marked.filter((t) => !groupTitles.includes(t.title)).map((t) => t.title);
-        console.log(`${cmd} --all: workspace ${machine.workspace}; проектов: ${targets.length - marked.length}; агенты: ${adapters.map((a) => a.id).join(", ")}`);
+        console.log(`${cmd} --all: workspace ${roots.map(rootText).join(", ")}; проектов: ${targets.length - marked.length}; агенты: ${adapters.map((a) => a.id).join(", ")}`);
         if (groupTitles.length) console.log(`  группы (${groupTitles.length}): ${groupTitles.join(", ")}`);
         if (bareTitles.length) console.log(`  цели без git (${bareTitles.length}): ${bareTitles.join(", ")}`);
         if (old.length) console.log(`  уже в учёте (${old.length}): ${old.map((t) => t.title).join(", ")}`);
         if (fresh.length) console.log(`  новые — miksy в них ещё не писал (${fresh.length}):\n${fresh.map((t) => "    " + t.title).join("\n")}`);
-        const plain = cmd === "sync" ? plainDirs(machine.workspace, runGroups, targets) : [];
+        const plain = cmd === "sync" ? plainDirs(roots, runGroups, targets) : [];
         if (plain.length) console.log(`  ${plainText(plain)}`);
         if (writeAll && fresh.length > NEW_TARGETS_LIMIT)
           confirm(`новых целей: ${fresh.length} (больше ${NEW_TARGETS_LIMIT}) — miksy создаст файлы в каждом из этих репо`, flags);
+      }
+      // clean каталога, до которого не дотянуться: достижимое убирается, записанное внутри — остаётся в учёте
+      // (miksy узнает свои файлы, когда диск вернётся) или забывается: --forget или «да» на вопрос
+      const unreachable = cmd === "clean" ? strandedTargets(targets, manifest, adapters, machine) : [];
+      for (const s of unreachable) {
+        let drop = "forget" in flags;
+        if (!drop && ask && !("dry-run" in flags))
+          drop = ask.yes(`Каталога ${s.dir} нет: диск не подключён или данных больше нет? Забыть записанное туда (${s.count} файлов)?`, false);
+        forgetDirs.set(fold(pathKey(s.dir)), drop);
       }
       let conflicts = 0;
       // Права local/: проверка одним снимком; исправление — только при открытых путях
@@ -540,6 +775,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         for (const t of targets) conflicts += runTarget(cmd, adapter, machine, t, manifest, flags, targets.length > 1);
       }
       // Лишние файлы секретов: не нужны ни целям этого запуска, ни остальным целям учёта
+      for (const s of unreachable) console.log(`\n${strandedText(s, forgetDirs.get(fold(pathKey(s.dir)))!, "dry-run" in flags, machine)}`);
       const needed = neededSecrets({ ...manifest, targets: Object.fromEntries(Object.entries(manifest.targets).filter(([id]) => !runSecrets.has(id))) });
       for (const names of runSecrets.values()) for (const n of names) needed.add(n);
       const pruned = pruneSecretFiles(needed, "dry-run" in flags, manifest.secretFiles ?? []);
@@ -553,17 +789,21 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         }
       }
       if (!("dry-run" in flags)) removeEmptyDirs(join(configRoot(), "local", "run"));
+      // Настоящие пути корней — в учёт, даже если цели не изменились: без них цели корня-ссылки, ставшего
+      // недоступным, выглядели бы пропавшими (src/load.ts: parseRoots)
+      if (!("dry-run" in flags) && rootsChanged && Object.keys(manifest.targets).length) saveManifest(manifest);
 
       // Доверие проектам с исполняемыми настройками агента: в терминале — вопрос по каждому (--yes его
       // не снимает); без терминала и в --dry-run — список и указание агенту спросить пользователя
       if (pendingTrust.size) {
         const list = [...pendingTrust.values()];
-        console.log(`\nНужно решение пользователя о доверии (${list.length}) — у проектов исполняемые настройки агента команды; без решения miksy доверие не ставит:`);
+        console.log(`\nНужно решение пользователя о доверии (${list.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне Claude, чужие файлы); без решения miksy доверие не ставит:`);
         if (!("dry-run" in flags) && ask) conflicts += decideTrust(list, machine, manifest);
         else console.log(`${pendingText(list.map((x) => x.p)).join("\n")}\n${AGENT_NOTE}`);
       }
 
-      if ("dry-run" in flags) console.log("\n--dry-run: ничего не записано.");
+      // План root remove --forget --dry-run по проектам (regainRoot): итог печатает он сам
+      if ("dry-run" in flags) { if (!regainRoot) console.log("\n--dry-run: ничего не записано."); }
       else {
         console.log(`\nГотово. Бэкапы этого запуска: ${runDir() ?? "не понадобились"} (хранятся последние ${KEEP_RUNS} запусков)`);
         // Записанные ключи общих файлов — на месте ли сразу после записи (без паузы); перезапись
@@ -588,7 +828,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (!name || !("to" in flags)) throw new UsageError("Использование: miksy adopt <путь проекта> <имя> --to <уровень>  |  miksy adopt --global <имя> --to <уровень>");
       const level = flags.to;
       layerDir(level); // проверка уровня
-      const t = isGlobal ? globalTarget(machine) : (() => { const p = findProject(positional[0], machine.workspace); return projectTarget(p.abs, p.rel, machine, p.nested); })();
+      const t = isGlobal ? globalTarget(machine) : (() => { const p = findProject(positional[0], machineRoots(machine)); return projectTarget(p.abs, p.rel, machine, p.nested); })();
       const secrets = loadSecrets();
       const { manifest, moves } = loadManifestMoved(machine);
       const mcps = agentsFor(machine, flags.agent).flatMap((a) => foreignMcp(a, renderFor(a, t, machine, secrets, manifest.targets[targetId(a, t.target)]).cfg, t.target, machine)).filter((f) => f.name === name);
@@ -608,7 +848,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const src = mcps[0];
         const codexSource = isGlobal && mcps.find((m) => m.agent === "codex");
         if (codexSource) adoptCodexTable(manifest, machine, name, codexSource.def, true);
-        const { server, secrets: found, open } = fromNative(name, src.def, src.agent, machine, level, secrets);
+        // ${WORKSPACE} — только пути основного корня (при любом --to); пути в другие корни — как есть
+        const { server, secrets: found, open, elsewhere } = fromNative(name, src.def, src.agent, machine, level, secrets);
         const comment = `Поднято из ${src.agent} (${src.source}) командой miksy adopt`;
         // План до записи: что попадёт в слой (только ссылки), какие секреты уйдут в local/secrets.env, что осталось
         const file = adoptMcp(server, found, level, comment, undefined, true);
@@ -618,6 +859,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         if (open.length)
           console.log(`  ВНИМАНИЕ: похоже на секрет, но не распознано — останется в слое открытым текстом: ${open.join(", ")}\n` +
             "  проверьте файл после записи и замените значение ссылкой ${ИМЯ}");
+        if (elsewhere.length) console.log(elsewhereText(elsewhere).join("\n"));
         if ("dry-run" in flags) {
           console.log("\n--dry-run: ничего не записано.");
           break;
@@ -665,7 +907,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (!ask && !positional[0]) throw new UsageError("без терминала укажите проект: miksy trust <проект> --confirm | --deny");
       const groups = listGroups(machine);
       const targets = positional[0]
-        ? [(() => { const p = findProject(positional[0], machine.workspace); return projectTarget(p.abs, p.rel, machine, p.nested, groups); })()]
+        ? [(() => { const p = findProject(positional[0], machineRoots(machine)); return projectTarget(p.abs, p.rel, machine, p.nested, groups); })()]
         : allTargets(machine, groups);
       const { manifest, moves } = loadManifestMoved(machine, groups);
       saveMoves(manifest, moves);
@@ -677,18 +919,20 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           const id = targetId(adapter, t.target);
           const prev = manifest.targets[id] ?? emptyState();
           const r = renderFor(adapter, t, machine, secrets, prev);
-          plan(r.result, t.target, machine, prev, false, adapter.id, otherOwners(manifest, id));
+          plan(r.result, t.target, machine, prev, false, adapter.id, otherOwners(manifest, id), manifest.forgotten?.[id]);
           let p = r.result.trustPending;
           // Названный проект — решение можно пересмотреть, даже если оно уже есть
           if (!p && positional[0]) {
-            const exec = executableSettings(t.target.dir, !!t.target.git, adapter.id as TrustAgent, ownFiles(prev, t.target.dir));
+            const dialog = adapter.id === "claude" && dialogOwn(prev, t.target.dir, r.result.trust?.claude?.item === true, manifest.forgotten?.[id]);
+            // Свои файлы — те же, что у sync в этом состоянии (с узнанными планом после «забыть»)
+            const exec = executableSettings(t.target.dir, !!t.target.git, adapter.id as TrustAgent, { ...(r.result.trustOwn ?? ownFiles(prev, t.target.dir)), dialog });
             const mcp = adapter.id === "claude" ? mcpJsonServers(t.target.dir, !!t.target.git) : null;
             if (exec) p = { dir: t.target.dir, rel: t.target.rel, agent: adapter.id as TrustAgent, ...exec, ...(mcp && { mcp: { fingerprint: mcp.fingerprint } }) };
           }
           if (p && (!p.declined || positional[0])) list.push({ p, adapter, t });
         }
       if (!list.length) {
-        console.log(positional[0] ? "Исполняемых настроек агента команды нет — решение не нужно: доверие ставит sync по умолчанию." : "Решения о доверии не ждёт ни один проект.");
+        console.log(positional[0] ? "Исполняемых настроек агента не от miksy нет — решение не нужно: доверие ставит sync по умолчанию." : "Решения о доверии не ждёт ни один проект.");
         break;
       }
       const conflicts = decideTrust(list, machine, manifest, answer);
@@ -700,7 +944,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Пометка target: true в слое дерева: каталог без git становится целью (над проектами — группой)
       const machine = loadMachine();
       const remove = "remove" in flags;
-      const { abs, rel } = targetDir(positional[0] ?? ".", machine.workspace, machine.home, remove);
+      const { abs, rel } = targetDir(positional[0] ?? ".", machineRoots(machine), machine.home, remove);
       const p = markPlan(layerPath(rel), remove);
       const file = slash(relative(configRoot(), p.file));
       if (p.after === p.before) console.log(remove ? `${rel}: не помечен целью (${file}) — снимать нечего` : `${rel}: уже цель (${file}: target: true)`);
@@ -723,7 +967,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (!remove) {
         const warns: string[] = [];
         if (!listGroups(machine, (w) => warns.push(w)).some((g) => samePath(g.abs, abs))) {
-          for (const w of warns.filter((x) => x.toLowerCase().startsWith(`цель ${rel.toLowerCase()} (target: true):`))) console.log(`предупреждение: ${w}`);
+          for (const w of warns.filter((x) => x.toLowerCase().startsWith(`цель ${rel.toLowerCase()} (target: true)`))) console.log(`предупреждение: ${w}`);
           return 1;
         }
         next = nested ? ["sync", { all: "" }, [], "Записать настройки: miksy sync --all (цель и проекты ниже неё)?"]
@@ -755,6 +999,178 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // пометки — проект: sync --all снова запишет туда настройки
       if (cmd2 === "clean" && exists && allProjects(machine).some((x) => samePath(x.abs, abs)))
         console.log(`\nВнимание: ${rel} и без пометки — проект: в нём работал агент (его реестр проектов), sync --all снова запишет туда настройки.`);
+      break;
+    }
+
+    case "root": {
+      // Корни workspace (local/machine.yaml → workspace): список, добавить, убрать. Пишется только ключ
+      // workspace; учёт и записанное в проекты — только с согласия (root remove)
+      const machine = loadMachine();
+      const roots = machineRoots(machine);
+      const warn = (w: string) => console.log("предупреждение: " + w);
+      const file = join(configRoot(), "local", "machine.yaml");
+      const text = readFileSync(file, "utf8");
+      const items = rootItems((parseYaml(text) as { workspace?: unknown } | null)?.workspace);
+      if (!positional.length) {
+        console.log(`Корни workspace (${roots.length}):`);
+        for (const [i, r] of roots.entries()) {
+          const o = outerRoot(r, roots);
+          console.log(`  ${rootText(r)}${i === 0 ? "  (основной)" : ""}${o ? `  (внутри корня ${o.path})` : ""}${rootExists(r) ? "" : `  — недоступен (${r.away ?? "каталога нет"})`}`);
+        }
+        console.log("\nДобавить — miksy root add <путь> --tree <ветка>, убрать — miksy root remove <путь>");
+        break;
+      }
+      const given = trimSlash(slash(resolve(process.cwd(), driveRoot(positional[1] ?? "."))));
+      if (positional[0] === "add") {
+        if (!existsSync(given) || !statSync(given).isDirectory()) throw new Error(`${given}: каталога нет — корнем workspace может быть только существующий каталог`);
+        const real = canonical(given);
+        const twin = roots.find((r) => rootKey(r.path) === rootKey(real));
+        if (twin) throw new UsageError(`${given} — уже корень workspace${fold(twin.path) !== fold(given) ? ` (${twin.given ?? twin.path} — тот же каталог: повтор, junction или симлинк)` : ""}`);
+        // Каталог, который сам проект: корнем он станет папкой с проектами, а не проектом. Справка с рекомендацией;
+        // в терминале — вопрос («нет» по умолчанию), без терминала — не добавляется без --yes (рецензия 6x, B3)
+        const project = projectRoot(real, machine, roots);
+        if (project) {
+          if ("yes" in flags || "dry-run" in flags) warn(project);
+          else if (!ask) throw new UsageError(`${project} Если такой корень всё-таки нужен — miksy root add "${given}"${flags.tree !== undefined ? ` --tree ${shellArg(flags.tree)}` : " --tree <ветка>"} --yes`);
+          else {
+            console.log(project);
+            if (!ask.yes(`Всё равно сделать ${given} корнем workspace?`, false)) {
+              console.log("Корень не добавлен.");
+              break;
+            }
+          }
+        }
+        const taken = roots.map((r) => r.tree).filter(Boolean);
+        const suggestion = suggestTree(given, taken);
+        let answer = flags.tree;
+        if (answer === undefined) {
+          if (!ask) throw new UsageError(`укажите ветку дерева слоёв для нового корня: miksy root add "${given}" --tree <ветка> (например, --tree ${shellArg(suggestion)}) — его слои будут в layers/tree/<ветка>/`);
+          answer = ask.line(`Ветка дерева слоёв для ${given} — его слои будут в layers/tree/<ветка>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
+        }
+        const tree = checkTree(answer);
+        if (!tree) throw new UsageError(`«${answer}» — не ветка дерева слоёв: имена каталогов через «/» (например, Clients), без «..», дисков и имён ${[...LAYER_PARTS].join(", ")}`);
+        const busy = roots.find((r) => r.tree.toLowerCase() === tree.toLowerCase());
+        if (busy) throw new UsageError(`tree: ${tree} уже у корня ${busy.given ?? busy.path} — выберите другое имя ветки (например, ${suggestion})`);
+        const next: RootItem[] = [...items, { path: given, tree }];
+        // Проверки — как при загрузке (дубль, ветка), затем текст файла
+        const newRoots = parseRoots(next, slash(file), ledgerRoots());
+        const after = rewriteRoots(text, next, [...items.keys(), -1]);
+        const added = newRoots[newRoots.length - 1];
+        const grown = { ...machine, roots: newRoots };
+        console.log(`Новый корень: ${rootText(added)} — local/machine.yaml: workspace ${typeof (parseYaml(text) as { workspace?: unknown }).workspace === "string" ? "станет списком корней" : "— ещё один элемент списка"}`);
+        // Предупреждения и справка: домашний каталог, корень в чужом проекте или группе, совпадение веток
+        const why = unsafeWorkspace(given, machine.home);
+        if (why) warn(`${given} — ${why}: sync --all обойдёт все каталоги внутри (и спросит подтверждение)`);
+        const before = new Set([...rootNotes(machine, listGroups(machine)), ...clashNotes(machine)]);
+        for (const n of [...rootNotes(grown, listGroups(grown)), ...clashNotes(grown)]) if (!before.has(n)) warn(n);
+        for (const r of newRoots) {
+          const o = outerRoot(r, newRoots);
+          if (o && (r === added || o === added)) console.log(`справка: ${nestedText(r, o)}`);
+        }
+        for (const n of branchNotes(grown)) if (n.includes(added.path)) console.log(`справка: ${n}`);
+        if ("dry-run" in flags) {
+          console.log("\n--dry-run: ничего не записано.");
+          break;
+        }
+        backup(file);
+        writeAtomic(file, after);
+        console.log("✓ записано");
+        const found = allProjects(grown).filter((p) => sameKey(p.root.path, added.path));
+        console.log(`Проектов в нём: ${found.length}${found.length ? ` — ${found.slice(0, 10).map((p) => p.rel).join(", ")}${found.length > 10 ? ", …" : ""}` : ""} (весь список — miksy projects)`);
+        if (!ask) {
+          console.log("Дальше: miksy projects — проверить, что видно; miksy sync --all — записать настройки");
+          break;
+        }
+        if (!ask.yes("Записать настройки проектам workspace сейчас (miksy sync --all)?", true)) {
+          console.log("Позже: miksy sync --all");
+          break;
+        }
+        console.log("");
+        resetRun();
+        code = command("sync", { all: "" }, []);
+        break;
+      }
+      // remove: только дополнительный корень. Записанное в его проекты — с согласия (в терминале —
+      // вопрос, без него — подсказка команд); учёт и файлы без согласия не трогаются
+      const idx = roots.findIndex((r) => rootKey(r.path) === rootKey(given) || (r.given !== undefined && rootMemoryKey(r.given) === rootMemoryKey(given)));
+      if (idx < 0) throw new UsageError(`${given} — не корень workspace. Корни: ${roots.map((r) => r.path).join(", ")} (список — miksy root)`);
+      if (idx === 0) throw new UsageError(`${roots[0].path} — основной корень, его нельзя убрать: на нём \${WORKSPACE} и ветка дерева без префикса. Сменить основной — miksy setup --force`);
+      const gone = roots[idx];
+      const outer = outerRoot(gone, roots);
+      let cleaned = false;
+      const { manifest } = loadManifestMoved(machine);
+      // Записанное в сам каталог корня (проект, ставший корнем, — root add … --yes) — не в его проектах: после
+      // удаления корня каталог снова проект (внешнего корня), его не убираем и не забываем
+      const dirs = [...new Set(Object.keys(manifest.targets).map((id) => id.slice(id.indexOf("|") + 1)))]
+        .filter((d) => d !== "global" && locate(d, roots)?.root === gone && rootKey(d) !== rootKey(gone.path)).sort();
+      const after = rewriteRoots(text, items.filter((_, i) => i !== idx), [...items.keys()].filter((i) => i !== idx));
+      console.log(`Убрать корень ${rootText(gone)} из local/machine.yaml (workspace)`);
+      if (dirs.length) console.log(`miksy записывал в его проекты (${dirs.length}): ${dirs.map((d) => treeOf(d, roots)).join(", ")}`);
+      // Корень недоступен (диск не подключён): тот же вопрос, что у clean, — забыть записанное туда (по
+      // умолчанию «нет») или --forget; без согласия корень убирается, а учёт его проектов остаётся
+      const away = !rootExists(gone);
+      const all = Object.values(ADAPTERS);
+      const n = dirs.length && away ? new Set(dirs.flatMap((d) => all.flatMap((a) => [...strandedPaths(splitState(manifest.targets[`${a.id}|${d}`] ?? emptyState(), d).far)]))).size : 0;
+      if ("dry-run" in flags) {
+        // План для недоступного корня — что будет: вопрос или --forget, сколько файлов забудется или что останется
+        // в учёте (как у clean … --forget --dry-run — по проектам)
+        if (dirs.length && away) {
+          console.log(`Корень недоступен (${gone.away ?? "каталога нет"}) — на нём записанное miksy: ${n} файлов.`);
+          if ("forget" in flags) {
+            regainRoot = gone;
+            try {
+              for (const d of dirs) {
+                console.log("");
+                resetRun();
+                command("clean", { forget: "", "dry-run": "" }, [d]);
+              }
+            } finally { regainRoot = null; }
+            console.log(`\nПлан: корень убирается из workspace, записанное в его проекты (${n} файлов) забывается.`);
+          } else if (outer) console.log(`Корень лежит внутри корня ${outer.path}: без «забыть» он не убирается (его папки стали бы обычными папками ${outer.path}, и miksy не отличил бы неподключённый диск от удалённых данных). ${ask ? "Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию) — корень не убран" : "Без терминала вопроса нет — корень не будет убран"}; забыть — --forget.`);
+          else console.log(`${ask ? "Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию)" : "Без терминала вопроса нет"} — корень убирается, а записанное (${n} файлов) и учёт остаются: уберёте их miksy clean "<путь проекта>", когда диск вернётся. Забыть сразу — --forget.`);
+        }
+        console.log("\n--dry-run: ничего не записано.");
+        break;
+      }
+      if (dirs.length && away) {
+        if ("forget" in flags || (ask && ask.yes(`Корень ${gone.path} недоступен (${gone.away ?? "каталога нет"}): диск не подключён или данных больше нет? Забыть записанное в его проекты (${n} файлов)?`, false))) {
+          regainRoot = gone;
+          try {
+            for (const d of dirs) {
+              console.log("");
+              resetRun();
+              code = Math.max(code, command("clean", { forget: "" }, [d]));
+            }
+          } finally { regainRoot = null; }
+          cleaned = true;
+          console.log("");
+          // Путь — как записан в machine.yaml (ссылка, junction — не путь назначения), «~» раскрыт: root add
+          // принимает путь от каталога запуска
+          const back = gone.given ? expandPath(gone.given, machine.home, process.cwd()) : gone.path;
+          console.log(`Если диск найдётся: сначала верните папку корнем — miksy root add "${back}" --tree ${shellArg(gone.tree)}; затем miksy sync --all — файлы miksy в его проектах, совпадающие с нынешними, вернутся под учёт сами, изменённые — с miksy sync "<путь проекта>" --force (бэкап будет). Если они не нужны — после этого miksy root remove "${back}" с согласием убрать записанное (без терминала — miksy clean "<путь проекта>" в каждом проекте).`);
+        } else if (outer) {
+          // Вложенный корень: после удаления его каталоги — обычные каталоги внешнего, доступного корня, и miksy
+          // уже не отличит неподключённый диск от удалённых данных — учёт забылся бы без вопроса. Не убираем
+          console.log(`Корень ${gone.path} недоступен и лежит внутри корня ${outer.path}: после удаления его папки стали бы обычными папками ${outer.path}, и miksy не отличил бы неподключённый диск от удалённых данных — записанное туда (${n} файлов) забылось бы без вопроса. Корень не убран. Подключите диск и повторите miksy root remove "${gone.path}" или, если данных больше нет, — miksy root remove "${gone.path}" --forget`);
+          code = 1;
+          break;
+        } else console.log(`Корень недоступен — записанное в его проекты (${n} файлов) и учёт не тронуты. Когда диск вернётся — miksy clean "<путь проекта>" (работает и без корня в workspace); данных больше нет — miksy clean "<путь проекта>" --forget:\n${dirs.map((d) => `  ${d}`).join("\n")}`);
+      } else if (dirs.length) {
+        if (ask && ask.yes(`Убрать записанное miksy в эти проекты сейчас (miksy clean — ${dirs.length})?`, true)) {
+          for (const d of dirs) {
+            console.log("");
+            resetRun();
+            code = Math.max(code, command("clean", {}, [d]));
+          }
+          cleaned = true;
+          console.log("");
+        } else if (!outer) console.log(`Записанное в проекты и учёт не тронуты. Убрать позже (работает и без корня в workspace):\n${dirs.map((d) => `  miksy clean "${d}"`).join("\n")}`);
+      }
+      // Вложенный корень: его папки остаются внутри внешнего — там они обычные папки внешнего корня
+      if (outer) console.log(`${gone.path} лежит внутри корня ${outer.path}: после удаления его папки — обычные папки ${outer.path}. Следующий sync --all пересчитает их проекты по месту в ${outer.path} (layers/tree${outer.tree ? `/${outer.tree}` : ""}/…), а записанное в его цели target: true уберёт, как у бывших групп${dirs.length && !cleaned ? `; убрать записанное сейчас — miksy clean "<путь>" до root remove` : ""}`);
+      backup(file);
+      writeAtomic(file, after);
+      console.log(`✓ корень ${gone.path} убран из workspace`);
       break;
     }
 

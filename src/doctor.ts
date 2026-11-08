@@ -3,13 +3,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger } from "./version";
-import { emptyState, ManifestError, type Manifest, otherOwners } from "./manifest";
+import { emptyState, ManifestError, type Manifest, otherOwners, splitState, strandedPaths } from "./manifest";
 import type { Move } from "./relocate";
 import { fold, pathKey } from "./paths";
 import { foreignMcp, foreignSkills } from "./foreign";
-import { allProjects, allTargets, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, READERS, renderFor, type TargetSpec, targetId, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
+import { allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
 import { checkLocalAccess, checkSecretFiles } from "./secretfiles";
 import { plainDirs } from "./target";
@@ -35,11 +36,13 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   const secrets = loadSecrets();
   const skippedDirs: string[] = [];
   const projects = allProjects(machine, undefined, (w) => skippedDirs.push(w));
-  const badGroups: string[] = [], absentGroups: string[] = [];
+  const badGroups: string[] = [], absentGroups: string[] = [], rootGroups: string[] = [];
   // Каталога группы нет на этой машине (проекты не склонированы) — справочно, как слои без проектов
   const groups = listGroups(machine, (w) => {
     const m = /^цель (.+) \(target: true\): каталога нет в workspace/.exec(w);
+    const r = /^цель (.+) \(target: true\): каталог (.+) стал корнем workspace/.exec(w);
     if (m) absentGroups.push(m[1]);
+    else if (r) rootGroups.push(`${r[1]} (${r[2]})`);
     else badGroups.push(w);
   });
   // Учёт — с переездами каталогов (в памяти: перенос сохранит sync)
@@ -87,10 +90,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
       let actions: Action[];
       try {
         const others = t.target.scope === "project" ? ledgerSkills(manifest, t.target.dir, new Set(adapters.map((a) => a.id))) : [];
-        rendered = renderFor(adapter, t, machine, secrets, prev, [...(delivered.get(t.title) ?? []), ...others], rulesDelivered(adapter));
-        actions = plan(rendered.result, t.target, machine, prev ?? emptyState(), false, adapter.id, otherOwners(manifest, id));
-        delivered.set(t.title, [...(delivered.get(t.title) ?? []), ...deliveredSkillNames(rendered.result, actions, t.target)]);
-        for (const detail of trustPlan(rendered.result, t.target, machine, prev ?? emptyState(), actions, adapter.id).missing) trust.push({ ...where, detail });
+        rendered = renderFor(adapter, t, machine, secrets, prev, [...(delivered.get(targetKey(t)) ?? []), ...others], rulesDelivered(adapter));
+        actions = plan(rendered.result, t.target, machine, prev ?? emptyState(), false, adapter.id, otherOwners(manifest, id), manifest.forgotten?.[id]);
+        delivered.set(targetKey(t), [...(delivered.get(targetKey(t)) ?? []), ...deliveredSkillNames(rendered.result, actions, t.target)]);
+        for (const detail of trustPlan(rendered.result, t.target, machine, prev ?? emptyState(), actions, adapter.id, undefined, undefined, manifest.forgotten?.[id]).missing) trust.push({ ...where, detail });
         const p = rendered.result.trustPending;
         if (p) (p.declined ? declined : pendingTrust).push(p);
         for (const detail of literalHints(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id)) literals.push({ ...where, detail });
@@ -145,9 +148,15 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   // там (распакованный архив и т. п.) применились бы без вопроса
   const inherited: Finding[] = [];
   if (adapters.some((a) => a.id === "claude"))
-    for (const g of groups.filter((x) => !x.git))
-      for (const s of inheritedExec(g.abs, groups.filter((x) => x !== g).map((x) => x.abs)))
+    for (const g of groups.filter((x) => !x.git)) {
+      // Доверие группы запрещено (слой или machine.yaml) — наследовать нечего. Ответы в окне Claude в подкаталоге
+      // (permissions.allow и т. п.) — не предмет этого раздела: их пишет Claude по ответу того, кто там работает;
+      // здесь — хуки, env и прочее, что выполнится без вопроса
+      const layer = targets.find((t) => t.target.scope === "project" && fold(pathKey(t.target.dir)) === fold(pathKey(g.abs)))?.cfg.trust?.claude?.item;
+      if (layer === false || machine.trust?.claude === false) continue;
+      for (const s of inheritedExec(g.abs, groups.filter((x) => x !== g).map((x) => x.abs), true))
         inherited.push({ agent: "claude", target: s.dir, detail: `доверие группы ${g.rel} действует и здесь: ${s.lines.join("; ")}` });
+    }
 
   const localAccess = checkLocalAccess();
   if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `${localAccess.bad.length} открытых путей или ошибок проверки; ${localAccess.bad[0]} — sync/setup исправит права` });
@@ -173,15 +182,35 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
     for (const s of foreignSkills(p.abs, READERS, manifest))
       added.push({ agent: s.seenBy.join("/") || "—", target: p.rel, detail: `skill ${s.name}  (${s.dir})`, kind: "skill", name: s.name, source: s.dir, dir: p.abs, rel: p.rel });
 
-  // Учёт ссылается на проекты, которых больше нет
+  // Учёт ссылается на проекты, которых больше нет. Каталоги недоступного корня (диск не подключён) — не
+  // пропавшие: они в «Справочно»
+  // Каталога нет и вне всех корней (корень убран; диск не подключён или папку удалили — не отличить) — тоже не
+  // «пропавшие»: clean их не забывает без согласия (вопрос или --forget), в «Справочно» — что осталось убрать
+  const awayTargets = new Set<string>();
+  const leftTargets = new Set<string>();
   const orphans = Object.keys(manifest.targets)
     .map((id) => id.split("|"))
     .filter(([agent, dir]) => adapters.some((a) => a.id === agent) && dir !== "global" && !existsSync(dir))
+    .filter(([, dir]) => !(unavailable(dir, machine) && awayTargets.add(dir)) && !(outsideRoots(dir, machine) && leftTargets.add(dir)))
     .map(([agent, dir]) => ({ agent, target: dir, detail: "" }));
+  // Сколько записанного miksy лежит в каталогах (по учёту всех агентов)
+  const filesIn = (dirs: Set<string>) => new Set([...dirs].flatMap((d) => Object.entries(manifest.targets)
+    .filter(([id]) => fold(id.slice(id.indexOf("|") + 1)) === fold(d)).flatMap(([, st]) => [...strandedPaths(splitState(st, d).far)]))).size;
+  const bothWays = `диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`;
+
+  // Цели учёта, чей каталог теперь сам корень workspace: записанное туда действует и не обновляется
+  const rootedAll: Finding[] = rootedTargets(manifest, machine).map((d) => ({ agent: "—", target: d, detail: rootedText(d, machine).slice(d.length + 3) }));
+  const rootedMain = rootedAll.filter((x) => isMainRoot(x.target, machine));
+  const rooted = rootedAll.filter((x) => !isMainRoot(x.target, machine));
+  // Цели учёта, которые есть, но вне всех корней workspace (корень убран): sync их не обновляет
+  const outside = [...new Set(Object.keys(manifest.targets).map((id) => id.slice(id.indexOf("|") + 1)))]
+    .filter((dir) => dir !== "global" && existsSync(dir) && outsideRoots(dir, machine)).sort();
 
   // Ключи, которые агент перезаписал своей копией файла
+  // Цели, чей каталог недоступен (диск не подключён и т. п.), не проверяются: о них — отдельная строка
   const lost = Object.entries(manifest.targets)
     .filter(([id]) => adapters.some((a) => id.startsWith(a.id + "|")))
+    .filter(([id]) => { const dir = id.slice(id.indexOf("|") + 1); return dir === "global" || !stranded(dir, machine); })
     .flatMap(([id, st]) => verifyMerges(st).map((l) => ({ agent: id.split("|")[0], target: id.split("|")[1], detail: l })));
 
   // Глобальные skills, которые положил не miksy
@@ -200,11 +229,15 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
 
   // Каталоги дерева слоёв без соответствующего каталога workspace — опечатка или переименование
   const naked = layerSecrets().map((l) => ({ agent: "—", target: "", detail: l }));
-  const treeUnused = orphanTreeDirs(machine.workspace);
-  const typos = treeUnused.filter((d) => d.suggestion).map((d) => ({ agent: "—", target: `layers/tree/${d.path}`, detail: `↔ в workspace есть ${d.suggestion}` }));
-  const unused = treeUnused.filter((d) => !d.suggestion).map((d) => d.path);
+  const roots = machineRoots(machine);
+  const treeUnused = orphanTreeDirs(roots);
+  const typos = treeUnused.filter((d) => d.suggestion && !d.other).map((d) => ({ agent: "—", target: `layers/tree/${d.path}`, detail: `↔ в workspace есть ${d.suggestion}` }));
+  // Ветка верхнего уровня, похожая на папку основного корня: опечатка или ветка корня другой машины — справочно
+  const maybeOther = treeUnused.filter((d) => d.suggestion && d.other);
+  const unused = treeUnused.filter((d) => !d.suggestion && !d.unmounted).map((d) => d.path);
+  const unmounted = treeUnused.filter((d) => d.unmounted).map((d) => d.path);
 
-  const out: string[] = [`miksy doctor — версия ${engineVersion()}; агенты: ${adapters.map((a) => a.id).join(", ")}; проектов: ${projects.length}${groups.length ? `; помечено целями (target: true): ${groups.length}` : ""}`, ""];
+  const out: string[] = [`miksy doctor — версия ${engineVersion()}; агенты: ${adapters.map((a) => a.id).join(", ")}; ${roots.length > 1 ? `корней: ${roots.length}; ` : ""}проектов: ${projects.length}${groups.length ? `; помечено целями (target: true): ${groups.length}` : ""}`, ""];
   const section = (title: string, hint: string, items: Finding[], grouped = false) => {
     if (!items.length) return;
     out.push(`${title} (${items.length})${hint ? ` — ${hint}` : ""}`);
@@ -224,7 +257,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   section("Конфликты первого sync", "файлы не записаны", blocked);
   section("Небезопасные права", "sync/setup закрывает local/ владельцу (ACL Windows / 0700 Unix)", permissions);
   section("Проекты без доверия", "причина для каждого агента; чужое доверие не меняется", trust);
-  if (pendingTrust.length) out.push(`Нужно решение пользователя о доверии (${pendingTrust.length}) — у проектов исполняемые настройки агента команды; без решения miksy доверие не ставит:`,
+  if (pendingTrust.length) out.push(`Нужно решение пользователя о доверии (${pendingTrust.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне Claude, чужие файлы); без решения miksy доверие не ставит:`,
     ...pendingText(pendingTrust), AGENT_NOTE, "");
   section("Исполняемые настройки в подкаталогах групп без git", "Claude наследует доверие группы на подкаталоги без своего git: эти настройки применятся без вопроса; удалите их, сделайте каталог git-репо или запретите доверие группы (trust: { claude: false })", inherited);
   section("Не синхронизировано", "sync для них ни разу не запускался: miksy sync --all --agent <id>", unsynced, true);
@@ -232,6 +265,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   section("Импорт командных skills устарел", "в репо изменились skills или агент теперь видит их сам: miksy sync <проект> --agent <id>", team);
   section("Правлено вручную", "sync не перезапишет без --force; перенесите правку в слои или откатите", manual);
   section("Ключи пропали", "агент перезаписал файл своей копией; повторите sync", lost);
+  section("Проект стал корнем workspace", "записанное в него miksy раньше действует, но больше не обновляется", rooted);
+  section("Записанное в основной корень workspace", "miksy раньше записал настройки в сам корень: они действуют, но больше не обновляются", rootedMain);
   section("Группа выше не получила правила", "агент читает правила родительских каталогов, а файла правил группы нет — её правила пишутся в цели ниже: miksy sync <группа> или sync --all", groupBelow);
   section("Снята пометка target: true", "miksy sync --all уберёт записанное туда по учёту (у группы иначе её правила задвоятся в целях ниже)", former);
   section("Учёт ссылается на несуществующие каталоги", "каталог удалён или переехал, но не найден по записанным файлам (найденный sync переносит сам); убрать записанное вне него (ключи MCP, доверие, обёртки) и запись учёта: miksy clean <путь>", orphans);
@@ -241,6 +276,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
     added,
   );
   section("Похоже на опечатку или переименование", "слой дерева не совпадает с каталогом workspace, но есть похожий — переименуйте слой", typos);
+  // Ветка корня совпала с папкой другого корня: правила ветки молча достаются обеим папкам
+  const clashes = clashNotes(machine).map((detail) => ({ agent: "—", target: "", detail }));
+  section("Ветка корня совпадает с папкой другого корня", "слои у них общие", clashes);
   section("Пометка target: true не действует", "target: true в layer.yaml; слой остаётся обычным промежуточным", badGroups.map((detail) => ({ agent: "—", target: "", detail })));
   section("Секреты открытым текстом в слоях", "уйдут в git конфигурации; вынесите значения в local/secrets.env, в слое — ${ИМЯ}", naked);
   const values = [...valueFiles].map(([file, names]) => ({ agent: "—", target: file, detail: `значения ${[...names].sort().join(", ")}` }));
@@ -258,7 +296,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + stale.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
-    + emptySecrets.length + missingExe.length;
+    + emptySecrets.length + missingExe.length + clashes.length + rooted.length + rootedMain.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
 
   // Справочно: не требует действий
@@ -274,15 +312,32 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   }
   const repoNote = workspaceRepoNote(machine, groups);
   if (repoNote) info.push(repoNote);
+  if (roots.length > 1 || roots.some((r) => r.tree)) info.push(`Корни workspace (${roots.length}): ${roots.map(rootText).join("; ")}`);
+  const notes = rootNotes(machine, groups);
+  if (notes.length) info.push(`Корни (${notes.length}):`, ...notes.map((n) => "  " + n));
+  const nested = nestedNotes(machine);
+  if (nested.length) info.push(`Вложенные корни (${nested.length}):`, ...nested.map((n) => "  " + n));
+  const branches = branchNotes(machine);
+  if (branches.length) info.push(`Ветки корней внутри чужих мест (${branches.length}) — не ошибка, но проекты этих корней получают слои этих мест:`, ...branches.map((n) => "  " + n));
+  if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>:`, ...outside.map((d) => "  " + d));
+  if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${filesIn(awayTargets)} файлов): ${bothWays}`);
+  if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${filesIn(leftTargets)} файлов): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)`);
+  // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
+  const legacy = legacyAgentNames();
+  if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: gemini теперь antigravity (Antigravity — агент, Gemini — модель):`, ...legacy.map((l) => "  " + l));
   if (skippedDirs.length) info.push(`Пропущено при поиске проектов (${skippedDirs.length}):`, ...skippedDirs.map((w) => "  " + w));
   const unread = ignoredLayerParts();
   if (unread.length) info.push(`Не читается: ${ignoredText(unread)}`);
   if (unused.length) info.push(`Слои, которые на этой машине ни к чему не применяются (проектов нет): ${unused.join(", ")}`);
+  if (maybeOther.length) info.push(`Ветки дерева слоёв без папки на этой машине, но с похожей папкой (${maybeOther.length}) — если это ветка корня другой машины (там в machine.yaml { path: …, tree: <ветка> }), всё в порядке, ничего не делайте; если опечатка — переименуйте слой:`,
+    ...maybeOther.map((d) => `  layers/tree/${d.path} ↔ в workspace есть ${d.suggestion}`));
+  if (unmounted.length) info.push(`Части дерева слоёв, которых нет на этой машине (над ними нет корня workspace — для других машин): ${unmounted.join(", ")}`);
   const env = environment({ env: process.env, home: machine.home, os: machine.os, bun: stableBun(process.execPath), agents: adapters.map((a) => a.id), engine: ENGINE, config: configRoot() });
   if (env.length) info.push(`Окружение (${env.length}) — только сведения, miksy здесь ничего не меняет:`, ...env.map((l) => "  " + l));
-  const plain = plainDirs(machine.workspace, groups, targets);
+  const plain = plainDirs(roots, groups, targets);
   if (plain.length) info.push(`Каталоги без git на уровне проектов (${plain.length}) — настроек не получат: git init в каталоге или miksy target <путь>:`,
     ...(verbose ? plain : plain.slice(0, 15)).map((d) => "  " + d), ...(!verbose && plain.length > 15 ? [`  … ещё ${plain.length - 15} (--verbose)`] : []));
+  if (rootGroups.length) info.push(`Цели target: true, чей каталог стал корнем workspace (пометка в этом месте дерева не действует; слои его проектов — в ветке корня): ${rootGroups.join(", ")}`);
   if (absentGroups.length) info.push(`Цели target: true, каталогов которых на этой машине нет (пометка здесь не действует): ${absentGroups.join(", ")}`);
   if (moves.length) info.push(`Каталоги переехали (${moves.length}) — учёт следует за ними, sync сохранит перенос:`, ...movesText(moves));
   if (foreign.length) info.push(`Глобальные skills не от miksy (${foreign.length}): ${foreign.join(", ")}`);

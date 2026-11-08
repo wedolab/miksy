@@ -3,19 +3,22 @@ import { dirname, join, relative, resolve } from "node:path";
 import type { RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
 import { fold, pathKey, slash } from "./paths";
+import { headerMark, miksyOpencodeJson } from "./marks";
 import { GitError, gitEnv, protectedBy, trackedPaths } from "./git";
 import { backup, originalBackup, runDir } from "./backup";
 import { blockHash, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
-import { canonicalState, emptyState, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
+import { canonicalState, emptyState, type ForgottenMark, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
 import type { Machine } from "./types";
 import { configRoot } from "./load";
 import { ensurePrivateLocal } from "./secretfiles";
+import { AGENT_ALIASES } from "./agentid";
 import { definitionHash, mcpTables, ownedTomlParts, parseToml, replaceOwnedMcp, splitToml } from "./toml";
 
 // roots — где путь обязан остаться после раскрытия симлинков (проект, домашний каталог);
 // apply перепроверяет непосредственно перед записью и удалением
-export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: boolean; beforeHash?: string } & (
+// known — файл (блок) miksy, которого не было в учёте (miksyMade): берётся обратно без оригинала
+export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: boolean; beforeHash?: string; known?: boolean } & (
   | TrustAction
   | ApproveAction
   | { kind: "write"; abs: string; content: string; why: "новый" | "обновление"; executable?: boolean; roots?: string[] }
@@ -31,7 +34,8 @@ export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: b
   | { kind: "merge"; abs: string; key: string[]; set: Record<string, unknown>; remove: string[]; adopt: string[]; own: string[]; roots?: string[]; beforeHash?: string }
   | { kind: "toml"; abs: string; content: string; beforeHash: string; names: string[]; definitions?: Record<string, string>; written?: string[]; roots?: string[] }
   // lines — итоговые строки блока; pre — на время apply (ещё и удаляемые файлы): пишется до файлов
-  | { kind: "exclude"; abs: string; roots?: string[]; lines: string[]; pre?: string[]; owner: string }
+  // unrecorded — строки не записываются в учёт (clean цели без учёта: оставшиеся строки — от забытого учёта)
+  | { kind: "exclude"; abs: string; roots?: string[]; lines: string[]; pre?: string[]; owner: string; unrecorded?: boolean }
   | { kind: "conflict"; abs: string; why: string });
 
 const UNKNOWN_WHY = "учёт: при миграции для файла нашлись разные записи — хеш неизвестен, проверьте файл (--force перезапишет, бэкап будет)";
@@ -85,11 +89,49 @@ export function excludeLines(paths: string[], open: string[] = []): string[] {
   return [...new Set(lines)].sort();
 }
 
+// Файл проекта, который явно сделал miksy, хотя учёта о нём нет (учёт забыт — clean --forget, а диск вернулся).
+// Только улики самого miksy:
+// - шапка «Сгенерировано miksy» в начале файла (marks.ts: headerMark);
+// - у файла с блоком инструкций (block) — блок miksy как блок: пара маркеров на своих строках;
+// - собственный корневой opencode.json miksy (marks.ts: miksyOpencodeJson);
+// - файл без метки (skills, plugin.json, …) — только если его текст тот же, что miksy записал бы сейчас
+//   (rendered), и его уже покрывает строка блока miksy в .git/info/exclude проекта (covered): этот блок
+//   остаётся на диске после «забыть» — до него miksy не дотянулся. Точная строка файла — улика всегда: её
+//   miksy пишет только для своего файла. Строка каталога скрывает весь каталог — улика, только пока учёт ничего
+//   не помнит о файлах цели в проекте (fresh): когда учёт цели есть, он и знает, что писал miksy, —
+//   незаписанный файл под строкой каталога (заметки пользователя в каталоге skill) — чужой. Решает вызывающий.
+// Путь (каталог плагина miksy) и совпадение текста сами по себе — не улика: такой файл мог положить
+// пользователь, он берётся с оригиналом. Неотслеживаемость git проверяет вызывающий
+export function miksyMade(path: string, opts: { rendered?: string; covered?: boolean; block?: boolean } = {}): boolean {
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch { return false; }
+  if (headerMark(text)) return true;
+  if (/(^|\/)opencode\.json$/.test(slash(path)) && miksyOpencodeJson(text)) return true;
+  if (opts.block) {
+    try { if (splitInstructions(text).block) return true; } catch { /* повреждённые маркеры — не улика */ }
+  }
+  return opts.rendered !== undefined && !!opts.covered && text === opts.rendered;
+}
+
+// Покрывает ли строка блока exclude (точная строка файла или строка каталога) путь проекта rel
+export const coveredBy = (lines: string[], rel: string) => lines.some((l) => l === `/${rel}` || (l.endsWith("/") && `/${rel}`.startsWith(l)));
+
+// Файлы под каталогом (относительные пути проекта); ссылки не раскрываются
+function filesUnder(dir: string, rel: string): string[] {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  return entries.flatMap((e) => e.isDirectory() ? filesUnder(join(dir, e.name), `${rel}/${e.name}`) : e.isFile() ? [`${rel}/${e.name}`] : []);
+}
+
 // owner — id агента: в общих файлах проекта (.git/info/exclude) у каждого агента свой блок.
 // owners — файлы других целей (канонический путь → цель): второй владелец одного файла — конфликт
-export function plan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, force: boolean, owner = "miksy", owners: Map<string, string> = new Map()): Action[] {
-  machine = { ...machine, home: canonical(machine.home), workspace: canonical(machine.workspace) };
-  if (target.scope === "project") target = { ...target, dir: canonical(target.dir) };
+// mark — отметка «проект забыт» этой цели (manifest.forgotten): только с ней план убирает файлы miksy без учёта,
+// которые miksy больше не пишет
+export function plan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, force: boolean, owner = "miksy", owners: Map<string, string> = new Map(), mark?: ForgottenMark): Action[] {
+  machine = { ...machine, home: canonical(machine.home), workspace: pathKey(machine.workspace) };
+  // clean каталога, которого нет (диск не подключён): путь не раскрывается — как записан; писать в него
+  // clean не будет, а записи учёта внутри недоступного каталога сюда не приходят (commands.ts: splitState)
+  if (target.scope === "project") target = { ...target, dir: result.clean ? pathKey(target.dir) : canonical(target.dir) };
   prev = canonicalState(prev);
   const actions: Action[] = [];
   // local/ конфигурации: сгенерированные обёртки и helper-ы секретов (base "local")
@@ -180,6 +222,27 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     return why;
   };
 
+  // .git/info/exclude проекта и строки блока miksy этого агента (под прежним именем — тоже). Строки — улика
+  // для файлов без метки (miksyMade: covered), а в конце плана блок пересчитывается
+  let ex: ReturnType<typeof excludeFile> = null;
+  let exError: string | null = null;
+  if (target.scope === "project" && !projectGitError) {
+    try { ex = excludeFile(target.dir); } catch (e) { exError = (e as Error).message; }
+  }
+  const blockOwner = ex?.shared ? `${owner}@${target.dir}` : owner;
+  const legacy = legacyOwner(blockOwner);
+  const exText = ex && !escapes(ex.path, ex.root) && existsSync(ex.path) ? readFileSync(ex.path, "utf8") : "";
+  const legacyBlock = !!legacy && blockRx(legacy).test(exText);
+  const current = legacyBlock ? [...new Set([...excludeBlock(exText, blockOwner), ...excludeBlock(exText, legacy!)])].sort() : excludeBlock(exText, blockOwner);
+  const relOf = (p: string) => relative(target.scope === "project" ? target.dir : machine.home, p).replaceAll("\\", "/");
+  // Учёт ничего не помнит о файлах цели в проекте (учёт забыт — clean --forget, диск вернулся; или цель новая):
+  // только тогда строка блока exclude — улика для файла без метки (miksyMade)
+  const fresh = target.scope === "project" && !Object.keys(prev.files).some((p) => inside(p, target.dir)) && !Object.keys(prev.blocks ?? {}).length;
+  // Файл проекта под строкой блока (точной — всегда, каталога — только fresh): по логическому пути и по
+  // физическому (через свою ссылку каталога)
+  const coveredRel = (rel: string) => current.includes(`/${rel}`) || (fresh && coveredBy(current, rel));
+  const covered = (rel: string, path: string) => target.scope === "project" && (coveredRel(rel) || (inside(pathKey(path), target.dir) && coveredRel(relOf(pathKey(path)))));
+
   // Файлы целиком
   const wanted = new Set<string>();
   for (const f of result.files) {
@@ -234,7 +297,6 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         // Файла нет (удалён) — пишется заново, как own-файл; блок пропал из существующего файла или изменён — конфликт
         if (old && exists && !parts.block && !force) throw new Error("инструкции: управляемый блок удалён из файла вручную (--force вернёт блок)");
         if (old && parts.block && blockHash(parts.block) !== old && !force) throw new Error("инструкции: управляемый блок изменён вручную (--force перезапишет только блок)");
-        if (parts.block && !old && !recorded && !force) throw new Error("инструкции: блок создан не miksy (--force возьмёт под учёт)");
         // Прежний own-файл совпал с учётом: его содержимое теперь принадлежит блоку.
         // При --force пользователь явно разрешил замену прежнего own-файла; оригинал сохраняем.
         const before = recorded ? "" : parts.before;
@@ -243,9 +305,15 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         const lf = instructionBlock(f.content, !!before && !before.endsWith("\n"));
         const block = parts.block.includes("\r\n") ? lf.replace(/\n/g, "\r\n") : lf;
         const content = before + block + after;
+        // Блок miksy в файле проекта без учёта (учёт забыт, диск вернулся): тот же, что miksy записал бы
+        // сейчас, — берётся обратно сам, без оригинала; другой — конфликт, --force перезапишет только блок
+        const known = !!parts.block && !old && !recorded && f.base === "project" && target.scope === "project";
+        if (parts.block && !old && !recorded && !force && !(known && blockHash(parts.block) === sha(lf)))
+          throw new Error(known ? "инструкции: блок miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас (--force перезапишет только блок, бэкап будет)" : "инструкции: блок создан не miksy (--force возьмёт под учёт)");
         if (content !== text || old !== sha(lf)) actions.push({ kind: "block", abs: path, content, hash: sha(lf), beforeHash: sha(text), roots,
+          ...(known && { known: true }),
           ...(recorded && onDisk !== recorded && { restoreBlock: true }),
-          ...((exists && ((!recorded && !old && !!text) || (recorded && onDisk !== recorded))) && { original: true }) });
+          ...((exists && !known && ((!recorded && !old && !!text) || (recorded && onDisk !== recorded))) && { original: true }) });
       } catch (e) { actions.push({ kind: "conflict", abs: path, why: (e as Error).message }); }
       continue;
     }
@@ -279,7 +347,13 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       }
     }
     if (retained) sensitivePaths.add(pathKey(path));
-    const x = { ...(f.executable && { executable: true }), roots, beforeHash: onDisk ?? sha(""), ...(exists && !recorded && { original: true }) };
+    // Чужой файл берётся с оригиналом (clean вернёт его), даже если совпал с выводом miksy или лежит в каталоге
+    // плагина miksy. Файл miksy без учёта (учёт забыт — clean --forget, диск вернулся; miksyMade — только по
+    // уликам miksy, только в проекте) — без оригинала: восстанавливать нечего, clean его удалит
+    const known = f.base === "project" && target.scope === "project" && exists && !recorded && miksyMade(path, { rendered: content, covered: covered(f.path, path) });
+    // known — и у конфликта и перезаписи узнанного файла: для проверки доверия в sync он свой, а не чужой конфиг; в
+    // просмотре miksy trust конфликтный — чужой (trust.ts, own)
+    const x = { ...(f.executable && { executable: true }), roots, beforeHash: onDisk ?? sha(""), ...(exists && !recorded && !known && { original: true }), ...(known && { known: true }) };
     if (!exists) actions.push({ kind: "write", abs: path, content, why: "новый", ...x });
     else if (onDisk === sha(content)) {
       // Содержимое то же: взять под учёт (adopt исправит и права) или исправить только права —
@@ -289,7 +363,9 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       else if (mode !== null) actions.push({ kind: "chmod", abs: path, mode, roots });
     }
     else if (recorded === UNKNOWN_HASH && !force) actions.push({ kind: "conflict", abs: path, why: UNKNOWN_WHY });
-    else if (!recorded && !force) actions.push({ kind: "conflict", abs: path, why: "файл существует и создан не miksy (--force перезапишет, бэкап будет)" });
+    else if (!recorded && !force) actions.push({ kind: "conflict", abs: path, ...(known && { known: true }), why: known
+      ? "файл miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас (--force перезапишет, бэкап будет)"
+      : "файл существует и создан не miksy (--force перезапишет, бэкап будет)" });
     else if (recorded && onDisk !== recorded && !force) actions.push({ kind: "conflict", abs: path, why: "изменён вручную после последнего sync (--force перезапишет, бэкап будет)" });
     else actions.push({ kind: "write", abs: path, content, why: "обновление", ...x });
   }
@@ -345,6 +421,37 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       if (parts.block && blockHash(parts.block) !== hash && !force) throw new Error("инструкции: управляемый блок изменён вручную — не удаляю");
       actions.push({ kind: "block", abs: path, content: joinOutside(parts.before, parts.after), hash: null, beforeHash: sha(text), roots: mergeRoots });
     } catch (e) { actions.push({ kind: "conflict", abs: path, why: (e as Error).message }); }
+  }
+
+  // Файл (блок) miksy, которого нет в учёте и который miksy больше не пишет (учёт забыт — clean --forget, диск
+  // вернулся, а слои с тех пор поменялись или в проекте появился вложенный репо): убирается, как свой ненужный, —
+  // с бэкапом; у блока — только блок. Только в проекте с отметкой «проект забыт» (mark): учёт у каждой машины свой,
+  // а .git/info/exclude в общей облачной папке — общий, и файл miksy другой машины выглядит так же (рецензия 6w);
+  // без отметки такие файлы не трогаются, как до 6w. Улики — обе сразу: блок miksy как блок или шапка
+  // «Сгенерировано miksy» в начале файла, и точная строка этого файла в блоке miksy этого агента в .git/info/exclude
+  // (её miksy пишет только для своего файла). Без точной строки (файл скопирован из другого проекта, цель без git),
+  // файл git, файл вложенного репо, ссылка — не трогаются. clean забытой цели — так же.
+  // Канонический путь → что делается (удалить файл или убрать блок); строки блока exclude этих файлов (логический и
+  // физический путь) уходят вместе с ними, у удаляемого — после удаления
+  const gone = new Map<string, "delete" | "block">();
+  const goneLines = new Map<string, "delete" | "block">();
+  for (const line of target.scope === "project" && mark ? current : []) {
+    const r = line.slice(1);
+    if (line.endsWith("/") || !safeRelative(r)) continue;
+    const path = abs("project", r);
+    const key = pathKey(path);
+    if (gone.has(key)) { goneLines.set(line, gone.get(key)!); continue; }
+    if (wanted.has(key) || key in prev.files || key in (prev.blocks ?? {}) || owners.has(key) || !inside(key, target.dir)) continue;
+    try { if (lstatSync(path).isSymbolicLink() || !statSync(path).isFile()) continue; } catch { continue; }
+    if (gitRefusal(path) || gitRefusal(key)) continue;
+    const text = readFileSync(key, "utf8");
+    let parts: ReturnType<typeof splitInstructions> | null = null;
+    try { parts = splitInstructions(text); } catch { /* повреждённые маркеры — не улика */ }
+    if (parts?.block) actions.push({ kind: "block", abs: key, content: joinOutside(parts.before, parts.after), hash: null, beforeHash: sha(text), roots: [target.dir], known: true });
+    else if (headerMark(text)) actions.push({ kind: "delete", abs: key, roots: fileRoots, beforeHash: sha(text), known: true });
+    else continue;
+    gone.set(key, parts?.block ? "block" : "delete");
+    goneLines.set(line, gone.get(key)!);
   }
 
   // Слияние ключей: владеем отдельными именами внутри объекта (например, MCP-серверами)
@@ -532,20 +639,28 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
 
   // Доверие и одобрение серверов .mcp.json — до exclude: файл одобрений (.claude/settings.local.json)
   // скрыт от git, пока в нём одобрения miksy
-  const trust = trustPlan(result, target, machine, prev, actions, owner, gitRefusal);
+  const trust = trustPlan(result, target, machine, prev, actions, owner, gitRefusal, current, mark);
   actions.push(...trust.actions);
 
   // .git/info/exclude: у каждого агента свой блок; сверяемся с файлом, а не с учётом —
   // блок мог быть стёрт (в т.ч. старым общим блоком другого агента).
   // Строка нужна, пока файл miksy лежит в проекте: нужные сейчас файлы и записанные раньше,
   // которые не удаляются (конфликт). Удаляемые остаются в блоке до конца apply
-  if (target.scope === "project" && !projectGitError) {
-    let ex: ReturnType<typeof excludeFile> = null;
-    try {
-      ex = excludeFile(target.dir);
-    } catch (e) {
-      actions.push({ kind: "conflict", abs: `${target.dir}/.git`, why: `сбой git: ${(e as Error).message} — exclude не меняю` });
-    }
+  // clean проекта, о котором учёт ничего не помнит (учёт забыт — clean --forget, диск вернулся; или проект в общей
+  // облачной папке, записанный другой машиной): из блока exclude уходят только строки файлов, которые этот clean
+  // убирает по уликам (только с отметкой «проект забыт»: шапка или блок и точная строка); остальные строки не трогаем —
+  // за ними файлы miksy, которые без вывода miksy не узнать (miksyMade); снять строки — открыть их git. Вернуть под
+  // учёт — sync, затем clean
+  const forgotten = !!result.clean && !Object.keys(prev.files).length && !Object.keys(prev.blocks ?? {}).length
+    && !Object.keys(prev.exclude ?? {}).length && !Object.values(prev.approvals ?? {}).some((ns) => ns.length);
+  if (target.scope === "project" && !projectGitError && forgotten && ex && goneLines.size && !escapes(ex.path, ex.root)) {
+    const lines = current.filter((l) => !goneLines.has(l));
+    const pre = [...new Set([...lines, ...[...goneLines].filter(([, k]) => k === "delete").map(([l]) => l)])].sort();
+    // Оставшиеся строки — не в учёт: цель по-прежнему «без учёта», и повторный clean их тоже не снимет
+    actions.push({ kind: "exclude", abs: ex.path, roots: [ex.root], lines, ...(!same(pre, lines) && { pre }), owner: blockOwner, unrecorded: true });
+  }
+  if (target.scope === "project" && !projectGitError && !forgotten) {
+    if (exError) actions.push({ kind: "conflict", abs: `${target.dir}/.git`, why: `сбой git: ${exError} — exclude не меняю` });
     if (ex) {
       const refusal = escapes(ex.path, ex.root);
       if (refusal) {
@@ -553,7 +668,6 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         // Без защиты exclude новые проектные файлы не должны появиться.
         return finishTrust(actions.filter((a) => a.kind === "conflict" || !inside(a.abs, target.dir)));
       }
-      const blockOwner = ex.shared ? `${owner}@${target.dir}` : owner;
       const rel = (p: string) => relative(target.dir, p).replaceAll("\\", "/");
       const inProject = (p: string) => inside(p, target.dir);
       const conflicts = actions.filter((a) => a.kind === "conflict");
@@ -569,18 +683,54 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         if (!(key in prev.files || key in (prev.blocks ?? {}) || taking.has(key))) return [];
         return inProject(key) && rel(key) !== p ? [p, rel(key)] : [p];
       });
-      // Чужие файлы, на которые выдан конфликт, строкой каталога не скрываем (С8)
-      const open = conflicts.filter((a) => inProject(a.abs) && existsSync(a.abs) && statSync(a.abs).isFile() && !(pathKey(a.abs) in prev.files))
+      // Файлы miksy вне учёта, которые этот план пишет, но не берёт (конфликт: отличаются от нынешнего вывода), —
+      // только по уликам miksy (miksyMade) и только под строкой, которая уже есть в блоке: строку не снимаем —
+      // иначе git увидит сгенерированный файл, и его можно закоммитить в репо проекта. Новых строк для них не
+      // добавляем, и строку каталога, в котором чужой конфликтный файл, в точную строку такого файла не сужаем
+      // (С8; рецензия 6w): точная строка — улика «файл miksy» (выше: ненужный файл с меткой убирается), а её miksy
+      // пишет только для файла из учёта или взятого этим планом. Файл, которого нет в выводе: в забытом проекте с
+      // меткой под точной строкой его план убирает (выше); sync проекта без отметки «забыт» его точную строку
+      // оставляет (файл miksy другой машины в общей облачной папке: снять строку — открыть его git; круг 6x);
+      // остальные (с меткой под строкой каталога, без метки) и при clean git увидит, когда строка не нужна файлам
+      // miksy (README: убрать вручную)
+      const rendered = new Map(result.files.filter((f) => f.base === "project" && f.mode === "own").map((f) => [f.path, f]));
+      // Отслеживается git — не скрываем (сбой git — считаем отслеживаемым: не прятать то, о чём ничего не известно)
+      const untracked = (r: string) => {
+        if (tracked.has(r)) return false;
+        if (projectPaths.includes(r)) return true;
+        try { return trackedPaths(target.dir, [r]).length === 0; } catch { return false; }
+      };
+      const made = (r: string) => {
+        const abs = join(target.dir, r);
+        const f = rendered.get(r);
+        // Блок как улика — у файла с блоком в выводе и у файла под точной строкой блока (CLAUDE.local.md, который
+        // miksy сейчас не пишет: например, в проекте появился вложенный репо)
+        return existsSync(abs) && statSync(abs).isFile() && untracked(r)
+          && miksyMade(abs, { rendered: f?.content, covered: coveredRel(r), block: !!f?.block || current.includes(`/${r}`) });
+      };
+      // Файлы, из которых этот план убирает своё: удаление, снятие блока, возврат оригинала
+      const removing = new Set(actions.filter((a) => inProject(a.abs) && (a.kind === "delete" || a.kind === "restore" || (a.kind === "block" && !a.hash))).map((a) => rel(a.abs)));
+      const marked = [...new Set(current.flatMap((l) => {
+        const r = l.replace(/^\//, "").replace(/\/$/, "");
+        if (!r) return [];
+        return l.endsWith("/") ? filesUnder(join(target.dir, r), r) : [r];
+      }))].filter((r) => !removing.has(r) && !goneLines.has(`/${r}`)
+        && (wanted.has(pathKey(join(target.dir, r))) || (!result.clean && current.includes(`/${r}`))) && made(r));
+      // Чужие файлы, на которые выдан конфликт, строкой каталога не скрываем (С8): не из учёта и не miksy
+      const open = conflicts.filter((a) => inProject(a.abs) && existsSync(a.abs) && statSync(a.abs).isFile() && !(pathKey(a.abs) in prev.files) && !marked.includes(rel(a.abs)))
         .flatMap((a) => [rel(a.abs), rel(pathKey(a.abs))]);
       // Файл одобрений серверов .mcp.json, пока в нём есть одобренные miksy (после этого плана)
       const approvals = new Set(Object.entries(prev.approvals ?? {}).filter(([, ns]) => ns.length).map(([p]) => p));
       for (const a of actions) if (a.kind === "approve") { if (a.own.length) approvals.add(pathKey(a.abs)); else approvals.delete(pathKey(a.abs)); }
       const approvalPaths = [...approvals].filter((p) => inProject(p) && !tracked.has(rel(p))).map(rel);
-      const lines = excludeLines([...ownedPaths, ...kept, ...approvalPaths], open);
-      const text = existsSync(ex.path) ? readFileSync(ex.path, "utf8") : "";
-      const current = excludeBlock(text, blockOwner);
-      const pre = [...new Set([...lines, ...excludeLines(deleting).filter((l) => current.includes(l))])].sort();
-      if (!same(current, lines) || !same(pre, lines))
+      // Строка файла miksy вне учёта — та, что уже есть в блоке; строка каталога, в котором чужой конфликтный
+      // файл, сужается до строки самого файла
+      const markedLines = marked.flatMap((r) => current.filter((c) => coveredBy([c], r))
+        .filter((c) => !c.endsWith("/") || !open.some((o) => fold(`/${o}`).startsWith(fold(c)))));
+      const lines = [...new Set([...excludeLines([...ownedPaths, ...kept, ...approvalPaths], open), ...markedLines])].sort();
+      const pre = [...new Set([...lines, ...excludeLines(deleting).filter((l) => current.includes(l)), ...[...goneLines].filter(([, k]) => k === "delete").map(([l]) => l)])].sort();
+      // Блок под прежним именем агента (miksy:gemini): его строки — текущие, запись заменит его новым
+      if (!same(current, lines) || !same(pre, lines) || legacyBlock)
         actions.push({ kind: "exclude", abs: ex.path, roots: [ex.root], lines, ...(!same(pre, lines) && { pre }), owner: blockOwner });
     }
   }
@@ -598,6 +748,10 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     }
     if (trust.pending) result.trustPending = trust.pending;
     else delete result.trustPending;
+    if (trust.renew) result.trustRenew = trust.renew;
+    else delete result.trustRenew;
+    if (trust.own) result.trustOwn = trust.own;
+    else delete result.trustOwn;
     return finish(list);
   }
 }
@@ -622,6 +776,13 @@ const end = (owner: string) => `# <<< miksy:${owner}`;
 // Блок агента
 const blockRx = (owner: string, flags = "m") =>
   new RegExp(`\\n?^# >>> miksy:${escapeRx(owner)} \\(сгенерировано, не править\\)$[\\s\\S]*?^# <<< miksy:${escapeRx(owner)}$\\n?`, flags);
+// Владелец блока под прежним именем агента (gemini → antigravity; «агент@каталог» — общий exclude worktree)
+function legacyOwner(owner: string): string | null {
+  const at = owner.indexOf("@");
+  const id = at < 0 ? owner : owner.slice(0, at);
+  const old = Object.keys(AGENT_ALIASES).find((k) => AGENT_ALIASES[k] === id);
+  return old ? old + (at < 0 ? "" : owner.slice(at)) : null;
+}
 
 // Только решение о доверии (miksy trust, ответ в конце sync): из блока exclude плана берётся одна
 // строка — файла одобрений. Остальные строки — как в файле сейчас (прочие изменения рендера — дело
@@ -641,6 +802,20 @@ export function approvalExclude(planned: Action[], dir: string): Extract<Action,
   return { ...rest, lines, ...(!same(pre, lines) && { pre }) };
 }
 
+// Строки блоков miksy в .git/info/exclude проекта: агента owner (и под его прежним именем) или всех агентов
+// (owner не задан). Сбой git, нет репо — пусто
+export function miksyExcludeLines(dir: string, owner?: string): string[] {
+  let ex: ReturnType<typeof excludeFile> = null;
+  try { ex = excludeFile(dir); } catch { return []; }
+  if (!ex || escapes(ex.path, ex.root) || !existsSync(ex.path)) return [];
+  const text = readFileSync(ex.path, "utf8");
+  if (!owner) return [...text.matchAll(/^# >>> miksy:\S+ \(сгенерировано, не править\)$([\s\S]*?)^# <<< miksy:/gm)]
+    .flatMap((m) => m[1].split(/\r?\n/).filter((l) => l && !l.startsWith("# ")));
+  const blockOwner = ex.shared ? `${owner}@${dir}` : owner;
+  const legacy = legacyOwner(blockOwner);
+  return [...excludeBlock(text, blockOwner), ...(legacy ? excludeBlock(text, legacy) : [])];
+}
+
 export function excludeBlock(text: string, owner: string): string[] {
   const m = text.match(blockRx(owner));
   return m ? m[0].split(/\r?\n/).filter((l) => l && !l.startsWith("# ")) : [];
@@ -649,14 +824,14 @@ export function excludeBlock(text: string, owner: string): string[] {
 export function describe(a: Action): string {
   switch (a.kind) {
     case "write": return `  записать (${a.why})  ${a.abs}`;
-    case "adopt": return `  взять под учёт       ${a.abs} (содержимое уже совпадает)`;
+    case "adopt": return `  взять под учёт       ${a.abs} (${a.known ? "файл miksy, которого не было в учёте" : "содержимое уже совпадает"})`;
     case "chmod": return `  права ${a.mode.toString(8).padStart(4, "0")}           ${a.abs} (содержимое не меняется)`;
     case "forget-merge": return `  снять с учёта        ${a.abs} ${JSON.stringify(a.key)} (родитель отсутствует)`;
-    case "delete": return `  удалить              ${a.abs}`;
+    case "delete": return `  удалить              ${a.abs}${a.known ? " (файл miksy, которого не было в учёте, — больше не нужен)" : ""}`;
     case "restore": return `  восстановить оригинал ${a.abs} ← ${a.source}`;
-    case "block": return `  блок инструкций     ${a.abs} (${a.hash ? "обновить" : "убрать только блок"})`;
+    case "block": return `  блок инструкций     ${a.abs} (${a.known ? (a.hash ? "взять под учёт — блок miksy, которого не было в учёте" : "убрать только блок — блок miksy, которого не было в учёте, больше не нужен") : a.hash ? "обновить" : "убрать только блок"})`;
     case "trust": return `  доверие ${a.format === "toml" ? "Codex" : "Claude"}     ${a.key[1]} (${a.remove ? "снять своё" : "добавить"})`;
-    case "approve": return `  одобрение .mcp.json  ${a.abs}: ${[...a.add.map((n) => `+ ${n}`), ...a.remove.map((n) => `- ${n} (снять своё)`)].join(", ") || "учёт"}`;
+    case "approve": return `  одобрение .mcp.json  ${a.abs}: ${[...a.add.map((n) => `+ ${n}`), ...a.remove.map((n) => `- ${n} (снять своё)`)].join(", ") || (a.known ? `взять под учёт — одобрения miksy, которых не было в учёте (${a.own.join(", ")})` : "учёт")}`;
     case "release": return `  снять с учёта        ${a.abs} (файлом владеет и цель ${a.owner} — не удаляю)`;
     case "merge":
       return [
@@ -935,7 +1110,11 @@ function writeExclude(a: Extract<Action, { kind: "exclude" }>, lines: string[], 
   const text = existsSync(a.abs) ? readFileSync(a.abs, "utf8") : "";
   backup(a.abs);
   const block = lines.length ? `\n${begin(a.owner)}\n${lines.join("\n")}\n${end(a.owner)}\n` : "\n";
-  writeAtomic(a.abs, text.replace(blockRx(a.owner, "gm"), "\n").replace(/\n*$/, "") + block);
+  // Блок агента под прежним именем (miksy:gemini) заменяется блоком под новым
+  const legacy = legacyOwner(a.owner);
+  const without = legacy ? text.replace(blockRx(legacy, "gm"), "\n") : text;
+  writeAtomic(a.abs, without.replace(blockRx(a.owner, "gm"), "\n").replace(/\n*$/, "") + block);
+  if (a.unrecorded) return;
   if (lines.length) state.exclude[pathKey(a.abs)] = lines;
   else delete state.exclude[pathKey(a.abs)];
 }

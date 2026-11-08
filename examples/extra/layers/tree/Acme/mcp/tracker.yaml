@@ -6,4 +6,4 @@ url: https://tracker.acme.example/mcp
 headers:
   Authorization: Bearer ${ACME_TRACKER_TOKEN}
 # Не подключать конкретному агенту:
-# agents: { gemini: skip }
+# agents: { antigravity: skip }

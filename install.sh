@@ -35,6 +35,23 @@ ask() { # ask <вопрос> → ответ в $REPLY (пустой — Enter и
     IFS= read -r REPLY <"$TTY" || REPLY=""
   fi
 }
+ask_path() { # ask_path <вопрос> <по умолчанию> → путь в $REPLY (пустой — по умолчанию)
+  # bash 4+ с терминалом — построчное редактирование (стрелки, правка) с подставленным значением по
+  # умолчанию (read -e -i); sh и старый bash (macOS /bin/bash 3.2) — вопрос, как у ask
+  case "${BASH_VERSION:-}" in
+    [4-9].*|[1-9][0-9].*)
+      if [ "$FROM_FILE" = 0 ] || [ -t 0 ]; then
+        REPLY=""
+        if [ "$FROM_FILE" = 1 ]; then
+          IFS= read -e -r -i "$2" -p "$1: " REPLY || REPLY=""
+        else
+          IFS= read -e -r -i "$2" -p "$1: " REPLY <"$TTY" || REPLY=""
+        fi
+        return
+      fi ;;
+  esac
+  ask "$1 [$2]:"
+}
 yes_no() { # yes_no <вопрос>: да — только явным ответом
   ask "$1 [y/N]"
   case "$REPLY" in [yYдД]*) return 0 ;; *) return 1 ;; esac
@@ -136,7 +153,7 @@ if [ "$FROM_FILE" = 1 ]; then
 fi
 if [ -z "$ENGINE" ]; then
   DEFAULT="$HOME/Projects/miksy"
-  ask "Куда скачать miksy [$DEFAULT]:"
+  ask_path "Куда скачать miksy" "$DEFAULT"
   DEST="${REPLY:-$DEFAULT}"
   case "$DEST" in "~") DEST="$HOME" ;; "~/"*) DEST="$HOME/${DEST#\~/}" ;; esac
   case "$DEST" in /*) ;; *) DEST="$(pwd)/$DEST" ;; esac

@@ -6,7 +6,7 @@ import { envLine, nakedSecrets, redact, redactArgs, SECRET_KEY } from "./secrets
 import { LAYER_PARTS, loadSecrets, configRoot } from "./load";
 import type { Machine, McpServer } from "./types";
 
-import { slash } from "./paths";
+import { slash, trimSlash } from "./paths";
 
 // Каталог слоя по уровню: global | workspace | путь в дереве (Org, Org/Team, Org/proj)
 // Уровень — только имена каталогов через «/»: без .., абсолютных путей, дисков и обратной косой;
@@ -47,7 +47,7 @@ export function fromNative(
   machine: Machine,
   level: string,
   existingSecrets: Record<string, string> = {},
-): { server: McpServer; secrets: Record<string, string>; open: string[] } {
+): { server: McpServer; secrets: Record<string, string>; open: string[]; elsewhere: { path: string; tree: string }[] } {
   const d = { ...def } as Record<string, any>;
   const s: McpServer = { name };
   const prefix = envName(level === "" || level === "workspace" ? "workspace" : level);
@@ -66,20 +66,52 @@ export function fromNative(
   };
   const refFor = (base: string) => (value: string, hint: string) => pickSecret(hint ? `${base}_${hint}` : base, value);
 
-  // Пути машины → переменные (длинные значения первыми, без учёта регистра на Windows)
+  // Пути машины → переменные (длинные значения первыми, без учёта регистра на Windows). Путь — целиком,
+  // до границы имени: D:/Work не задевает D:/Work2. ${WORKSPACE} — только основной (первый) корень и то,
+  // что к нему относится, при любом уровне --to. Путь в другой корень (и во вложенный в основной) не
+  // сворачивается ни в ${WORKSPACE}, ни в ${HOME} — только в переменную, накрывающую корень целиком
+  // (CLIENTS: "G:/Clients"); иначе остаётся как есть (elsewhere — подсказать переменную в vars: на другой
+  // машине тот корень лежит иначе)
+  // Косая в конце — прочь, кроме корня диска: с X:/ путь X:/tools сворачивается в ${WORKSPACE}tools, и
+  // подстановка вернёт ровно X:/tools. Корень файловой системы «/» не сворачивается
+  const trim = (p: string) => { const t = trimSlash(slash(p)); return t === "/" ? "" : t; };
+  const others = (machine.roots ?? []).slice(1).map((r) => ({ path: trim(r.path), tree: r.tree }));
+  const elsewhere = new Map<string, string>();
   const varsByLen = [
     ...Object.entries(machine.vars),
     ["WORKSPACE", machine.workspace],
     ["HOME", machine.home],
-  ].sort((a, b) => b[1].length - a[1].length);
+  ].map(([k, v]) => [k, trim(v)] as [string, string]).sort((a, b) => b[1].length - a[1].length);
+  const win = machine.os === "windows";
+  const find = (s: string, p: string, from: number) => (win ? s.toLowerCase().indexOf(p.toLowerCase(), from) : s.indexOf(p, from));
+  const boundary = (s: string, j: number) => j >= s.length || /[/\\\s"';,=)\]}]/.test(s[j]);
+  const all = (s: string, p: string) => { const at: number[] = []; if (!p) return at; for (let i = find(s, p, 0); i >= 0; i = find(s, p, i + 1)) if (p.endsWith("/") || boundary(s, i + p.length)) at.push(i); return at; };
+  type Span = { from: number; to: number };
+  const overlap = (a: Span, b: Span) => a.from < b.to && b.from < a.to;
+  const covers = (a: Span, b: Span) => a.from <= b.from && a.to >= b.to;
   const unpath = (v: string) => {
-    let out = slash(v);
-    for (const [k, val] of varsByLen) {
-      const p = slash(val);
+    const src = slash(v);
+    // Места путей других корней; корень внутри другого (вложенный) — только самый глубокий
+    const guarded: (Span & { root: { path: string; tree: string } })[] = [];
+    for (const o of [...others].sort((a, b) => b.path.length - a.path.length))
+      for (const i of all(src, o.path)) {
+        const g = { from: i, to: i + o.path.length, root: o };
+        if (!guarded.some((x) => covers(x, g))) guarded.push(g);
+      }
+    // Подстановки — по исходной строке, без пересечений; через место другого корня — только накрыв его
+    // целиком (основной корень внутри дополнительного: ${WORKSPACE} накрывает путь внешнего корня)
+    const chosen: (Span & { k: string })[] = [];
+    for (const [k, p] of varsByLen) {
       if (!p) continue;
-      const i = machine.os === "windows" ? out.toLowerCase().indexOf(p.toLowerCase()) : out.indexOf(p);
-      if (i >= 0) out = out.slice(0, i) + `\${${k}}` + out.slice(i + p.length);
+      for (const i of all(src, p)) {
+        const c = { from: i, to: i + p.length, k };
+        if (chosen.some((x) => overlap(x, c)) || guarded.some((g) => overlap(g, c) && !covers(c, g))) continue;
+        chosen.push(c);
+      }
     }
+    for (const g of guarded) if (!chosen.some((c) => covers(c, g))) elsewhere.set(g.root.path, g.root.tree);
+    let out = src;
+    for (const c of [...chosen].sort((a, b) => b.from - a.from)) out = out.slice(0, c.from) + `\${${c.k}}` + out.slice(c.to);
     return out;
   };
   // env/headers: значение по «секретному» имени — целиком; Bearer-токен заголовка — <имя сервера>_TOKEN
@@ -124,8 +156,14 @@ export function fromNative(
   };
   const extra = Object.fromEntries(Object.entries(d).filter(([k]) => !known.has(k)).map(([k, v]) => [k, scrub(v, k)]));
   if (Object.keys(extra).length) s.agents = { [agent]: { raw: extra } };
-  return { server: s, secrets, open: nakedSecrets(s as unknown as Record<string, unknown>) };
+  return { server: s, secrets, open: nakedSecrets(s as unknown as Record<string, unknown>), elsewhere: [...elsewhere].map(([path, tree]) => ({ path, tree })) };
 }
+
+// Подсказка adopt: пути в другие корни workspace остались в слое как есть
+export const elsewhereText = (roots: { path: string; tree: string }[]) => roots.map((r) => {
+  const v = envName(r.tree) || "ROOT";
+  return `  путь в корне ${r.path} (не основном) остался в слое как есть — на другой машине этот корень лежит иначе: заведите переменную в vars local/machine.yaml (${v}: "${r.path}") и замените в слое ${r.path} на \${${v}}`;
+});
 
 // Простой YAML для определения MCP: строки в двойных кавычках (валидный YAML)
 export function mcpYaml(s: McpServer, comment?: string): string {

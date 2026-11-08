@@ -1,4 +1,4 @@
-// Что Gemini / Antigravity видит сейчас из ручных конфигов — для сравнения с тем, что сгенерирует miksy.
+// Что Antigravity видит сейчас из ручных конфигов — для сравнения с тем, что сгенерирует miksy.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CurrentState } from "../../src/adapter";

@@ -5,6 +5,7 @@ import { dirname, join, relative } from "node:path";
 import type { Adapter, Target } from "./adapter";
 import type { Manifest } from "./manifest";
 import { repoOf, trackedPaths } from "./git";
+import { coveredBy, miksyExcludeLines } from "./apply";
 import type { AgentId } from "./teamskills";
 import type { Machine, Resolved } from "./types";
 
@@ -62,6 +63,9 @@ export function foreignSkills(projectDir: string, readers: Record<AgentId, strin
   // loadManifest уже канонизировал весь учёт: не обходим файлы всех целей для каждого проекта.
   const owned = new Set(Object.values(manifest.targets).flatMap((s) => Object.keys(s.files)));
   const dirs = [...new Set(Object.values(readers).flat())];
+  // Каталог skill под строкой блока miksy в .git/info/exclude — skill записал miksy (учёт забыт — clean --forget,
+  // диск вернулся: sync возьмёт его обратно), а не агент в обход слоёв: adopt не советуем
+  const hidden = miksyExcludeLines(projectDir);
   const out: ForeignSkill[] = [];
   for (const rel of dirs) {
     const base = join(projectDir, rel);
@@ -70,6 +74,7 @@ export function foreignSkills(projectDir: string, readers: Record<AgentId, strin
       if (!e.isDirectory() || !existsSync(join(base, e.name, "SKILL.md"))) continue;
       const skillMd = slash(join(base, e.name, "SKILL.md"));
       if (owned.has(pathKey(skillMd))) continue;
+      if (hidden.length && coveredBy(hidden, slash(relative(projectDir, skillMd)))) continue;
       if (teamOwned(skillMd)) continue;
       const seenBy = Object.keys(readers).filter((a) => readers[a].includes(rel));
       out.push({ kind: "skill", name: e.name, dir: slash(join(base, e.name)), seenBy });

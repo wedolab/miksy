@@ -2,13 +2,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { gemini, nativeMcp } from "../adapters/gemini";
-import { currentGlobal, currentProject, readJsonc, strictJson } from "../adapters/gemini/current";
+import { antigravity, nativeMcp } from "../adapters/antigravity";
+import { currentGlobal, currentProject, readJsonc, strictJson } from "../adapters/antigravity/current";
 import type { Machine, Resolved } from "../src/types";
 import { plan } from "../src/apply";
 import { emptyState } from "../src/manifest";
 
-const temp = mkdtempSync(join(tmpdir(), "gemini-test-"));
+const temp = mkdtempSync(join(tmpdir(), "antigravity-test-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
 function fixture() {
@@ -39,7 +39,7 @@ function fixture() {
   return { dir, home, project, machine, cfg };
 }
 
-describe("gemini adapter", () => {
+describe("antigravity adapter", () => {
   describe("nativeMcp", () => {
     test("stdio с command, args и env", () => {
       expect(nativeMcp({ name: "s", command: "bin", args: ["-y", "p"], env: { TOKEN: "v" } })).toEqual({
@@ -57,8 +57,8 @@ describe("gemini adapter", () => {
     });
 
     test("skip и raw", () => {
-      expect(nativeMcp({ name: "s", command: "bin", agents: { gemini: "skip" } })).toBeNull();
-      expect(nativeMcp({ name: "s", command: "bin", agents: { gemini: { raw: { disabled: true } } } })).toEqual({
+      expect(nativeMcp({ name: "s", command: "bin", agents: { antigravity: "skip" } })).toBeNull();
+      expect(nativeMcp({ name: "s", command: "bin", agents: { antigravity: { raw: { disabled: true } } } })).toEqual({
         command: "bin",
         args: [],
         disabled: true,
@@ -69,7 +69,7 @@ describe("gemini adapter", () => {
   describe("render: global", () => {
     test("инструкции в ~/.gemini/GEMINI.md, skills в ~/.gemini/config/skills/, mcp в CLI и IDE", () => {
       const { cfg, machine } = fixture();
-      const r = gemini.render(cfg, { scope: "global" }, machine);
+      const r = antigravity.render(cfg, { scope: "global" }, machine);
 
       expect(r.warnings).toEqual([]);
 
@@ -120,7 +120,7 @@ describe("gemini adapter", () => {
     test("нестрогий JSON (комментарии) в существующем mcp_config.json вызывает warning", () => {
       const { cfg, machine, home } = fixture();
       writeFileSync(join(home, ".gemini", "config", "mcp_config.json"), '{\n  // комментарий\n  "mcpServers": {}\n}\n');
-      const r = gemini.render(cfg, { scope: "global" }, machine);
+      const r = antigravity.render(cfg, { scope: "global" }, machine);
       expect(r.warnings.some((w) => w.includes("не парсится как строгий JSON"))).toBe(true);
       expect(r.files.some((f) => f.path === ".gemini/config/mcp_config.json")).toBe(false);
       // IDE файл при этом чистый и записывается
@@ -131,7 +131,7 @@ describe("gemini adapter", () => {
   describe("render: project", () => {
     test("собственный плагин в .agents/plugins/miksy/: plugin.json, rules/AGENTS.md, skills/ и mcp_config.json", () => {
       const { cfg, machine, project } = fixture();
-      const r = gemini.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
+      const r = antigravity.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
 
       expect(r.warnings).toEqual([]);
 
@@ -179,8 +179,8 @@ describe("gemini adapter", () => {
       const { cfg, machine, project } = fixture();
       expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
 
-      const r = gemini.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
-      const actionsUntracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "gemini");
+      const r = antigravity.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
+      const actionsUntracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "antigravity");
       const excludeAction = actionsUntracked.find((a) => a.kind === "exclude");
       expect(excludeAction).toBeDefined();
       expect(excludeAction && excludeAction.kind === "exclude" ? excludeAction.lines : []).toEqual([
@@ -192,7 +192,7 @@ describe("gemini adapter", () => {
       writeFileSync(join(project, ".agents", "plugins", "miksy", "rules", "AGENTS.md"), "# Team\n");
       expect(Bun.spawnSync(["git", "-C", project, "add", "--", ".agents/plugins/miksy/rules/AGENTS.md"]).exitCode).toBe(0);
 
-      const actionsTracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "gemini");
+      const actionsTracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "antigravity");
       expect(actionsTracked.some((a) => a.kind === "conflict" && a.abs.includes("AGENTS.md"))).toBe(true);
     });
 
@@ -206,7 +206,7 @@ describe("gemini adapter", () => {
         skills: [{ item: { name: "s", dir: join(dir, "skill") }, layer: "l" }],
         notes: [],
       };
-      const r = gemini.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
+      const r = antigravity.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
       expect(r.files.some((f) => f.path.endsWith("bin.dat"))).toBe(false);
       expect(r.warnings.some((w) => w.includes("бинарный файл bin.dat пропущен"))).toBe(true);
     });
@@ -229,7 +229,7 @@ describe("gemini adapter", () => {
         ],
         notes: [],
       };
-      const r = gemini.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
+      const r = antigravity.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
       const skillFile = r.files.find((f) => f.path === ".agents/plugins/miksy/skills/s/SKILL.md");
       expect(skillFile?.content).toContain("Patched body");
     });
@@ -237,7 +237,7 @@ describe("gemini adapter", () => {
 
   describe("metadata and current state", () => {
     test("skillDirs указывает на проверенный .agents/skills", () => {
-      expect(gemini.skillDirs).toEqual([".agents/skills"]);
+      expect(antigravity.skillDirs).toEqual([".agents/skills"]);
     });
 
     test("knownDirs читает ~/.gemini/projects.json", () => {
@@ -251,7 +251,7 @@ describe("gemini adapter", () => {
           },
         }),
       );
-      expect(gemini.knownDirs!(machine)).toEqual(["D:/work/project1", "D:/work/project2"]);
+      expect(antigravity.knownDirs!(machine)).toEqual(["D:/work/project1", "D:/work/project2"]);
     });
 
     test("currentGlobal читает GEMINI.md и mcp_config.json из CLI и IDE", () => {

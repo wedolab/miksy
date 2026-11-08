@@ -1,11 +1,12 @@
 // Защита прогона (test/guard.ts): запуск CLI с записью, который целится в настоящие HOME, конфигурацию
 // или workspace, — останавливает прогон, какие бы переменные ни понимала запускаемая версия
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type Real, unsafeSpawn } from "./guard";
 import { put } from "./helpers";
+import { missingDrive } from "./nodrive";
 
 // «Настоящее» окружение и песочница — оба во временном каталоге, но песочница — только safe
 function world() {
@@ -60,6 +61,67 @@ describe("guard: запуск CLI в тесте", () => {
     expect(unsafeSpawn(["bun", cli, "setup", "--yes"], { env: { ...w.env, BUN_INSTALL: `${w.realHome}/.bun` } }, w.real, w.safe)).toContain("BUN_INSTALL");
     // без HOME процесс взял бы настоящий
     expect(unsafeSpawn(["bun", cli, "sync", "--global"], { env: { MIKSY_CONFIG: w.box.config } }, w.real, w.safe)).toContain("HOME");
+  });
+
+  test("несколько корней workspace (список): настоящий среди них — остановка; realEnvironment видит все корни", async () => {
+    const w = world();
+    const leak = `${w.safe[0]}/roots-config`;
+    put(`${leak}/map.yaml`, "global: []\n");
+    put(`${leak}/local/machine.yaml`, `workspace:\n  - "${w.box.ws}"\n  - { path: "${w.realWs}", tree: Clients }\n`);
+    const why = unsafeSpawn(["bun", `${w.box.engine}/src/cli.ts`, "sync", "--all", "--yes"], { env: { ...w.env, MIKSY_CONFIG: leak } }, w.real, w.safe);
+    expect(why).toContain("workspace");
+    expect(why).toContain("настоящий");
+    const { realEnvironment } = await import("./guard");
+    put(`${w.realCfg}/local/machine.yaml`, `workspace:\n  - ${w.realWs}\n  - { path: "${w.root}/real/drive", tree: X }\n`);
+    expect(realEnvironment({ MIKSY_CONFIG: w.realCfg, HOME: w.realHome }, `${w.box.engine}`, w.realHome).workspaces).toEqual([w.realWs, `${w.root}/real/drive`]);
+  });
+
+  test("sync и target без пути пишут в текущий каталог — он проверяется", () => {
+    const w = world();
+    const cli = `${w.box.engine}/src/cli.ts`;
+    expect(unsafeSpawn(["bun", cli, "sync"], { env: w.env, cwd: `${w.realWs}/Org/p1` }, w.real, w.safe)).toContain("текущий каталог");
+    expect(unsafeSpawn(["bun", cli, "sync", "--dry-run", "--agent", "claude"], { env: w.env, cwd: `${w.realWs}/Org/p1` }, w.real, w.safe)).toContain("текущий каталог");
+    expect(unsafeSpawn(["bun", cli, "target"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toContain("текущий каталог");
+    // С путём или --all/--global текущий каталог не цель
+    expect(unsafeSpawn(["bun", cli, "sync", "--all", "--yes"], { env: w.env, cwd: `${w.realWs}/Org/p1` }, w.real, w.safe)).toBeNull();
+    expect(unsafeSpawn(["bun", cli, "sync", `${w.box.ws}/p`], { env: w.env, cwd: `${w.realWs}/Org/p1` }, w.real, w.safe)).toBeNull();
+    expect(unsafeSpawn(["bun", cli, "sync"], { env: w.env, cwd: `${w.box.ws}/p` }, w.real, w.safe)).toBeNull();
+  });
+
+  test("root: путь корня и (root add без пути) текущий каталог проверяются; корень на отсутствующем диске — отказ, а не сбой проверки", () => {
+    const w = world();
+    const cli = `${w.box.engine}/src/cli.ts`;
+    expect(unsafeSpawn(["bun", cli, "root", "add", "--tree", "X"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toContain("текущий каталог");
+    expect(unsafeSpawn(["bun", cli, "root", "add", `${w.realWs}/Org`, "--tree", "X"], { env: w.env }, w.real, w.safe)).toContain("путь в аргументах");
+    expect(unsafeSpawn(["bun", cli, "root", "remove", `${w.realWs}/Org`], { env: w.env }, w.real, w.safe)).toContain("путь в аргументах");
+    expect(unsafeSpawn(["bun", cli, "root", "add", `${w.box.ws}/p`, "--tree", "X"], { env: w.env }, w.real, w.safe)).toBeNull();
+    // Корень на диске, которого нет: проверка не падает (путь не раскрывается), запуск — не в песочнице
+    const away = missingDrive();
+    const leak = `${w.safe[0]}/away-config`;
+    put(`${leak}/map.yaml`, "global: []\n");
+    put(`${leak}/local/machine.yaml`, `workspace:\n  - "${w.box.ws}"\n  - { path: "${away}", tree: X }\n`);
+    expect(unsafeSpawn(["bun", cli, "sync", "--all", "--yes"], { env: { ...w.env, MIKSY_CONFIG: leak } }, w.real, w.safe)).toContain(`${away} — вне песочницы`);
+    expect(unsafeSpawn(["bun", cli, "sync", "--all", "--yes"], { env: w.env }, { ...w.real, workspaces: [...w.real.workspaces, away] }, w.safe)).toBeNull();
+    // Ссылка в никуда внутри песочницы (куда поведёт запись, неизвестно) — остановка, а не пропуск и не сбой
+    const target = `${w.root}/gone`, link = `${w.safe[0]}/broken`;
+    put(`${target}/.keep`, "");
+    symlinkSync(target, link, process.platform === "win32" ? "junction" : "dir");
+    rmSync(target, { recursive: true });
+    put(`${leak}/local/machine.yaml`, `workspace: "${link}"\n`);
+    expect(unsafeSpawn(["bun", cli, "sync", "--all", "--yes"], { env: { ...w.env, MIKSY_CONFIG: leak } }, w.real, w.safe)).toContain(`${link} — путь не раскрывается`);
+    expect(unsafeSpawn(["bun", cli, "sync", link], { env: w.env }, w.real, w.safe)).toContain("путь не раскрывается");
+  });
+
+  test("путь цели без косой (sync p1 — каталог от каталога запуска) проверяется, как и с косой (R8)", () => {
+    const w = world();
+    const cli = `${w.box.engine}/src/cli.ts`;
+    put(`${w.realWs}/Org/p1/.keep`, "");
+    expect(unsafeSpawn(["bun", cli, "sync", "p1"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toContain("путь в аргументах");
+    expect(unsafeSpawn(["bun", cli, "clean", "p1", "--agent", "claude"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toContain("путь в аргументах");
+    expect(unsafeSpawn(["bun", cli, "adopt", "p1", "srv", "--to", "Org"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toContain("путь в аргументах");
+    // Имя добавки у adopt --global и значения флагов — не пути
+    expect(unsafeSpawn(["bun", cli, "adopt", "--global", "srv", "--to", "Org"], { env: w.env, cwd: `${w.realWs}/Org` }, w.real, w.safe)).toBeNull();
+    expect(unsafeSpawn(["bun", cli, "sync", "p", "--agent", "claude"], { env: w.env, cwd: w.box.ws }, w.real, w.safe)).toBeNull();
   });
 
   test("update: только копия движка в песочнице (он меняет git-клон движка и запускает setup)", () => {

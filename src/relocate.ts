@@ -82,6 +82,7 @@ export function findMoves(m: Manifest, config: string, candidates: () => string[
     if (dir !== "global") byDir.set(dir, [...(byDir.get(dir) ?? []), st]);
   }
   let pool: string[] | null = null;
+  const forgotten = new Set(Object.keys(m.forgotten ?? {}).map(dirOf).map(fold));
   for (const dir of [...byDir.keys()].sort((a, b) => a.length - b.length)) {
     if (exists(dir)) continue;
     const mapped = movePath(dir, moves);
@@ -95,7 +96,9 @@ export function findMoves(m: Manifest, config: string, candidates: () => string[
     if (!ev.length) continue;
     pool ??= candidates();
     const taken = new Set([...byDir.keys()].map((d) => fold(movePath(d, moves))).filter((d) => exists(d)));
-    const hits = pool.filter((c) => !taken.has(fold(c)) && !moves.some((mv) => fold(mv.to) === fold(c)) && ev.every((e) => same(c, e)));
+    // Проект с отметкой «проект забыт» — не кандидат: в нём файлы miksy без учёта по устройству «забыть», а не
+    // потому, что сюда переехал другой проект (его разберёт план с отметкой)
+    const hits = pool.filter((c) => !forgotten.has(fold(c)) && !taken.has(fold(c)) && !moves.some((mv) => fold(mv.to) === fold(c)) && ev.every((e) => same(c, e)));
     if (hits.length === 1) moves.push({ from: dir, to: hits[0], how: "files" });
   }
   return moves;
@@ -124,11 +127,11 @@ export function applyMoves(m: Manifest, moves: Move[]): Manifest {
     return out;
   };
   // Две записи на одном месте сливает normalizeManifest — как старые написания одного пути
-  const entries = Object.entries(m.targets).map(([id, st]): [string, TargetState] => {
-    const dir = dirOf(id);
-    return [`${id.slice(0, id.indexOf("|") + 1)}${dir === "global" ? dir : mp(dir)}`, move(st)];
-  });
-  return normalizeManifest(m, entries);
+  const target = (id: string) => { const dir = dirOf(id); return `${id.slice(0, id.indexOf("|") + 1)}${dir === "global" ? dir : mp(dir)}`; };
+  const entries = Object.entries(m.targets).map(([id, st]): [string, TargetState] => [target(id), move(st)]);
+  // Отметки «проект забыт» переезжают вместе с каталогом (родитель переехал)
+  const forgotten = m.forgotten && Object.fromEntries(Object.entries(m.forgotten).map(([id, v]) => [target(id), v]));
+  return normalizeManifest({ ...m, ...(forgotten && { forgotten }) }, entries);
 }
 
 export const HOW: Record<Move["how"], string> = {

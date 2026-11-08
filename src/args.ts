@@ -18,7 +18,10 @@ const oneTarget = (flags: Record<string, string>, positional: string[]) => {
 
 export const COMMANDS: Record<string, Spec> = {
   setup: { bool: ["yes", "force", "backup"], positional: [0, 0] },
-  explain: { positional: [0, 1] },
+  explain: {
+    bool: ["global"], positional: [0, 1],
+    check: (f, p) => { if ("global" in f && p.length) throw new UsageError("укажите что-то одно: <путь> или --global"); },
+  },
   projects: { valued: ["agent"], positional: [0, 0] },
   skills: {
     valued: ["agent"], bool: ["all"], positional: [0, 1],
@@ -31,7 +34,8 @@ export const COMMANDS: Record<string, Spec> = {
       oneTarget(f, p);
     },
   },
-  clean: { valued: ["agent"], bool: ["global", "all", "dry-run", "force"], positional: [0, 1], check: oneTarget },
+  // --forget — забыть записанное в каталог, которого нет (диск не подключён или данных больше нет)
+  clean: { valued: ["agent"], bool: ["global", "all", "dry-run", "force", "forget"], positional: [0, 1], check: oneTarget },
   adopt: {
     valued: ["agent", "to"], bool: ["global", "dry-run", "yes"], positional: [1, 2],
     check: (f, p) => {
@@ -41,6 +45,19 @@ export const COMMANDS: Record<string, Spec> = {
   },
   doctor: { valued: ["agent"], bool: ["verbose"], positional: [0, 0] },
   target: { bool: ["remove", "dry-run"], positional: [0, 1] },
+  // root — список корней; root add [<путь>] [--tree <ветка>]; root remove <путь>
+  root: {
+    valued: ["tree"], bool: ["dry-run", "forget", "yes"], positional: [0, 2],
+    check: (f, p) => {
+      const usage = "использование: miksy root add [<путь>] [--tree <ветка>]  |  miksy root remove <путь>  |  miksy root (список корней)";
+      if (p.length && p[0] !== "add" && p[0] !== "remove") throw new UsageError(usage);
+      if (p[0] === "remove" && p.length !== 2) throw new UsageError("miksy root remove <путь> — укажите, какой корень убрать");
+      if ("tree" in f && p[0] !== "add") throw new UsageError("--tree — только для miksy root add");
+      if ("forget" in f && p[0] !== "remove") throw new UsageError("--forget — только для miksy root remove");
+      if ("yes" in f && p[0] !== "add") throw new UsageError("--yes — только для miksy root add (добавить корнем каталог, который сам проект, без вопроса)");
+      if ("dry-run" in f && !p.length) throw new UsageError("--dry-run — для miksy root add и root remove");
+    },
+  },
   trust: {
     valued: ["agent"], bool: ["confirm", "deny"], positional: [0, 1],
     check: (f) => { if ("confirm" in f && "deny" in f) throw new UsageError("укажите что-то одно: --confirm или --deny"); },

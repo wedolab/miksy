@@ -10,12 +10,12 @@ export type AgentId = string;
 
 // Где агент сам находит skills проекта: <каталог>/<имя>/SKILL.md.
 // По умолчанию; адаптер уточняет через skillDirs. opencode — проверено вживую (адаптер);
-// gemini — не проверен вживую.
+// antigravity — уточняет адаптер (.agents/skills, проверено вживую).
 export const DEFAULT_READERS: Record<AgentId, string[]> = {
   claude: [".claude/skills"],
   codex: [".agents/skills"],
   opencode: [".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill"],
-  gemini: [".gemini/skills"],
+  antigravity: [".gemini/skills"],
 };
 
 export interface SkillCopy {

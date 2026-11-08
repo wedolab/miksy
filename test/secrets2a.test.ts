@@ -14,7 +14,7 @@ const TOKENS = {
   HTTP_TOKEN: "http-artificial-0004",
   URL_TOKEN: "url-artificial-0005",
 };
-const ALL = ["claude", "codex", "opencode", "gemini"];
+const ALL = ["claude", "codex", "opencode", "antigravity"];
 
 // Все слои с секретами во всех местах: env целиком и частью, аргумент, заголовок, URL
 function layers(f: ReturnType<typeof cliFixture>, where = "tree") {

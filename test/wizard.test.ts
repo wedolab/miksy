@@ -11,6 +11,7 @@ import { ENGINE, configRoot } from "../src/load";
 import { canonical, inside } from "../src/paths";
 import { layoutWarning, setup, type System } from "../src/setup";
 import { put } from "./helpers";
+import { missingDrive } from "./nodrive";
 
 type Step = { q: RegExp; a: string | (() => string) };
 
@@ -110,7 +111,7 @@ describe("мастер setup", () => {
       { q: /Откуда её взять/, a: "2" },
       { q: /Где хранить конфигурацию/, a: "" },
       { q: /git-репо и записать первый коммит/, a: "y" },
-      { q: /Корень workspace/, a: "" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "" },
       ...ifInstaller([{ q: /Выполнить «.*node/i, a: "" }]),
@@ -135,7 +136,7 @@ describe("мастер setup", () => {
     const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: string; agents: string[] };
     expect(canonical(machine.workspace)).toBe(canonical(f.ws));
     expect(machine.agents).toEqual(["claude"]);
-    expect(t).toMatch(/не найдены: codex, opencode, gemini — miksy их не ставит.*README/);
+    expect(t).toMatch(/не найдены: codex, opencode, antigravity — miksy их не ставит.*README/);
     // 3. Копия настроек до записи — исходный ~/.claude.json
     const backups = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-miksy-"));
     expect(backups.length).toBe(1);
@@ -175,7 +176,7 @@ describe("мастер setup", () => {
       { q: /Откуда её взять/, a: "1" },
       { q: /Адрес git-репо конфигурации/, a: `${f.dir}/нет-такого.git` },
       { q: /Адрес git-репо конфигурации/, a: bare },
-      { q: /Корень workspace/, a: "" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       ...ifInstaller([{ q: /Выполнить «/, a: "n" }]),
       { q: /Создать команду/, a: "n" },
@@ -204,7 +205,7 @@ describe("мастер setup", () => {
       { q: /Откуда её взять/, a: "2" },
       { q: /Где хранить конфигурацию/, a: "" },
       { q: /git-репо/, a: "n" },
-      { q: /Корень workspace/, a: "" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "y" },
       { q: linux ? /Создать команду/ : /Выполнить «/, a: () => { throw new Error("прервано"); } },
@@ -251,7 +252,7 @@ describe("мастер setup", () => {
     f.bin.set("node", "node");
     const base: Step[] = [
       { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
-      { q: /Корень workspace/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "n" }, { q: /Создать команду/, a: "n" },
     ];
     f.wizard([
@@ -287,7 +288,7 @@ describe("мастер setup", () => {
     userMcp(f.home, { fetcher: { type: "stdio", command: "uvx", args: ["mcp-server-fetch"] }, mine: { type: "stdio", command: "node", args: ["x.js"] } });
     f.wizard([
       { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
-      { q: /Корень workspace/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Скопировать это в/, a: "n" },
       // Шаг 4: только npx (context7 из примера); uvx и node — ещё не в слоях
       ...ifInstaller([{ q: /Выполнить «.*node/i, a: "n" }]),
@@ -310,7 +311,7 @@ describe("мастер setup", () => {
     f.bin.set("npx", "npx");
     const steps: Step[] = [
       { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
-      { q: /Корень workspace/, a: () => { put(`${f.config}/layers/tree/mcp/demo.yaml`, "name: demo\ncommand: npx\nargs: [demo]\nenv:\n  A: ${DEMO_A}\n  B: ${DEMO_B}\n"); return ""; } },
+      { q: /Корень workspace/, a: () => { put(`${f.config}/layers/tree/mcp/demo.yaml`, "name: demo\ncommand: npx\nargs: [demo]\nenv:\n  A: ${DEMO_A}\n  B: ${DEMO_B}\n"); return ""; } }, { q: /Есть ещё папки/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       { q: /Создать команду/, a: "n" },
       // Enter без изменений — ещё нет обоих; затем A записан — остался B; затем s — позже
@@ -386,6 +387,108 @@ describe("мастер setup", () => {
     const warn = `в конфигурации есть слой Tools/Miksy (target: true), а движок лежит в ${f.engine} — на первой машине он был в ${f.ws}/Tools/Miksy/miksy`;
     expect(t.split(warn).length).toBe(2);
     expect(existsSync(`${f.ws}/Tools`)).toBe(false);
+  }, 60000);
+
+  test("ещё папки с проектами: корень с веткой дерева (Enter — имя папки); повтор, неверная и занятая ветка — не добавляются; путь на отсутствующем диске — недоступный корень", () => {
+    const f = fixture();
+    const drive = `${f.dir}/drive`;
+    const away = missingDrive("Projects");
+    project(drive, "Client1/site");
+    const code = f.wizard([
+      { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
+      { q: /Корень workspace/, a: "" },
+      { q: /Есть ещё папки/, a: `${f.ws}/` },
+      { q: /Есть ещё папки/, a: drive }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — drive\)/, a: "../x" },
+      { q: /Есть ещё папки/, a: drive }, { q: /Ветка этой папки в дереве слоёв/, a: "Clients" },
+      { q: /Есть ещё папки/, a: `${f.dir}/other` }, { q: /Ветка этой папки в дереве слоёв/, a: "clients" },
+      { q: /Есть ещё папки/, a: `${f.dir}/later` }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — later\)/, a: "" },
+      { q: /Есть ещё папки/, a: away }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — Projects\)/, a: "" },
+      { q: /Есть ещё папки/, a: "" },
+      { q: /Записать local\/machine\.yaml/, a: "y" },
+      ...ifInstaller([{ q: /Выполнить «/, a: "n" }]),
+      { q: /Создать команду/, a: "n" },
+      { q: /полный план/, a: "" },
+      { q: /Записать настройки агентам сейчас/, a: "n" },
+    ]);
+    expect(code).toBe(0);
+    const t = f.text();
+    expect(t).toContain(`${f.ws} — уже указан (тот же каталог) — не добавляю`);
+    expect(t).toContain("«../x» — не ветка дерева");
+    expect(t).toContain("ветка clients уже у другой папки — выберите другое имя; папка не добавлена");
+    expect(t).toContain(`✓ ещё корень: ${drive} → layers/tree/Clients`);
+    expect(t).toContain(`✓ ещё корень: ${f.dir}/later → layers/tree/later (каталога сейчас нет — miksy пропускает его, пока он не появится)`);
+    expect(t).toContain(`✓ ещё корень: ${away} → layers/tree/Projects (каталога сейчас нет`);
+    const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: unknown };
+    expect(machine.workspace).toEqual([f.ws, { path: drive, tree: "Clients" }, { path: `${f.dir}/later`, tree: "later" }, { path: away, tree: "Projects" }]);
+    // План уже по всем корням: проект второго корня — в его месте дерева; недоступные корни — с предупреждением
+    expect(t).toMatch(/проекты и группы: создать \d+/);
+    // Повторный setup без --force — корни из файла, не переспрашивает
+    f.out.length = 0;
+    f.wizard([...ifInstaller([{ q: /Выполнить «/, a: "n" }]), { q: /Создать команду/, a: "n" }, { q: /полный план/, a: "" }, { q: /Записать настройки агентам сейчас/, a: "n" }]);
+    expect(f.text()).toContain(`Workspace: ${f.ws}  (из local/machine.yaml)\n  ещё корень: ${drive} → layers/tree/Clients`);
+    expect(f.text()).toContain(`  ещё корень: ${away} → layers/tree/Projects`);
+  }, 120000);
+
+  test("setup --force: основным выбран бывший дополнительный корень — уходит из дополнительных и сохраняет свою ветку (R4)", () => {
+    const f = fixture();
+    const drive = `${f.dir}/drive`;
+    project(drive, "Client1/site");
+    expect(f.wizard([], { yes: true })).toBe(0);
+    put(`${f.config}/local/machine.yaml`, `workspace:\n  - { path: "${f.ws}", tree: Main }\n  - { path: "${drive}", tree: Clients }\nagents: [claude]\n`);
+    f.out.length = 0;
+    const code = f.wizard([
+      { q: /Корень workspace/, a: drive },
+      { q: /Есть ещё папки/, a: "" },
+      { q: /Записать local\/machine\.yaml/, a: "y" },
+      ...ifInstaller([{ q: /Выполнить «/, a: "n" }]),
+      { q: /нет в PATH|Создать команду/, a: "n" },
+      { q: /полный план/, a: "" },
+      { q: /Записать настройки агентам сейчас/, a: "n" },
+    ], { force: true });
+    expect(code).toBe(0);
+    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит (вернуть — miksy root add)`);
+    expect(f.text()).not.toContain("указан дважды");
+    // Проекты drive получали слои layers/tree/Clients/… — и после смены основного тоже
+    const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: unknown };
+    expect(machine.workspace).toEqual([{ path: drive, tree: "Clients" }]);
+  }, 120000);
+
+  test.skipIf(win)("PATH: установщик Bun уже прописал каталог в ~/.zshrc ($BUN_INSTALL/bin) — вторую строку не дописывает", () => {
+    const f = fixture();
+    put(`${f.home}/.zshrc`, `# bun\nexport BUN_INSTALL="${f.dir}/bun"\nexport PATH="$BUN_INSTALL/bin:$PATH"\n`);
+    process.env.MIKSY_ORIGINAL_PATH = "/usr/bin:/bin";
+    const code = f.wizard([
+      { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" },
+      // Проектов нет — серверам проектов (context7, npx) программы не нужны: вопроса об установке нет
+      { q: /Записать local\/machine\.yaml/, a: "y" },
+      { q: /Создать команду/, a: "y" },
+      { q: /полный план/, a: "" }, { q: /Записать настройки агентам сейчас/, a: "n" },
+    ]);
+    expect(code).toBe(0);
+    expect(f.text()).toContain(`${f.dir}/bun/bin уже прописан в ~/.zshrc`);
+    expect(readFileSync(`${f.home}/.zshrc`, "utf8")).not.toContain("# miksy");
+  }, 120000);
+
+  test("секреты и программы — только для слоёв, которые на этой машине к чему-то применяются", () => {
+    const f = fixture();
+    project(f.ws, "Acme/app");
+    cpSync(join(ENGINE, "examples", "config"), f.config, { recursive: true });
+    const other = win ? "env-macos" : "env-windows";
+    put(`${f.config}/layers/tree/Acme/mcp/a.yaml`, "name: a\ncommand: npx\nenv:\n  T: ${ACME_TOKEN}\n");
+    put(`${f.config}/layers/tree/Ghost/mcp/g.yaml`, "name: g\ncommand: ${GITHUB_MCP_SERVER}\nenv:\n  T: ${GHOST_TOKEN}\n");
+    put(`${f.config}/layers/${other}/mcp/o.yaml`, "name: o\ncommand: npx\nenv:\n  T: ${OTHER_OS_TOKEN}\n");
+    put(`${f.config}/layers/unused/mcp/u.yaml`, "name: u\ncommand: npx\nenv:\n  T: ${UNUSED_TOKEN}\n");
+    expect(f.wizard([], { yes: true })).toBe(0);
+    const t = f.text();
+    expect(t).toMatch(/Не заполнены секреты[\s\S]*ACME_TOKEN {2}— слои: Acme/);
+    for (const n of ["GHOST_TOKEN", "OTHER_OS_TOKEN", "UNUSED_TOKEN", "GITHUB_MCP_SERVER"]) expect(t).not.toContain(n);
+    // Слой появился на машине (каталог Ghost) — спрашивается
+    project(f.ws, "Ghost/x");
+    f.out.length = 0;
+    expect(f.wizard([], { yes: true })).toBe(0);
+    expect(f.text()).toContain("GHOST_TOKEN");
+    expect(f.text()).toContain("GITHUB_MCP_SERVER: не найден");
   }, 60000);
 });
 
