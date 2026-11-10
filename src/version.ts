@@ -64,5 +64,5 @@ export function newerLedger(recorded: string | undefined, engine = ENGINE): stri
   const mine = packageVersion(engine);
   const theirs = recorded && baseVersion(recorded);
   if (!theirs || mine === "?" || compareVersions(theirs, mine) <= 0) return null;
-  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}. Обновились на другой копии движка — обновите и эту: miksy update. Откатились нарочно — сделайте шаги из README, «Откатиться на прежнюю версию»: без них часть записанного будет конфликтами (ничего не потеряется)`;
+  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}. Обновились на другой копии движка — обновите и эту: miksy update. Откатились нарочно — сделайте шаги из README, «Откатиться на прежнюю версию»: без них часть записанного будет конфликтами (ничего не потеряется); шаги сделаны — ничего делать не нужно, сообщение пропадёт, когда эта версия сама запишет учёт (первый sync с изменениями)`;
 }

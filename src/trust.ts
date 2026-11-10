@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import type { Action } from "./apply";
 import type { RenderResult, Target } from "./adapter";
 import type { Machine } from "./types";
-import type { ForgottenMark, TargetState } from "./manifest";
-import { sha, writeAtomic } from "./manifest";
+import type { ForgottenMark, Manifest, TargetState } from "./manifest";
+import { emptyState, sha, writeAtomic } from "./manifest";
 import { canonical, fold, pathKey, slash } from "./paths";
 import { protectedBy, trackedPaths } from "./git";
 import { escapes } from "./bounds";
@@ -176,6 +176,39 @@ const DIALOG = (doc: any) => {
   return doc;
 };
 
+// Отпечаток ответов пользователя в окне Claude (ключи DIALOG) в .claude/settings.local.json каталога — хеш, без
+// самих ответов. Отметка «доверие ставил miksy» после clean (Manifest.trustedBefore) хранит его: своими остаются
+// только ответы, которые были в папке в момент clean (выпуск 0.2.1, проверка 7a, A №1)
+// own — одобрения серверов, которые записал miksy (учёт TargetState.approvals): в отпечаток не входят. Тогда отпечаток
+// при sync (одобрения на месте) и при сравнении после clean недоступной папки (одобрения ещё на месте) или после
+// clean доступной (уже убраны) — один и тот же; пустые списки — как отсутствующие (проверка 7b, A №1; круг 7c)
+export function dialogPrint(dir: string, own: string[] = []): string {
+  let text: string;
+  try { text = readFileSync(join(dir, ".claude/settings.local.json"), "utf8"); } catch { return sha("{}"); }
+  let doc: any;
+  try { doc = JSON.parse(text); } catch { return sha("bad:" + text); }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return sha("bad:" + text);
+  const out: Record<string, unknown> = {};
+  const perms = doc.permissions && typeof doc.permissions === "object" ? doc.permissions : {};
+  for (const k of ["allow", "ask", "deny", "additionalDirectories"]) if (Object.hasOwn(perms, k)) out[`permissions.${k}`] = perms[k];
+  for (const k of ["enabledMcpjsonServers", "disabledMcpjsonServers", "enableAllProjectMcpServers"]) if (Object.hasOwn(doc, k)) out[k] = doc[k];
+  if (Array.isArray(out.enabledMcpjsonServers)) out.enabledMcpjsonServers = out.enabledMcpjsonServers.filter((n) => !own.includes(n as string));
+  for (const [k, v] of Object.entries(out)) if (Array.isArray(v) && !v.length) delete out[k];
+  return sha(JSON.stringify(out));
+}
+// Одобрения серверов .mcp.json, которые записал miksy в settings.local.json каталога (по учёту цели)
+export const ownApprovals = (st: TargetState | undefined, dir: string): string[] =>
+  st?.approvals?.[pathKey(join(dir, ".claude/settings.local.json"))] ?? [];
+// Учёт цели для решения о доверии: с отметкой «доверие ставил miksy» после clean (Manifest.trustedBefore) — если
+// ответы в окне Claude с момента clean не менялись (отпечаток тот же). Изменились — они в вопросе, как в 0.2.0
+export function trustState(m: Manifest, id: string): TargetState | undefined {
+  const st = m.targets[id];
+  const print = m.trustedBefore?.[id];
+  if (print === undefined || st?.everTrusted) return st;
+  const dir = id.slice(id.indexOf("|") + 1);
+  return print === dialogPrint(dir, ownApprovals(st, dir)) ? { ...(st ?? emptyState()), everTrusted: true } : st;
+}
+
 // Отслеживается ли файл командой: по индексу, а через ссылку (каталог-симлинк, файл-ссылка) — общей
 // защитой git (protectedBy: логический путь, родительские ссылки, физическая цель)
 function teamFiles(dir: string, rels: string[]): Set<string> {
@@ -257,7 +290,10 @@ export function mcpJsonServers(dir: string, git: boolean): { names: string[]; li
 
 // ---- решения пользователя: local/trust.json ----
 
-type Decision = { answer: "yes" | "no"; fingerprint: string; date: string };
+// alone — «да» серверам .mcp.json на отдельный вопрос о них (пишет 0.2.1): действует и при «нет» доверию Claude
+// (пользователь доверился проекту сам в окне Claude). Пара «нет» + «да» серверам без отметки — от 0.2.0 (там «нет»
+// не отзывало прежнее «да» серверам): серверы она не одобряет, miksy спросит (выпуск 0.2.1, проверка 7a, A №2)
+type Decision = { answer: "yes" | "no"; fingerprint: string; date: string; alone?: true };
 type Decisions = Record<string, { rel?: string } & Partial<Record<DecisionKind, Decision>>>;
 const decisionsPath = () => join(configRoot(), "local", "trust.json").replaceAll("\\", "/");
 // Переехавшие каталоги (src/relocate.ts): решение прежнего пути — решение нового (отпечаток — от
@@ -295,9 +331,12 @@ export function saveDecision(p: PendingTrust, answer: "yes" | "no") {
   const entry = (all[pathKey(p.dir)] ??= {});
   entry.rel = p.rel;
   const date = new Date().toISOString().slice(0, 10);
-  entry[p.agent] = { answer, fingerprint: p.fingerprint, date };
-  // «Да» доверию Claude видело и серверы .mcp.json (они в списке) — одобряет и их
-  if (p.agent === "claude" && answer === "yes" && p.mcp) entry.mcpjson = { answer, fingerprint: p.mcp.fingerprint, date };
+  entry[p.agent] = { answer, fingerprint: p.fingerprint, date, ...(p.agent === "mcpjson" && answer === "yes" && { alone: true as const }) };
+  // «Да» доверию Claude видело и серверы .mcp.json (они в списке) — одобряет и их. «Нет» отзывает и прежнее «да»
+  // серверам: иначе, доверься пользователь проекту сам в окне Claude, sync одобрил бы их по старому «да» (выпуск 0.2.1,
+  // A2); серверы в списке — «нет» и им (вопроса о них нет, пересмотреть — miksy trust <проект>)
+  if (p.agent === "claude" && p.mcp) entry.mcpjson = { answer, fingerprint: p.mcp.fingerprint, date };
+  else if (p.agent === "claude" && answer === "no") delete entry.mcpjson;
   writeAtomic(decisionsPath(), JSON.stringify({ version: 1, decisions: all }, null, 2) + "\n", { sensitive: true });
 }
 // «Да» прежнего расчёта (executableSettings: legacy) — на новый отпечаток: ответ и дата те же. sync сохраняет
@@ -437,7 +476,9 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const old = !!exec?.legacy && decision?.answer === "yes" && decision.fingerprint === exec.legacy;
       const approved = fromLayer?.item === true || (decision?.answer === "yes" && (decision.fingerprint === exec?.fingerprint || old));
       const mcp = a === "claude" && exec ? mcpJsonServers(target.dir, !!target.git) : null;
-      const basis = approved || (decisions?.mcpjson?.answer === "yes" && decisions.mcpjson.fingerprint === mcp?.fingerprint);
+      // «Да» серверам при «нет» доверию Claude — только отдельное (alone): пара от 0.2.0 — не основание
+      const basis = approved || (decisions?.mcpjson?.answer === "yes" && decisions.mcpjson.fingerprint === mcp?.fingerprint
+        && (decisions.claude?.answer !== "no" || decisions.mcpjson.alone === true));
       return { exec, decisions, decision, approved, mcp, basis, old };
     };
     let j = judge(regained);
@@ -491,7 +532,9 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
         else out.push({ kind: "approve", abs: local, add, remove, own, beforeHash: sha(exists ? readFileSync(local, "utf8") : ""), roots: [target.dir], ...(back.length > 0 && { known: true }) });
       }
       if (team && mcp && !clean) advice.push(`Claude: ${target.rel || target.dir}/.claude/settings.local.json — ${gitWhy}: одобрение серверов .mcp.json miksy туда не пишет (отслеживаемый файл Claude не читает); одобрите серверы в Claude (/mcp)`);
-      const unapproved = mcp && eligible && !basis ? mcp.names.filter((n) => !enabled.includes(n) && !disabled.includes(n)) : [];
+      // Неодобренные — и те, чьё одобрение этот же план снимает (своё без основания): вопрос в том же sync, а не в
+      // следующем (проверка 7b, A №2)
+      const unapproved = mcp && eligible && !basis ? mcp.names.filter((n) => (!enabled.includes(n) || remove.includes(n)) && !disabled.includes(n)) : [];
       if (unapproved.length && !pending)
         pending = { dir: target.dir, rel: target.rel, agent: "mcpjson", fingerprint: mcp!.fingerprint, lines: mcp!.lines, files: [join(target.dir, ".mcp.json").replaceAll("\\", "/")], ...(mcpDecision?.answer === "no" && { declined: true }) };
     };

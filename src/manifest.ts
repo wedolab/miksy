@@ -23,11 +23,19 @@ export interface TargetState {
   secrets?: string[]; // имена секретов, файлы которых (local/secrets/<ИМЯ>) нужны записанным конфигам цели
   servers?: Record<string, string[]>; // MCP-сервер → секреты его записанной версии (keep сохраняет и их файлы)
   approvals?: Record<string, string[]>; // .claude/settings.local.json → серверы .mcp.json, одобренные miksy
+  // own-файл с MCP (opencode.json, mcp_config.json, .codex/config.toml проекта) → серверы, которые записал туда miksy:
+  // файл правил пользователь — его добавка только то, что дописал он (foreign.ts: miksyServer; проверка 7a, A №6).
+  // Пишет sync; поля нет — учёт до 0.2.1 (решает хеш файла)
+  ownMcp?: Record<string, string[]>;
   group?: true; // цель записана как цель-группа: после снятия пометки sync --all убирает её файлы
   // Доверие этой цели ставил miksy (Claude): остаётся, когда miksy снял доверие (команда добавила исполняемые
   // настройки и ждёт решения пользователя и т. п.), — ответы пользователя в окне Claude по-прежнему его (trust.ts:
   // dialogOwn); clean снимает. Записью учёта не считается
   everTrusted?: true;
+  // Отпечаток ответов пользователя в окне Claude (trust.ts: dialogPrint), снятый последним sync, который дотянулся до
+  // папки, — пока доверие ставил miksy. clean недоступной папки (ответов на диске не прочитать) делает из него отметку
+  // Manifest.trustedBefore: на её месте чужая копия — вопрос, как в 0.2.0 (проверка 7b, A №1). Поля нет — один вопрос
+  dialog?: string;
 }
 
 // Отметка «проект забыт» (clean --forget, root remove --forget, «да» на вопрос «забыть?»): учёт этой машины помнит
@@ -51,6 +59,12 @@ export interface Manifest {
   roots?: Record<string, string>;
   // Забытые проекты: цель (агент|каталог, как ключ targets) → отметка (ForgottenMark)
   forgotten?: Record<string, ForgottenMark>;
+  // Цели Claude (claude|каталог), которым доверие ставил miksy, а clean убрал записанное туда вместе с учётом цели →
+  // отпечаток ответов пользователя в окне Claude в момент clean (trust.ts: dialogPrint). Пока ответы те же, они его
+  // (trust.ts: trustState, dialogOwn; выпуск 0.2.1, A1). Не отметка «проект забыт»: план по ней ничего не убирает.
+  // Снимает sync, записавший цель снова (отметка переходит в TargetState.everTrusted); переезжает с каталогом
+  // (relocate.ts: applyMoves). Поля нет — учёт до 0.2.1 (0.2.0 его отбросит)
+  trustedBefore?: Record<string, string>;
 }
 
 export const manifestPath = () => join(configRoot(), "local", "state", "manifest.json");
@@ -62,7 +76,7 @@ export const emptyState = (): TargetState => ({ files: {}, merges: {}, exclude: 
 // Учёт цели — на записи внутри каталога dir (far) и остальные (near: ключи в домашних конфигах, доверие,
 // обёртки в local/run). Без обращения к диску. clean каталога, до которого не дотянуться, убирает near, а
 // far оставляет — по нему miksy узнает свои файлы, когда диск вернётся — или забывает (--forget)
-const PARTS = ["files", "merges", "exclude", "toml", "blocks", "originals", "links", "aliases", "approvals"] as const;
+const PARTS = ["files", "merges", "exclude", "toml", "blocks", "originals", "links", "aliases", "approvals", "ownMcp"] as const;
 export function splitState(st: TargetState, dir: string): { near: TargetState; far: TargetState } {
   const near = emptyState(), far = emptyState();
   const pick = (p: string) => (inside(p, dir) ? far : near);
@@ -77,6 +91,7 @@ export function splitState(st: TargetState, dir: string): { near: TargetState; f
   if (st.servers) near.servers = structuredClone(st.servers);
   if (st.group) near.group = far.group = true;
   if (st.everTrusted) near.everTrusted = true;
+  if (st.dialog) near.dialog = st.dialog;
   return { near, far };
 }
 // Сколько путей учёта лежит внутри каталога (файлы, блоки, слияния, exclude, одобрения)
@@ -89,6 +104,7 @@ export function joinStates(a: TargetState, b: TargetState): TargetState {
   if (b.trust && Object.keys(b.trust).length) out.trust = { ...out.trust, ...structuredClone(b.trust) };
   if (b.group) out.group = true;
   if (b.everTrusted) out.everTrusted = true;
+  if (b.dialog) out.dialog ??= b.dialog;
   return out;
 }
 
@@ -113,8 +129,10 @@ function validState(state: unknown): state is TargetState {
   if (state.secrets !== undefined && !names(state.secrets)) return false;
   if (state.servers !== undefined && (!record(state.servers) || !Object.values(state.servers).every(names))) return false;
   if (state.approvals !== undefined && (!record(state.approvals) || !Object.values(state.approvals).every(names))) return false;
+  if (state.ownMcp !== undefined && (!record(state.ownMcp) || !Object.values(state.ownMcp).every(names))) return false;
   if (state.group !== undefined && state.group !== true) return false;
   if (state.everTrusted !== undefined && state.everTrusted !== true) return false;
+  if (state.dialog !== undefined && typeof state.dialog !== "string") return false;
   if (state.blocks !== undefined && (!record(state.blocks) || !Object.values(state.blocks).every((v) => typeof v === "string"))) return false;
   if (state.originals !== undefined && (!record(state.originals) || !Object.values(state.originals).every((v) => record(v) && typeof v.path === "string" && typeof v.hash === "string"))) return false;
   for (const t of Object.values(state.toml ?? {})) if (t.definitions !== undefined && (!record(t.definitions) || !Object.values(t.definitions).every((v) => typeof v === "string"))) return false;
@@ -129,6 +147,9 @@ export function loadManifest(path = manifestPath()): Manifest {
     if (m?.version !== 1 || !m.targets || typeof m.targets !== "object" || Array.isArray(m.targets)) throw new Error();
     if (m.secretFiles !== undefined && !names(m.secretFiles)) throw new Error();
     if (m.forgotten !== undefined && (!record(m.forgotten) || !Object.entries(m.forgotten).every(([id, v]) => id.includes("|") && record(v) && [undefined, true].includes(v.trusted)))) throw new Error();
+    // Список — форма невыпущенного снимка 0.2.1 (без отпечатков): отметки нет, учёт не повреждён (рецензия 7b A, п. 3)
+    if (names(m.trustedBefore)) delete m.trustedBefore;
+    if (m.trustedBefore !== undefined && (!record(m.trustedBefore) || !Object.entries(m.trustedBefore).every(([id, v]) => id.includes("|") && typeof v === "string"))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
       if (!id.includes("|") || !validState(state)) throw new Error();
     }
@@ -162,8 +183,13 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
     const key = `${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`;
     forgotten[key] = { ...(forgotten[key]?.trusted || v.trusted ? { trusted: true as const } : {}) };
   }
+  const before: Record<string, string> = {};
+  for (const [id, v] of Object.entries(m.trustedBefore ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const split = id.indexOf("|");
+    before[`${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`] = v;
+  }
   return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
-    ...(Object.keys(forgotten).length > 0 && { forgotten }) };
+    ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }) };
 }
 
 // Хеш записи, для которой при миграции нашлись разные значения и ни одно не совпало с диском:
@@ -195,9 +221,11 @@ function mergeStates(into: TargetState, from: TargetState): TargetState {
   if (from.secrets?.length) into.secrets = [...new Set([...(into.secrets ?? []), ...from.secrets])].sort();
   for (const [n, list] of Object.entries(from.servers ?? {})) (into.servers ??= {})[n] = [...new Set([...(into.servers[n] ?? []), ...list])].sort();
   for (const [p, list] of Object.entries(from.approvals ?? {})) (into.approvals ??= {})[pathKey(p)] = [...new Set([...(into.approvals[pathKey(p)] ?? []), ...list])].sort();
+  for (const [p, list] of Object.entries(from.ownMcp ?? {})) (into.ownMcp ??= {})[pathKey(p)] = [...new Set([...(into.ownMcp[pathKey(p)] ?? []), ...list])].sort();
   if (from.trust) into.trust = { ...into.trust, ...structuredClone(from.trust) };
   if (from.group) into.group = true;
   if (from.everTrusted) into.everTrusted = true;
+  if (from.dialog) into.dialog ??= from.dialog;
   return into;
 }
 

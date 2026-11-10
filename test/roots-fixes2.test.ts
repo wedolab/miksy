@@ -82,13 +82,13 @@ describe("A.2: clean каталога, до которого не дотянут
     const f = unplugged();
     const r = f.run(["clean", f.app]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain(`На недоступном диске осталось записанное miksy — 2 файлов в ${f.app}: подключите диск и повторите miksy clean "${f.app}"; данных больше нет — miksy clean "${f.app}" --forget.`);
+    expect(r.out).toContain(`На недоступном диске осталось записанное miksy — 2 файла в ${f.app}: подключите диск и повторите miksy clean "${f.app}"; данных больше нет — miksy clean "${f.app}" --forget.`);
     expect(f.projects()[f.app]?.mcpServers?.ws).toBeUndefined();
     const [[, st]] = f.mine();
     expect(Object.keys(st.blocks ?? {}).some((p) => p.endsWith("/Acme/app/CLAUDE.local.md"))).toBe(true);
     expect(Object.keys(st.merges).some((p) => p.endsWith(".claude.json"))).toBe(false);
     // doctor не прячет оставленное: обе подсказки
-    expect(f.run(["doctor"]).out).toContain(`Учёт целей недоступного корня (1) не проверяется — подключите диск: ${f.app}. Убрать записанное туда (2 файлов): диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`);
+    expect(f.run(["doctor"]).out).toContain(`Учёт целей недоступного корня (1) не проверяется — подключите диск: ${f.app}. Убрать записанное туда (2 файла): диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`);
     plugBack(f.archive);
     expect(read(`${f.app}/CLAUDE.local.md`)).toContain("# workspace");
     expect(f.run(["clean", f.app]).code).toBe(0);
@@ -101,10 +101,10 @@ describe("A.2: clean каталога, до которого не дотянут
     const f = unplugged();
     const no = inProcess(f, ["clean", f.app], f.dir, [false]);
     expect(no.code).toBe(0);
-    expect(no.questions).toEqual([`Каталога ${f.app} нет: диск не подключён или данных больше нет? Забыть записанное туда (2 файлов)?`]);
+    expect(no.questions).toEqual([`Каталога ${f.app} нет: диск не подключён или данных больше нет? Забыть записанное туда (2 файла)?`]);
     expect(f.mine().length).toBe(1);
     const yes = inProcess(f, ["clean", f.app], f.dir, [true]);
-    expect(yes.out).toContain(`Записанное в ${f.app} (2 файлов на недоступном диске) забыто. Если диск найдётся: miksy sync "${f.app}"`);
+    expect(yes.out).toContain(`Записанное в ${f.app} (2 файла на недоступном диске) забыто. Если диск найдётся: miksy sync "${f.app}"`);
     expect(f.mine()).toEqual([]);
     plugBack(f.archive);
     const sync = f.run(["sync", f.app]);
@@ -138,15 +138,15 @@ describe("A.2: clean каталога, до которого не дотянут
     const f = unplugged();
     const r = inProcess(f, ["root", "remove", f.archive], f.dir, [false]);
     expect(r.err).toBe("");
-    expect(r.questions).toEqual([`Корень ${f.archive} недоступен (пуст, а в учёте есть его цели — диск не смонтирован?): диск не подключён или данных больше нет? Забыть записанное в его проекты (2 файлов)?`]);
-    expect(r.out).toContain("Корень недоступен — записанное в его проекты (2 файлов) и учёт не тронуты.");
+    expect(r.questions).toEqual([`Корень ${f.archive} недоступен (пуст, а в учёте есть его цели — диск не смонтирован?): диск не подключён или данных больше нет? Забыть записанное в его проекты (2 файла)?`]);
+    expect(r.out).toContain("Корень недоступен — записанное в его проекты (2 файла) и учёт не тронуты.");
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain(f.archive);
     expect(f.mine().length).toBe(1);
     // Каталога нет, корня в workspace нет — не «пропавший», а «осталось убрать»
     rmSync(f.archive, { recursive: true });
     const d = f.run(["doctor"]).out;
     expect(d).not.toContain("Учёт ссылается на несуществующие каталоги");
-    expect(d).toContain(`Учёт целей вне workspace без каталога (1; 2 файлов): ${f.app} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)`);
+    expect(d).toContain(`Учёт целей вне workspace без каталога (1; 2 файла): ${f.app} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)`);
     // clean без --forget — тоже не забывает
     expect(f.run(["clean", f.app]).out).toContain("На недоступном диске осталось записанное miksy");
     expect(f.mine().length).toBe(1);

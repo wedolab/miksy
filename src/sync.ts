@@ -7,6 +7,7 @@ import { trackedPaths } from "./git";
 import { maskText, redactArgs } from "./secrets";
 import type { Machine, Resolved } from "./types";
 import { instructionBlock } from "./instructions";
+import { files } from "./plural";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
 
@@ -150,7 +151,7 @@ export function compare(adapter: Adapter, cfg: Resolved, current: CurrentState, 
 export function syncOut(adapter: Adapter, rendered: { result: RenderResult; cfg: Resolved; missing: string[] }, target: Target, machine: Machine, out: string, dryRun = false, secrets: Record<string, string> = {}, launch?: Launcher) {
   const { result, cfg, missing } = rendered;
   const count = dryRun ? result.files.length : writeSandbox(out, adapter.id, result).length;
-  const lines = [`Адаптер ${adapter.id}: ${count} файл(ов) ${dryRun ? "были бы записаны в" : "→"} ${join(out, adapter.id).replaceAll("\\", "/")}`];
+  const lines = [`Адаптер ${adapter.id}: ${files(count)} ${dryRun ? "были бы записаны в" : "→"} ${join(out, adapter.id).replaceAll("\\", "/")}`];
   for (const f of result.files) lines.push(`  ${f.mode === "own" ? "файл " : "слить"}  ${f.base === "home" ? "~" : f.base === "local" ? "<конфигурация>/local" : "<проект>"}/${f.path}${f.mode === "merge" ? `  ключ ${JSON.stringify(f.key)}` : ""}`);
 
   if (target.scope === "project") {

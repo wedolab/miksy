@@ -6,10 +6,11 @@ export function selectGlobal(map: MiksyMap, os: Os): string[] {
   return map.global.filter((e) => osMatches(e, os)).map((e) => e.use);
 }
 
-// rel — путь проекта относительно workspace через «/»; "" — сам корень workspace
+// rel — путь проекта относительно workspace через «/»; "" — сам корень workspace. Без учёта регистра, как слои
+// дерева, на всех ОС: ветка корня в machine.yaml другой машины может быть набрана иначе (выпуск 0.2.1, A5)
 export function selectProject(map: MiksyMap, rel: string, os: Os): string[] {
   const hit = (e: MapEntry) =>
-    e.match !== undefined && (e.match === "**" || (rel !== "" && new Bun.Glob(e.match).match(rel)));
+    e.match !== undefined && (e.match === "**" || (rel !== "" && new Bun.Glob(e.match.toLowerCase()).match(rel.toLowerCase())));
   return map.layers.filter((e) => hit(e) && osMatches(e, os)).map((e) => e.use);
 }
 

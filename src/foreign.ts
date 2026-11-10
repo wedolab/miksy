@@ -3,7 +3,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { Adapter, Target } from "./adapter";
-import type { Manifest } from "./manifest";
+import { type Manifest, sha, type TargetState } from "./manifest";
+import { readFileSync } from "node:fs";
 import { repoOf, trackedPaths } from "./git";
 import { coveredBy, miksyExcludeLines } from "./apply";
 import type { AgentId } from "./teamskills";
@@ -24,7 +25,7 @@ export interface ForeignSkill {
   seenBy: string[]; // какие агенты его находят
 }
 
-import { canonical, pathKey, slash } from "./paths";
+import { canonical, inside, pathKey, slash } from "./paths";
 
 // Принадлежит ли файл команде: отслеживается git того репо, где лежит (в т.ч. родительского),
 // сам или через закоммиченную ссылку выше по пути
@@ -44,8 +45,44 @@ function teamOwned(file: string): boolean {
   }
 }
 
+// Сервер записал miksy (учёт цели state): имя среди своих ключей общих файлов (~/.claude.json и т. п.) и таблиц TOML
+// или файл целиком свой (хеш на диске — записанный: .codex/config.toml проекта, opencode.json, mcp_config.json).
+// Убран из слоёв, а sync ещё не запускали, — это «устарело» (sync уберёт), а не добавка агента (выпуск 0.2.1, A16).
+// Учёта цели нет («забыть», диск вернулся): файл проекта под строкой блока miksy в .git/info/exclude — тоже его (как у
+// skills). При учёте решают его ключи и записанный хеш: сервер, дописанный пользователем в файл miksy, — его добавка
+// (рецензия 0.2.1 A, п. 1)
+function miksyServer(state: TargetState | undefined, target: Target, name: string, source: string): boolean {
+  if (!state && target.scope === "project" && /^[A-Za-z]:\/|^\//.test(source) && inside(source, target.dir)) {
+    const hidden = miksyExcludeLines(target.dir);
+    if (hidden.length && coveredBy(hidden, slash(relative(target.dir, source)))) return true;
+  }
+  if (!state) return false;
+  if (Object.values(state.merges).some((keys) => Object.values(keys).some((names) => names.includes(name)))) return true;
+  if (Object.values(state.toml ?? {}).some((t) => t.names.includes(name))) return true;
+  if (state.ownMcp?.[pathKey(source)]?.includes(name)) return true;
+  const recorded = state.files[pathKey(source)];
+  try { return !!recorded && recorded === sha(readFileSync(source, "utf8")); } catch { return false; }
+}
+
+// Серверы, которые miksy записал в свои own-файлы цели (TargetState.ownMcp): файл на диске — записанный (хеш тот же)
+// — его серверы; правленый пользователем (конфликт, не перезаписан) — прежний список; файлов, которых больше нет в
+// учёте, — нет
+export function ownMcpOf(adapter: Adapter, target: Target, machine: Machine, state: TargetState, prev?: TargetState): Record<string, string[]> | undefined {
+  const out: Record<string, string[]> = {};
+  const same = (p: string) => { try { return state.files[p] === sha(readFileSync(p, "utf8")); } catch { return false; } };
+  let current: Record<string, { source: string }> = {};
+  try { current = adapter.current?.(target, machine).mcp ?? {}; } catch { /* конфиг не читается — прежний список */ }
+  for (const [name, { source }] of Object.entries(current)) {
+    const key = pathKey(source);
+    if (state.files[key] && same(key)) (out[key] ??= []).push(name);
+  }
+  for (const [key, list] of Object.entries(prev?.ownMcp ?? {})) if (state.files[key] && !out[key] && !same(key)) out[key] = [...list];
+  for (const list of Object.values(out)) list.sort();
+  return Object.keys(out).length ? out : undefined;
+}
+
 // MCP, которые агент видит для цели, но которые не сгенерировал miksy и не закоммитила команда
-export function foreignMcp(adapter: Adapter, cfg: Resolved, target: Target, machine: Machine): ForeignMcp[] {
+export function foreignMcp(adapter: Adapter, cfg: Resolved, target: Target, machine: Machine, state?: TargetState): ForeignMcp[] {
   if (!adapter.current) return [];
   const generated = new Set([
     // Сервер слоя для агента — всё, что не skip (с секретом nativeMcp без доставки не строится)
@@ -54,7 +91,7 @@ export function foreignMcp(adapter: Adapter, cfg: Resolved, target: Target, mach
   ]);
   const current = adapter.current(target, machine).mcp;
   return Object.entries(current)
-    .filter(([name, { source }]) => !generated.has(name) && !teamOwned(source))
+    .filter(([name, { source }]) => !generated.has(name) && !miksyServer(state, target, name, source) && !teamOwned(source))
     .map(([name, { source, def }]) => ({ kind: "mcp" as const, agent: adapter.id, name, source: slash(source), def }));
 }
 

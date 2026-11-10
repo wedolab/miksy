@@ -21,7 +21,14 @@ export function layerDir(level: string, root = configRoot()): string {
   if (parts.some((s) => !s || s === "." || s === ".." || !NAME.test(s)))
     throw new Error(`«${level}»: недопустимый уровень — только имена каталогов дерева через «/»`);
   if (parts.some((s) => LAYER_PARTS.has(s))) throw new Error(`«${level}»: имена ${[...LAYER_PARTS].join(", ")} зарезервированы`);
-  const dir = join(root, "layers", "tree", ...parts);
+  // Существующий каталог уровня — без учёта регистра, тот же, что применяет sync (load.ts: treeLayers): иначе на ФС с
+  // учётом регистра рядом с layers/tree/Clients появился бы clients (проверка 7a выпуска 0.2.1, B №2)
+  let dir = join(root, "layers", "tree");
+  for (const seg of parts) {
+    let hit: string | undefined;
+    try { hit = readdirSync(dir, { withFileTypes: true }).find((e) => e.isDirectory() && !LAYER_PARTS.has(e.name) && e.name.toLowerCase() === seg.toLowerCase())?.name; } catch { /* каталога ещё нет */ }
+    dir = join(dir, hit ?? seg);
+  }
   guard(dir, join(root, "layers"));
   return dir;
 }

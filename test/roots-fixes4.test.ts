@@ -305,8 +305,8 @@ describe("B.7: root remove недоступного корня --dry-run — п�
     const x = setup();
     const r = x.f.run(["root", "remove", x.f.archive, "--dry-run"]);
     expect(r.code).toBe(0);
-    expect(r.out).toContain("Корень недоступен (пуст, а в учёте есть его цели — диск не смонтирован?) — на нём записанное miksy: 2 файлов.");
-    expect(r.out).toContain("Без терминала вопроса нет — корень убирается, а записанное (2 файлов) и учёт остаются");
+    expect(r.out).toContain("Корень недоступен (пуст, а в учёте есть его цели — диск не смонтирован?) — на нём записанное miksy: 2 файла.");
+    expect(r.out).toContain("Без терминала вопроса нет — корень убирается, а записанное (2 файла) и учёт остаются");
     expect(r.out).toContain("Забыть сразу — --forget.");
     untouched(x);
   }, 120000);
@@ -315,7 +315,7 @@ describe("B.7: root remove недоступного корня --dry-run — п�
     const x = setup();
     const r = inProcess(x.f, ["root", "remove", x.f.archive, "--dry-run"], x.f.dir, []);
     expect({ code: r.code, err: r.err, questions: r.questions }).toEqual({ code: 0, err: "", questions: [] });
-    expect(r.out).toContain("Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию) — корень убирается, а записанное (2 файлов) и учёт остаются");
+    expect(r.out).toContain("Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию) — корень убирается, а записанное (2 файла) и учёт остаются");
     untouched(x);
   }, 120000);
 
@@ -324,8 +324,8 @@ describe("B.7: root remove недоступного корня --dry-run — п�
     const r = x.f.run(["root", "remove", x.f.archive, "--forget", "--dry-run"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("Корень недоступен (");
-    expect(r.out).toContain(`План: записанное в ${x.f.archive}/Acme/app (2 файлов на недоступном диске) будет забыто.`);
-    expect(r.out).toContain("План: корень убирается из workspace, записанное в его проекты (2 файлов) забывается.");
+    expect(r.out).toContain(`План: записанное в ${x.f.archive}/Acme/app (2 файла на недоступном диске) будет забыто.`);
+    expect(r.out).toContain("План: корень убирается из workspace, записанное в его проекты (2 файла) забывается.");
     expect(r.out.split("--dry-run: ничего не записано.").length - 1).toBe(1);
     untouched(x);
   }, 120000);

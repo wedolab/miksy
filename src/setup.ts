@@ -5,7 +5,7 @@
 // adopt) — через run в этом же процессе, действия с системой (установка программ, PATH, git) — через
 // System: тесты подменяют все три. Без Ask (--yes, нет терминала) — только безопасная часть.
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { canonical, driveRoot, homeDir, samePath, slash, trimSlash } from "./paths";
+import { canonical, driveRoot, homeDir, inside, samePath, slash, trimSlash } from "./paths";
 import { basename, delimiter, dirname, join, posix, relative, win32 } from "node:path";
 import { ensurePrivateLocal } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
@@ -21,6 +21,7 @@ import { engineVersion } from "./version";
 import { environment } from "./environ";
 import { ADAPTERS, agentsFor, allTargets, globalTarget, listGroups } from "./registry";
 import type { McpServer, Os, Tool } from "./types";
+import { count } from "./plural";
 
 // Как найти агента: команда в PATH
 const AGENT_COMMANDS: Record<string, string[]> = {
@@ -219,12 +220,15 @@ export function repoAbove(dir: string): string | null {
   }
 }
 
+// Ветка в команде — в кавычках, если в имени пробел и т. п.
+const treeArg = (t: string) => (/^[\w./-]+$/.test(t) ? t : `"${t}"`);
+
 // Как git-репо вне workspace сделать проектом: корнем — папка, в которой он лежит; если она — диск, дом или
 // каталог всех пользователей, — перенести репо в папку с проектами (рецензия 6x, B3)
 export function outsideRepoAdvice(repo: string, home: string, roots: Root[]): string {
   const parent = slash(dirname(repo));
   return parent !== repo && !unsafeWorkspace(parent, home)
-    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add "${parent}" (её проекты — git-репо внутри)`
+    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add "${parent}" --tree ${treeArg(suggestTree(parent, roots.map((r) => r.tree).filter(Boolean)))} (её проекты — git-репо внутри; --tree — её ветка в layers/tree)`
     : `перенесите его в папку с проектами — корень workspace (${roots.map((r) => r.path).join(", ")}) или новую папку, которую добавите корнем (miksy root add "<папка>")`;
 }
 
@@ -237,9 +241,19 @@ export function projectRootText(dir: string, home: string, roots: Root[], o: { g
   const at = locate(dir, roots);
   const place = at && at.rel !== "" ? at : null;
   const group = !!(place && o.group);
-  if (!group && !o.recorded && (!repo || (!place && containsProjects(dir)))) return null;
-  const kind = group ? `цель (target: true) корня ${place!.root.path}` : repo && place ? `проект корня ${place.root.path}` : repo ? "git-репо" : "каталог, в который miksy уже записывал настройки";
-  const advice = place ? ` Он и так в workspace и получает настройки: miksy sync "${dir}"; свои правила для него — в layers/tree/${place.tree}/instructions/`
+  // Каталог внутри git-репо (подкаталог проекта): проектов в нём нет, корнем он ничего не даст — как сам репо (выпуск
+  // 0.2.1, A6). Не в счёт репо-дом и репо-диск (dotfiles), в workspace — репо выше корня, вне его — папка с проектами
+  const above = repo || slash(dirname(dir)) === dir ? null : repoAbove(slash(dirname(dir)));
+  const outer = above && !unsafeWorkspace(above, home)
+    && (!place || (inside(above, place.root.path) && rootKey(above) !== rootKey(place.root.path))) && !containsProjects(dir) ? above : null;
+  if (!group && !o.recorded && !outer && (!repo || (!place && containsProjects(dir)))) return null;
+  const kind = group ? `цель (target: true) корня ${place!.root.path}`
+    : outer ? `${place ? "папка внутри проекта" : "папка внутри git-репо"} ${outer}`
+    : repo && place ? `проект корня ${place.root.path}` : repo ? "git-репо" : "каталог, в который miksy уже записывал настройки";
+  const outerTree = outer && place ? locate(outer, roots)?.tree : undefined;
+  const advice = outer && place ? ` Проект ${outer} и так в workspace и получает настройки: miksy sync "${outer}"; свои правила для него — в layers/tree/${outerTree}/instructions/`
+    : outer ? ` Чтобы репо ${outer} стал проектом, ${outsideRepoAdvice(outer, home, roots)}`
+    : place ? ` Он и так в workspace и получает настройки: miksy sync "${dir}"; свои правила для него — в layers/tree/${place.tree}/instructions/`
     : repo ? ` Чтобы он стал проектом, ${outsideRepoAdvice(dir, home, roots)}` : "";
   // Группа: её пометка в этом месте дерева перестанет действовать — записанное sync --all уберёт сам, как у снятой
   const before = group ? `, пометка target: true (layers/tree/${place!.tree}/layer.yaml) перестанет действовать, и следующий miksy sync --all уберёт записанное в него miksy`
@@ -351,10 +365,13 @@ export function copyAgentSettings(home: string, rels: string[], dest: string): {
   return { files, links };
 }
 
-// Как вернуть копию настроек на место (пути в копии — от HOME)
+// Как вернуть копию настроек на место (пути в копии — от HOME). Кроме ~/.claude.json: в нём Claude хранит вход и список
+// проектов — копия затёрла бы их (README, «Как удалить», шаг 3; проверка 7c, Н 1). На macOS и Linux — по файлам:
+// запись идёт сквозь ссылки (dotfiles: ~/.claude → ~/dotfiles/claude), права ~ не меняются, пробелы и псевдонимы
+// ls не мешают (проверки правок 7d)
 export const restoreCommand = (dir: string, os: Os) => os === "windows"
-  ? `robocopy "${dir.replaceAll("/", "\\")}" $env:USERPROFILE /E`
-  : `cp -R "${dir}/." ~/`;
+  ? `robocopy "${dir.replaceAll("/", "\\")}" $env:USERPROFILE /E /XF .claude.json`
+  : `(cd "${dir}" && find . -type f ! -path ./.claude.json -exec sh -c 'mkdir -p "$HOME/$(dirname "$1")" && cp "$1" "$HOME/$1"' _ {} \\;)`;
 
 // Действия с системой, которые мастер делает только после «да»: тесты подменяют их
 export interface System {
@@ -550,7 +567,16 @@ export function setup(o: SetupOptions): number {
     const was = main ? extra.findIndex((r) => rootKey(r.path) === rootKey(main)) : -1;
     if (was >= 0) {
       mainTree = extra[was].tree;
-      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; прежний основной ${kept} из workspace уходит (вернуть — miksy root add)` : ""}`);
+      // Вернуть прежний основной — дополнительным корнем: ветка обязательна, а его слои без ветки (layers/tree/<папка>)
+      // придётся перенести под неё (выпуск 0.2.1, A11)
+      const raw = keptTree || suggestTree(kept ?? "", [mainTree, ...extra.map((r) => r.tree)].filter(Boolean));
+      // В команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5)
+      const branch = treeArg(raw);
+      // По порядку текста: сначала перенос слоёв, потом root add — его sync --all иначе снял бы с проектов слои, которые
+      // ещё не перенесены (проверка 7a выпуска 0.2.1, B №6)
+      const add = `miksy root add "${kept}" --tree ${branch}`;
+      const back = keptTree ? `${add}.` : `1) у дополнительного корня своя ветка — его слои из layers/tree/<папка>/… перенесите в layers/tree/${raw}/<папка>/…, а привязки map.yaml (match:) к его проектам — под ту же ветку (Org/** → ${raw}/Org/**); 2) ${add} (README, «Несколько корней workspace»).`;
+      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; прежний основной ${kept} из workspace уходит. Вернуть его: ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}` : ""}`);
       extra.splice(was, 1);
     }
     if (workspace) moreRoots(ask, workspace);
@@ -1089,7 +1115,7 @@ export function planSummary(run: Run): { lines: string[]; text: string; changes:
   };
   quiet(() => run("sync", ["--global", "--dry-run"], { ask: null, observe: (r) => reports.push(r) }));
   quiet(() => run("sync", ["--all", "--dry-run"], { ask: null, observe: (r) => reports.push(r) }));
-  const count = (rs: TargetReport[]) => {
+  const tally = (rs: TargetReport[]) => {
     const acts = rs.flatMap((r) => r.actions);
     return { create: acts.filter((a) => a.kind === "write" && a.why === "новый").length,
       update: acts.filter((a) => !["conflict", "delete"].includes(a.kind) && !(a.kind === "write" && a.why === "новый")).length,
@@ -1097,7 +1123,7 @@ export function planSummary(run: Run): { lines: string[]; text: string; changes:
       targets: new Set(rs.filter((r) => r.actions.some((a) => a.kind !== "conflict")).map((r) => r.title)).size };
   };
   const line = (label: string, rs: TargetReport[]) => {
-    const c = count(rs);
+    const c = tally(rs);
     lines.push(`  ${label}: ${c.create + c.update + c.remove ? `создать ${c.create}, обновить ${c.update}${c.remove ? `, удалить ${c.remove}` : ""} (целей: ${c.targets})` : "изменений нет"}`);
   };
   line("глобально", reports.filter((r) => r.scope === "global"));
@@ -1111,10 +1137,10 @@ export function planSummary(run: Run): { lines: string[]; text: string; changes:
   const skipped = [...new Set(reports.flatMap((r) => r.warnings.filter((w) => w.startsWith("пропущен сервер")).map((w) => w.replace(/^пропущен сервер /, ""))))];
   if (skipped.length) lines.push(`  пропущены серверы (${skipped.length}):\n${skipped.map((s) => "    " + s).join("\n")}`);
   const trust = text.match(/Нужно решение пользователя о доверии \((\d+)\)/);
-  if (trust) lines.push(`  доверие: ${trust[1]} проектов ждут вашего решения — sync спросит при записи`);
+  if (trust) lines.push(`  доверие: ${count(Number(trust[1]), "проект ждёт", "проекта ждут", "проектов ждут")} вашего решения — sync спросит при записи`);
   // Ошибка команды целиком (нет machine.yaml, учёт повреждён) — в сводку, а не только в полный план
   for (const e of text.match(/^Ошибка: .*$/gm) ?? []) lines.push(`  ${e}`);
-  const all = count(reports);
+  const all = tally(reports);
   // Изменения, решения о доверии и ошибки плана: «записывать нечего» — только если ничего из этого нет
   return { lines, text, changes: all.create + all.update + all.remove + (trust ? 1 : 0) + (/^Ошибка: /m.test(text) ? 1 : 0) };
 }

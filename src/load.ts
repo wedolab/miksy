@@ -113,6 +113,10 @@ export const rootMemoryKey = (given: string) => fold(trimSlash(slash(resolve(dri
 // Каталог без видимых записей (скрытые — .DS_Store и т. п. — не в счёт); не читается — не пуст
 const emptyDir = (dir: string) => { try { return !readdirSync(dir).some((n) => !n.startsWith(".")); } catch { return false; } };
 
+// Каталог, где только точки монтирования дисков: корень ФС, /Volumes (macOS), /mnt, /media и /media/<пользователь>
+// (Ubuntu), /run/media/<пользователь> (Fedora и др.) — ближайший существующий предок корня здесь: диск не подключён
+export const mountParent = (dir: string) => /^(\/|\/Volumes|\/mnt|\/media(\/[^/]+)?|\/run\/media(\/[^/]+)?)$/.test(dir);
+
 // Почему корень недоступен: нет даже корня диска — «нет диска»; путь не раскрывается (ссылка или junction
 // на пропавший каталог) — «ссылка ведёт в никуда»; каталога нет; не каталог. null — доступен
 export function rootAway(given: string): { path: string; away?: string } {
@@ -122,7 +126,7 @@ export function rootAway(given: string): { path: string; away?: string } {
   // системы либо каталог точек монтирования (/Volumes, /mnt, /media) — не подключён диск (том)
   let near = plain;
   while (!exists(near) && slash(dirname(near)) !== near) near = slash(dirname(near));
-  if (!exists(near) || (near !== plain && /^(\/|\/Volumes|\/mnt|\/media|\/run\/media(\/[^/]+)?)$/.test(near)))
+  if (!exists(near) || (near !== plain && mountParent(near)))
     return { path: plain, away: "нет диска" };
   let path: string;
   try { path = canonical(plain); }
@@ -258,6 +262,22 @@ export function treeLayers(rel: string, root = configRoot()): Layer[] {
     name = name ? `${name}/${hit.name}` : hit.name;
     if (hasContent(dir)) out.push(loadLayerDir(dir, name));
   }
+  return out;
+}
+
+// Каталоги дерева слоёв, которые отличаются только регистром (бывает на ФС с учётом регистра — Linux): применяется
+// один — первый в порядке каталога, как его находят treeLayers и adopt (проверка 7a выпуска 0.2.1, B №2)
+export function caseTwins(root = configRoot()): { names: string[]; used: string }[] {
+  const out: { names: string[]; used: string }[] = [];
+  const walk = (dir: string, rel: string) => {
+    let entries: import("node:fs").Dirent[];
+    try { entries = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !LAYER_PARTS.has(e.name)); } catch { return; }
+    const groups = new Map<string, string[]>();
+    for (const e of entries) groups.set(e.name.toLowerCase(), [...(groups.get(e.name.toLowerCase()) ?? []), e.name]);
+    for (const names of groups.values()) if (names.length > 1) out.push({ names: names.map((n) => rel + n), used: rel + names[0] });
+    for (const e of entries) walk(join(dir, e.name), `${rel}${e.name}/`);
+  };
+  walk(join(root, "layers", "tree"), "");
   return out;
 }
 
@@ -444,8 +464,11 @@ export function treeGroups(root = configRoot()): string[] {
       checkTarget(t, `${rel || "workspace"}/layer.yaml`);
       if (t === true) out.push(rel);
     }
-    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)))
-      if (e.isDirectory() && !LAYER_PARTS.has(e.name)) walk(join(dir, e.name), rel ? `${rel}/${e.name}` : e.name);
+    // Из каталогов, отличающихся только регистром, — тот, что применяется (первый в порядке каталога, как treeLayers и
+    // caseTwins): пометка из другого не действует (проверка 7b, B №5)
+    const dirs = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && !LAYER_PARTS.has(e.name));
+    const used = dirs.filter((e) => dirs.find((x) => x.name.toLowerCase() === e.name.toLowerCase()) === e);
+    for (const e of used.sort((a, b) => a.name.localeCompare(b.name))) walk(join(dir, e.name), rel ? `${rel}/${e.name}` : e.name);
   };
   const base = join(root, "layers", "tree");
   if (existsSync(base)) walk(base, "");

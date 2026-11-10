@@ -439,13 +439,17 @@ describe("рецензия круга 6x", () => {
     expect({ deny: d.out.includes("разрешено без вопроса"), confirm: c.out.includes("разрешено без вопроса") }).toEqual({ deny: false, confirm: false });
   }, 120000);
 
-  test("п. 6: отметка агента, которого убрали из agents, снимается вместе с отметкой каталога; пустых отметок в учёте нет", () => {
+  // Выпуск 0.2.1, круг 7c (проверка 7b, B №1): отметку агента вне agents снимает только его clean (--agent) — иначе его
+  // файлы остались бы навсегда без учёта; пустых отметок в учёте нет
+  test("п. 6: отметка агента, которого убрали из agents, остаётся до его clean --agent; пустых отметок в учёте нет", () => {
     const f = archiveFixture(["claude", "codex"]);
     expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
     forgetAway(f, f.archive, f.app);
     expect(Object.keys(marks(f.config)).length).toBe(2);
     put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
     expect(f.run(["sync", f.app]).code).toBe(0);
+    expect(Object.keys(marks(f.config)).map((k) => k.slice(0, k.indexOf("|")))).toEqual(["codex"]);
+    expect(f.run(["clean", f.app, "--agent", "codex"]).code).toBe(0);
     expect("forgotten" in ledger(f.config)).toBe(false);
   }, 120000);
 

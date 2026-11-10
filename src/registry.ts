@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { parseToml } from "./toml";
 import { blockHash, splitInstructions } from "./instructions";
 import { MIN as MASK_MIN } from "./mask";
+import { count } from "./plural";
 
 export const ADAPTERS: Record<string, Adapter> = { claude, codex, opencode, antigravity };
 
@@ -415,7 +416,7 @@ export function renderFor(
   for (const e of empty) result.warnings.push(`mcp ${e.server}: секрет ${e.name} пустой в local/secrets.env — сервер получит пустое значение`);
   // Короткое значение совпадало бы с чем угодно: маскируется только целой строкой (src/mask.ts)
   for (const n of usedSecrets.filter((n) => secrets[n] && secrets[n].length < MASK_MIN))
-    result.warnings.push(`секрет ${n} короче ${MASK_MIN} символов: в бэкапах и выводе моста маскируется, только когда он — целое строковое значение (JSON/TOML, строка ответа); в прочем тексте — нет`);
+    result.warnings.push(`секрет ${n} короче ${count(MASK_MIN, "символа", "символов", "символов")}: в бэкапах и выводе моста маскируется, только когда он — целое строковое значение (JSON/TOML, строка ответа); в прочем тексте — нет`);
   if (team.cfg.trust) result.trust = team.cfg.trust;
   // Сервер без переменной (или с недоставляемым секретом) пропускается сам, остальное генерируется;
   // записанный раньше остаётся как был
@@ -539,7 +540,14 @@ export function loadManifestMoved(machine: Machine, groups?: Group[]): { manifes
   const moves = findMoves(raw, configRoot(), () =>
     [...(groups ?? listGroups(machine)).map((g) => g.abs), ...allProjects(machine).map((p) => p.abs)].map(pathKey), exists);
   moveDecisions(moves, (dir) => treeOf(dir, roots));
-  const manifest = applyMoves(raw, moves);
+  // Корни, путь которых поправили в machine.yaml (прежний пропал, новый ещё не запомнен): по ним переезжают отметки
+  // «доверие ставил miksy» после clean, у которых нет записей учёта (relocate.ts: followParent)
+  const memoKeys = new Set(roots.filter((r) => r.given).map((r) => rootMemoryKey(r.given!)));
+  const remembered = new Set(Object.values(raw.roots ?? {}).map(fold));
+  const lost = Object.entries(raw.roots ?? {}).filter(([k, p]) => !memoKeys.has(k) && !existsSync(p)).map(([, p]) => p);
+  const fresh = roots.filter((r) => rootExists(r) && !remembered.has(fold(r.path)));
+  const rootMoves: Move[] = lost.flatMap((from) => fresh.map((r) => ({ from, to: r.path, how: "parent" as const })));
+  const manifest = applyMoves(raw, moves, rootMoves);
   // Последний известный настоящий путь доступных корней (по пути, как он записан в machine.yaml):
   // запишется с учётом при первой записи. Нужен, когда корень станет недоступен (src/load.ts: parseRoots)
   // rootsChanged — запомненное разошлось с учётом на диске: sync и clean сохраняют учёт и без других изменений
@@ -605,7 +613,9 @@ export function vanishedTarget(path: string, manifest: Manifest, machine: Machin
     const given = rootMemoryKey(r.given);
     return fold(r.path) !== given && inside(typed, given) ? [fold(trimSlash(slash(join(r.path, relative(given, typed)))))] : [];
   });
-  const id = Object.keys(manifest.targets).find((id) => [typed, ...via].includes(fold(id.slice(id.indexOf("|") + 1))));
+  // И отметки «проект забыт»: после «забыть» записей учёта по папке нет, а clean --agent <имя> агента вне agents по
+  // отметке убирает его файлы — и когда папка уже вне workspace (рецензия 7c A, п. 1)
+  const id = [...Object.keys(manifest.targets), ...Object.keys(manifest.forgotten ?? {})].find((id) => [typed, ...via].includes(fold(id.slice(id.indexOf("|") + 1))));
   if (!id) return null;
   const key = id.slice(id.indexOf("|") + 1);
   return formerTarget({ dir: key, rel: treeOf(key, machineRoots(machine)) });

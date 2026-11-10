@@ -104,11 +104,35 @@ export function findMoves(m: Manifest, config: string, candidates: () => string[
   return moves;
 }
 
+// Каталог без записей учёта (отметка «доверие ставил miksy» после clean), переехавший вместе с общим родителем
+// другого переезда: папку корня переименовали — проект с учётом нашёлся по файлам (A/x → B/x), прежнего родителя A
+// нет, а на новом месте B каталог на том же относительном пути есть. roots — пары «прежний корень → новый» (путь корня
+// поправили в machine.yaml): так — и когда в корне нет другого проекта с записями учёта (рецензия 7b A, п. 2)
+function followParent(dir: string, moves: Move[], roots: Move[] = []): string {
+  if (existsSync(dir)) return dir;
+  for (const r of roots) {
+    if (existsSync(r.from) || !under(dir, r.from)) continue;
+    const moved = movePath(dir, [r]);
+    if (moved !== dir && existsSync(moved)) return moved;
+  }
+  for (const mv of moves) {
+    const a = mv.from.replace(/\/+$/, "").split("/"), b = mv.to.replace(/\/+$/, "").split("/");
+    let k = 0;
+    while (k < a.length - 1 && k < b.length - 1 && fold(a[a.length - 1 - k]) === fold(b[b.length - 1 - k])) k++;
+    if (!k) continue;
+    const from = a.slice(0, a.length - k).join("/"), to = b.slice(0, b.length - k).join("/");
+    if (fold(from) === fold(to) || existsSync(from) || !under(dir, from) || under(to, from)) continue;
+    const moved = to + dir.slice(from.length);
+    if (existsSync(moved)) return moved;
+  }
+  return dir;
+}
+
 // Учёт с перенесёнными путями: ключи файлов, слияний, exclude, TOML, блоков, оригиналов, ссылок,
 // одобрений и цели. Ключи внутри конфигов агента (projects[<путь>] в ~/.claude.json, доверие) — как
 // были: это записанное под прежним путём, его снимет план цели
-export function applyMoves(m: Manifest, moves: Move[]): Manifest {
-  if (!moves.length) return m;
+export function applyMoves(m: Manifest, moves: Move[], roots: Move[] = []): Manifest {
+  if (!moves.length && !(roots.length && m.trustedBefore)) return m;
   const mp = (p: string) => movePath(p, moves);
   const keys = <T>(o: Record<string, T> | undefined, f: (v: T) => T = (v) => v) =>
     o && Object.fromEntries(Object.entries(o).map(([k, v]) => [mp(k), f(v)]));
@@ -120,6 +144,7 @@ export function applyMoves(m: Manifest, moves: Move[]): Manifest {
     if (st.links) out.links = keys(st.links, mp);
     if (st.aliases) out.aliases = keys(st.aliases, (l) => l.map(mp));
     if (st.approvals) out.approvals = keys(st.approvals);
+    if (st.ownMcp) out.ownMcp = keys(st.ownMcp);
     if (st.trust) out.trust = Object.fromEntries(Object.entries(st.trust).map(([id, r]) => {
       const [file, ...key] = JSON.parse(id);
       return [JSON.stringify([mp(file), ...key]), r];
@@ -131,7 +156,12 @@ export function applyMoves(m: Manifest, moves: Move[]): Manifest {
   const entries = Object.entries(m.targets).map(([id, st]): [string, TargetState] => [target(id), move(st)]);
   // Отметки «проект забыт» переезжают вместе с каталогом (родитель переехал)
   const forgotten = m.forgotten && Object.fromEntries(Object.entries(m.forgotten).map(([id, v]) => [target(id), v]));
-  return normalizeManifest({ ...m, ...(forgotten && { forgotten }) }, entries);
+  // Отметки «доверие ставил miksy» после clean — тоже (проверка 7a выпуска 0.2.1, A №1)
+  const trustedBefore = m.trustedBefore && Object.fromEntries(Object.entries(m.trustedBefore).map(([id, v]) => {
+    const to = target(id);
+    return [to !== id ? to : `${id.slice(0, id.indexOf("|") + 1)}${followParent(dirOf(id), moves, roots)}`, v];
+  }));
+  return normalizeManifest({ ...m, ...(forgotten && { forgotten }), ...(trustedBefore && { trustedBefore }) }, entries);
 }
 
 export const HOW: Record<Move["how"], string> = {

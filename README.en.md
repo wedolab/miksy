@@ -91,10 +91,13 @@ reads Russian fine and can explain the steps to you in English.
 | `miksy setup` | setup wizard; rerun to continue or to pick up newly installed agents |
 | `miksy sync --global`, `miksy sync --all` | write your settings to the agents (home folder / all projects); `--dry-run` shows the plan |
 | `miksy sync` | the same for the project (or `target: true` folder) you are in, also from its subfolders |
-| `miksy root add [<path>]` | add another folder with projects as a workspace root (`--tree <branch>`); `miksy root` lists roots |
+| `miksy root add [<path>]` | add another folder with projects as a workspace root (`--tree <branch>`); `miksy root` lists roots, `miksy root remove <path>` removes one |
+| `miksy target [<path>]` | let a folder without git (notes, a group of projects) get settings like a project |
 | `miksy doctor` | checks that everything is written and nothing has drifted (changes nothing) |
 | `miksy explain [<path>]` | what a folder (the current one by default) gets and from which layer; `--global` — home folder settings |
+| `miksy trust [<path>]` | decide whether to trust a project whose hooks or MCP servers were not set up by miksy (`sync` asks itself) |
 | `miksy update` | update miksy to the latest release (`--check` only checks) |
+| `miksy clean --all`, `miksy clean --global` | remove everything miksy wrote (to uninstall it) |
 
 ## More
 

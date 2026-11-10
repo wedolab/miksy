@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { configRoot, containsProjects, LAYER_PARTS, parseYaml, serviceDir, SKIP_DIRS } from "./load";
-import { canonical, child, fold, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { canonical, child, fold, homeDir, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import { writeAtomic } from "./manifest";
 import type { Group, TargetSpec } from "./registry";
 import { innerRoots, locate, type Root, rootExists, treeJoin } from "./roots";
@@ -35,7 +35,9 @@ export function plainDirs(workspace: string | Root[], groups: Group[], targets: 
   const out = new Set<string>();
   for (const r of live) {
     const ws = r.path;
-    const inner = new Set(innerRoots(r, live).map((o) => key(o.path)));
+    // Вложенные корни — и недоступные: их точка монтирования (диск не подключён) — не «каталог без git», о них говорят
+    // свои сообщения (выпуск 0.2.1, A7)
+    const inner = new Set(innerRoots(r, roots).map((o) => key(o.path)));
     const parents = new Map<string, string>([[key(ws), ws]]);
     const layers = new Set<string>();
     // Каталоги корня по слоям дерева его места — без учёта регистра, как treeLayers
@@ -81,8 +83,21 @@ export function targetDir(path: string, workspace: string | Root[], home: string
   const roots = typeof workspace === "string" ? [{ path: canonical(workspace), tree: "" }] : workspace;
   const given = trimSlash(slash(resolve(process.cwd(), driveRoot(path))));
   if (!existsSync(given) && !remove) throw new Error(`${given}: каталога нет`);
-  const abs = canonical(given);
-  const at = locate(abs, roots);
+  // Пометка лежит в слое конфигурации, а не на диске: снять её можно и без диска — путь, который не раскрывается
+  // (недоступный корень: нет диска, ссылка в никуда), — как записан (выпуск 0.2.1, A9)
+  let abs = remove ? pathKey(given) : canonical(given);
+  let at = locate(abs, roots);
+  // Путь через корень-ссылку, назначение которой недоступно: путь такого корня — запомненное назначение
+  // (load.ts: parseRoots), а набран путь через саму ссылку, как записан в local/machine.yaml (проверка 7a, B №4)
+  if (!at && remove)
+    for (const r of roots) {
+      if (!r.away || !r.given) continue;
+      const link = trimSlash(slash(resolve(process.cwd(), driveRoot(r.given.replace(/^~(?=$|[\\/])/, homeDir())))));
+      if (!inside(given, link)) continue;
+      const moved = trimSlash(`${r.path}${given.slice(link.length)}`);
+      const hit = locate(moved, roots);
+      if (hit) { abs = moved; at = hit; break; }
+    }
   if (!at) throw new Error(`${abs} вне workspace ${roots.map((r) => r.path).join(", ")} — целью может быть только каталог внутри него`);
   const ws = at.root.path;
   if (!at.rel) throw new Error(`${abs} — сам workspace (корень): он не цель (общие настройки его проектов — слой layers/tree/${at.root.tree})`);

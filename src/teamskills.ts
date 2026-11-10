@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Resolved, Skill } from "./types";
+import { count } from "./plural";
 
 export type AgentId = string;
 
@@ -381,7 +382,7 @@ export function withTeamSkills(
     const fm = text && frontmatter(text);
     if (!fm) { warnings.push(`skill ${s.name}: ${text ? "нет frontmatter" : "SKILL.md нет в коммите"} — не доставлен; исправленную версию можно положить в слой проекта`); continue; }
     if (typeof fm.description !== "string" || !fm.description) { warnings.push(`skill ${s.name}: нет description — не доставлен; исправленную версию можно положить в слой проекта`); continue; }
-    if (s.variants > 1) warnings.push(`skill ${s.name}: копии в репо расходятся (${s.variants} варианта), взят ${src.path}`);
+    if (s.variants > 1) warnings.push(`skill ${s.name}: копии в репо расходятся (${count(s.variants, "вариант", "варианта", "вариантов")}), взят ${src.path}`);
     added.push({
       item: { name, dir: join(projectDir, src.path).replaceAll("\\", "/"), team: true, files, ...(fm.name !== name && { patch: { "SKILL.md": patchName(text, name) } }) },
       layer: `репо:${src.path}`,

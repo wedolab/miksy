@@ -32,7 +32,7 @@ Object.assign(process.env, {
 // Так же — переменные git, которые указывают на чужой репо, индекс или каталог (IDE, хуки git) или задают
 // настройки git окружением машины (GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_CONFIG_PARAMETERS — как «-c»)
 for (const k of Object.keys(process.env))
-  if (/^(BUN_INSTALL|CODEX_HOME|CLAUDE_CONFIG_DIR|OPENCODE_CONFIG(_DIR)?|GEMINI_CLI_HOME|XDG_[A-Z_]+|GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|NAMESPACE|CEILING_DIRECTORIES|CONFIG|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_COUNT|CONFIG_KEY_\d+|CONFIG_VALUE_\d+|CONFIG_PARAMETERS))$/i.test(k)) delete process.env[k];
+  if (/^(BUN_INSTALL|CODEX_HOME|CLAUDE_CONFIG_DIR|OPENCODE_CONFIG(_DIR)?|GEMINI_CLI_HOME|XDG_[A-Z_]+|GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|NAMESPACE|CEILING_DIRECTORIES|CONFIG|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_COUNT|CONFIG_KEY_\d+|CONFIG_VALUE_\d+|CONFIG_PARAMETERS|TEMPLATE_DIR))$/i.test(k)) delete process.env[k];
 // git в тестах (и движок под тестом) не читает настройки машины: системный конфиг выключен, глобальный — пустой
 // файл песочницы (а не ~/.gitconfig пользователя: глобальный gitignore прятал бы файлы, которые тест проверяет)
 Object.assign(process.env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(home, ".gitconfig") });

@@ -141,7 +141,7 @@ describe("мастер setup", () => {
     const backups = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-miksy-"));
     expect(backups.length).toBe(1);
     expect(JSON.parse(readFileSync(`${f.config}/local/backups/${backups[0]}/.claude.json`, "utf8")).mcpServers.mine).toBeTruthy();
-    expect(t).toMatch(win ? /robocopy ".*before-miksy-.*" \$env:USERPROFILE \/E/ : /cp -R ".*before-miksy-.*\/\." ~\//);
+    expect(t).toMatch(win ? /robocopy ".*before-miksy-.*" \$env:USERPROFILE \/E \/XF \.claude\.json/ : /\(cd ".*before-miksy-.*" && find \. -type f ! -path \.\/\.claude\.json -exec sh -c 'mkdir -p "\$HOME\/\$\(dirname "\$1"\)" && cp "\$1" "\$HOME\/\$1"' _ \{\} \\;\)/);
     // 4. npx для context7: показана команда установки, без «да» не выполнена
     expect(t).toMatch(/Node\.js \(npx\): нужна серверам context7/);
     expect(f.calls.exec).toEqual([]);
@@ -446,7 +446,7 @@ describe("мастер setup", () => {
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
     expect(code).toBe(0);
-    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит (вернуть — miksy root add)`);
+    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит. Вернуть его: miksy root add "${f.ws}" --tree Main. \${WORKSPACE} в слоях теперь — ${drive}`);
     expect(f.text()).not.toContain("указан дважды");
     // Проекты drive получали слои layers/tree/Clients/… — и после смены основного тоже
     const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: unknown };

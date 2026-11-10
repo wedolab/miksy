@@ -67,10 +67,11 @@ export function unsafeSpawn(argv: string[], opts: { env?: Env; cwd?: string }, r
   const env = opts.env ?? process.env;
   const cwd = opts.cwd ?? process.cwd();
   const cmd = argv[at + 1];
-  // «X:» движок понимает как корень диска X:/ (paths.ts: driveRoot), а не как текущий каталог диска
-  const abs = (p: string) => { const d = p.replace(/^([A-Za-z]:)$/, "$1/"); return isAbsolute(d) ? d : resolve(cwd, d); };
-  const engine = dirname(dirname(abs(argv[at])));
   const home = (process.platform === "win32" ? env.USERPROFILE ?? env.HOME : env.HOME ?? env.USERPROFILE) ?? "";
+  // «X:» движок понимает как корень диска X:/ (paths.ts: driveRoot), а не как текущий каталог диска; «~» в начале
+  // пути — домашний каталог (commands.ts: tilde)
+  const abs = (p: string) => { const d = p.replace(/^~(?=$|[\\/])/, home).replace(/^([A-Za-z]:)$/, "$1/"); return isAbsolute(d) ? d : resolve(cwd, d); };
+  const engine = dirname(dirname(abs(argv[at])));
   const problems: string[] = [];
   const check = (what: string, p: string | null) => {
     if (!p) return;

@@ -125,9 +125,9 @@ describe("B.5 — документация по правде", () => {
     const d = f.run(["doctor"]);
     expect({ asked: asked(s), doctor: d.out.includes("colleague.sh") && d.out.includes("Исполняемые настройки в подкаталогах групп без git") })
       .toEqual({ asked: false, doctor: true });
-    const r = readme(), c = changelog();
+    const r = readme().replace(/\s+/g, " "), c = changelog();
     // Обещания «требуют вашего решения» для подкаталогов нет; сказано, что показывает doctor и что делать
-    const at = r.indexOf("Подкаталоги цели без git");
+    const at = r.indexOf("Их **подкаталоги**");
     expect(at).toBeGreaterThan(0);
     const sub = r.slice(at, at + 600);
     expect(r).not.toMatch(/подкаталогах:s*хуки[^.]*требуют вашего решения/);
@@ -141,7 +141,7 @@ describe("B.5 — документация по правде", () => {
   test("справочник команд README: root add … [--yes] — каталог, который сам проект, объясняет и спрашивает, без терминала — только с --yes", () => {
     const r = readme();
     const line = r.split("\n").find((l) => l.startsWith("| `root [add [<путь>] [--tree <ветка>] [--yes]"));
-    expect(line).toMatch(/сам проект[^|]*спрашивает, без терминала добавляет только с `--yes`/);
+    expect(line).toMatch(/сама? проект[^|]*спрашивает, без терминала добавляет только с `--yes`/);
   });
 });
 
