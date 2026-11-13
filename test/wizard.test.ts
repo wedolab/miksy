@@ -9,7 +9,7 @@ import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
 import { ENGINE, configRoot } from "../src/load";
 import { canonical, inside } from "../src/paths";
-import { layoutWarning, setup, type System } from "../src/setup";
+import { layoutWarning, restoreCommand, setup, type System } from "../src/setup";
 import { put } from "./helpers";
 import { missingDrive } from "./nodrive";
 
@@ -141,7 +141,8 @@ describe("мастер setup", () => {
     const backups = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-miksy-"));
     expect(backups.length).toBe(1);
     expect(JSON.parse(readFileSync(`${f.config}/local/backups/${backups[0]}/.claude.json`, "utf8")).mcpServers.mine).toBeTruthy();
-    expect(t).toMatch(win ? /robocopy ".*before-miksy-.*" \$env:USERPROFILE \/E \/XF \.claude\.json/ : /\(cd ".*before-miksy-.*" && find \. -type f ! -path \.\/\.claude\.json -exec sh -c 'mkdir -p "\$HOME\/\$\(dirname "\$1"\)" && cp "\$1" "\$HOME\/\$1"' _ \{\} \\;\)/);
+    // Команда возврата копии — та же, что restoreCommand (README сверяется отдельно, fixes022-restore); на Windows — с пометкой PowerShell
+    expect(t).toContain(`вернуть (${win ? "PowerShell; " : ""}после miksy clean): ${restoreCommand(`${f.config}/local/backups/${backups[0]}`.replaceAll("\\", "/"), win ? "windows" : process.platform === "darwin" ? "macos" : "linux")}`);
     // 4. npx для context7: показана команда установки, без «да» не выполнена
     expect(t).toMatch(/Node\.js \(npx\): нужна серверам context7/);
     expect(f.calls.exec).toEqual([]);
@@ -433,6 +434,8 @@ describe("мастер setup", () => {
     const f = fixture();
     const drive = `${f.dir}/drive`;
     project(drive, "Client1/site");
+    // В прежнем основном есть проект: без проектов он — как «нет на месте», без рецепта (круг 8d, B №2)
+    project(f.ws, "Org/p1");
     expect(f.wizard([], { yes: true })).toBe(0);
     put(`${f.config}/local/machine.yaml`, `workspace:\n  - { path: "${f.ws}", tree: Main }\n  - { path: "${drive}", tree: Clients }\nagents: [claude]\n`);
     f.out.length = 0;
@@ -446,7 +449,7 @@ describe("мастер setup", () => {
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
     expect(code).toBe(0);
-    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит. Вернуть его: miksy root add "${f.ws}" --tree Main. \${WORKSPACE} в слоях теперь — ${drive}`);
+    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его: miksy root add "${f.ws}" --tree Main. Это — если новый основной другая папка, а прежняя нужна; папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет). \${WORKSPACE} в слоях теперь — ${drive}`);
     expect(f.text()).not.toContain("указан дважды");
     // Проекты drive получали слои layers/tree/Clients/… — и после смены основного тоже
     const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: unknown };

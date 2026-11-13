@@ -118,6 +118,24 @@ export function unsafeSpawn(argv: string[], opts: { env?: Env; cwd?: string }, r
   return problems.length ? `тест запускает «${cmd}» в настоящем окружении пользователя:\n  ${problems.join("\n  ")}` : null;
 }
 
+// Запись настоящего пользовательского окружения (PATH в реестре: HKCU\Environment) — запуском PowerShell или setx.
+// Второй замок после notInTests в src/setup.ts: тест не меняет настоящий PATH, даже если тот сломан (круг 8e, F6)
+export function userEnvironmentWrite(argv: string[]): string | null {
+  const exe = (argv[0] ?? "").replace(/^.*[\\/]/, "").toLowerCase();
+  const text = argv.join(" ");
+  const why = "тест запускает программу, которая пишет настоящее пользовательское окружение (HKCU\\Environment)";
+  if (/^setx(\.exe)?$/.test(exe)) return why;
+  if (!/^(powershell|pwsh|cmd|reg)(\.exe)?$/.test(exe)) return null;
+  // setx из cmd или PowerShell; reg add/delete/import к HKCU\Environment
+  if (/\bsetx(\.exe)?\b/i.test(text)) return why;
+  const userEnv = /(HKCU|HKEY_CURRENT_USER)(:|\\)+\\*Environment|CurrentUser\.(Open|Create)SubKey\(\s*['"]Environment/i.test(text);
+  if (/^reg(\.exe)?$/.test(exe) && userEnv && /\b(add|delete|import|restore|copy|load)\b/i.test(text)) return why;
+  // PowerShell: запись значения в HKCU\Environment (SetValue, *-ItemProperty, OpenSubKey с записью) или переменная User
+  if (userEnv && /SetValue|Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|Rename-ItemProperty|Clear-ItemProperty|SubKey\([^)]*\$true|CreateSubKey|DeleteValue/i.test(text)) return why;
+  if (/SetEnvironmentVariable\([^)]*(['"]User['"]|EnvironmentVariableTarget\]::User)/i.test(text)) return why;
+  return null;
+}
+
 // Перехват: отказ — сообщение и остановка всего прогона.
 // Запуск без env получает песочное окружение явно (копию process.env на момент запуска): Bun на Windows
 // (1.3.14) отдаёт такому подпроцессу исходное окружение процесса bun — настоящий USERPROFILE, без MIKSY_CONFIG
@@ -125,7 +143,7 @@ export function unsafeSpawn(argv: string[], opts: { env?: Env; cwd?: string }, r
 // git и прочие программы в тестах не читают настройки пользователя (глобальный gitignore и т. п.)
 export function installGuard(real: Real, safe: string[]) {
   const stop = (argv: string[], opts: { env?: Env; cwd?: string } = {}) => {
-    const why = unsafeSpawn(argv.map(String), opts, real, safe);
+    const why = userEnvironmentWrite(argv.map(String)) ?? unsafeSpawn(argv.map(String), opts, real, safe);
     if (!why) return;
     console.error(`\nОСТАНОВЛЕНО (test/guard.ts): ${why}\n`);
     process.exit(97);

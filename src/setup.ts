@@ -7,7 +7,7 @@
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { canonical, driveRoot, homeDir, inside, samePath, slash, trimSlash } from "./paths";
 import { basename, delimiter, dirname, join, posix, relative, win32 } from "node:path";
-import { ensurePrivateLocal } from "./secretfiles";
+import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
 import { locate, machineRoots, type Root, rootKey, suggestTree, treeAbove, treeJoin } from "./roots";
 import { agentId } from "./agentid";
@@ -17,7 +17,8 @@ import type { Ask } from "./ask";
 import type { TargetReport } from "./commands";
 import { doctor } from "./doctor";
 import { stableBun } from "./launch";
-import { engineVersion } from "./version";
+import { baseVersion, engineVersion, newerLedger, packageVersion } from "./version";
+import { isDeepStrictEqual } from "node:util";
 import { environment } from "./environ";
 import { ADAPTERS, agentsFor, allTargets, globalTarget, listGroups } from "./registry";
 import type { McpServer, Os, Tool } from "./types";
@@ -290,7 +291,10 @@ export function defaultWorkspace(engine: string, home: string): string | null {
   const grouped = withConfig && children.every((e) => e.name.toLowerCase().startsWith("miksy"));
   const candidates = grouped ? [dirname(dirname(base)), dirname(base), base]
     : withConfig || children.length === 1 ? [base] : [dirname(base), base];
-  return candidates.map(canonical).find((c) => !unsafeWorkspace(c, home)) ?? null;
+  // Песочница тестов (MIKSY_TEST_SANDBOX): только внутри неё — мастер в тесте с настоящим движком не предложит настоящий
+  // workspace (круг 8e, F6)
+  const box = process.env.MIKSY_TEST_SANDBOX;
+  return candidates.map(canonical).find((c) => !unsafeWorkspace(c, home) && (!box || inside(c, canonical(box)))) ?? null;
 }
 
 // Раскладка не как на первой машине: в дереве конфигурации есть слой каталога, где лежали движок и
@@ -366,12 +370,49 @@ export function copyAgentSettings(home: string, rels: string[], dest: string): {
 }
 
 // Как вернуть копию настроек на место (пути в копии — от HOME). Кроме ~/.claude.json: в нём Claude хранит вход и список
-// проектов — копия затёрла бы их (README, «Как удалить», шаг 3; проверка 7c, Н 1). На macOS и Linux — по файлам:
-// запись идёт сквозь ссылки (dotfiles: ~/.claude → ~/dotfiles/claude), права ~ не меняются, пробелы и псевдонимы
-// ls не мешают (проверки правок 7d)
+// проектов — копия затёрла бы их (README, «Как удалить», шаг 3; проверка 7c, Н 1). Выпуск 0.2.2, A1:
+// - macOS, Linux: по файлам и ссылкам копии (find, без псевдонимов ls): запись идёт сквозь ссылки пользователя
+//   (dotfiles: ~/.claude → ~/dotfiles/claude), права ~ не меняются; ссылки из копии возвращаются ссылками; на месте
+//   файла настоящая папка — «не возвращён»; не вернулся хоть один — код не 0 (find … {} + передаёт код sh);
+// - Windows (PowerShell) — то же правило, без robocopy: он не создаёт ссылку на папку без прав администратора (ERROR
+//   1314, на её месте — пустая папка, а код «успех») и считает несовпадением ссылку, которая уже на месте (рецензия A
+//   0.2.2, п. 2, 3). Файлы — записью в открытый файл: сквозь ссылки пользователя, скрытые файлы тоже; ссылка из копии на
+//   папку — junction (прав не нужно), на файл — символическая ссылка; та же ссылка уже на месте — пропуск. Ссылки
+//   создаёт mklink (cmd): New-Item в PowerShell 5.1 требует прав администратора и для режима разработчика и разбирает
+//   -Target как шаблон ([ ]); относительная цель — от места ссылки, как у ln -s; прежнее на месте ссылки убирается
+//   только после того, как новая создана (рядом, затем переименование) — повторная проверка 0.2.2, п. 1, 2, 4; остаток
+//   <имя>.miksy-new (ссылка) убирается до и после неудачи. Пути — mklink через переменные окружения в кавычках: cmd сам
+//   разбирает ^ & , ; = %…% в аргументах; /d — без автозапуска cmd (повторная проверка 2, п. 1, 2). Не
+//   вернулся хоть один (или копии нет, папку копии не прочитать) — «не возвращён: …» и $LASTEXITCODE 1, иначе 0 (exit
+//   не нужен: окно PowerShell остаётся открытым);
+// - путь копии — в одинарных кавычках оболочки: $, `, ", пробел остаются буквально; PowerShell считает кавычками и
+//   ‘ ’ ‚ ‛ — их тоже удваиваем (рецензия A 0.2.2, п. 4); косые в конце пути копии отрезаются (TrimEnd([char]92)):
+//   иначе Substring($c.Length + 1) терял первый знак каждого пути (проверка 8a, A №2, B №1)
+const RESTORE_SH = "r=0; for f; do t=\"$HOME/${f#./}\"; if [ -L \"$f\" ]; then if [ -d \"$t\" ] && [ ! -L \"$t\" ]; then false; else mkdir -p \"${t%/*}\" && ln -sfn \"$(readlink \"$f\")\" \"$t\"; fi; else if [ -d \"$t\" ]; then false; else mkdir -p \"${t%/*}\" && cp \"$f\" \"$t\"; fi; fi || { echo \"не возвращён: ${f#./}\" >&2; r=1; }; done; exit $r";
+const shQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+const psQuote = (s: string) => `'${s.replace(/['‘’‚‛]/g, "$&$&")}'`;
+const restorePs = (dir: string) => [
+  `& { try { $c = (Get-Item -LiteralPath ${psQuote(dir.replaceAll("/", "\\"))} -Force -ErrorAction Stop).FullName.TrimEnd([char]92) } catch { Write-Host "не возвращён ни один файл: $_"; $global:LASTEXITCODE = 1; return };`,
+  ` $st = @{ e = 0 }; $f = { param($d) try { $items = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction Stop) } catch { Write-Host "не возвращён: $d — $_"; $st.e = 1; return }; foreach ($i in $items) {`,
+  ` $rel = $i.FullName.Substring($c.Length + 1); $t = Join-Path $env:USERPROFILE $rel; $link = $i.LinkType -in 'Junction', 'SymbolicLink';`,
+  ` if ($i.PSIsContainer -and -not $link) { & $f $i.FullName; continue }; if ($rel -eq '.claude.json') { continue };`,
+  ` try { $o = Get-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue; $olink = $o -and $o.LinkType -in 'Junction', 'SymbolicLink';`,
+  ` if ($o -and $o.PSIsContainer -and -not $olink) { throw 'папка' }; [void][IO.Directory]::CreateDirectory((Split-Path $t));`,
+  ` if ($link) { $to = @($i.Target)[0]; if ($olink -and @($o.Target)[0] -eq $to) { continue }; $n = $(if ($o) { "$t.miksy-new" } else { $t });`,
+  ` $rl = { param($p) $x = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; if ($x -and $x.LinkType -in 'Junction', 'SymbolicLink') { if ($x.PSIsContainer) { [IO.Directory]::Delete($p) } else { [IO.File]::Delete($p) } } };`,
+  ` & $rl "$t.miksy-new"; $env:MIKSY_L = $n; $env:MIKSY_T = $(if ($i.PSIsContainer) { [IO.Path]::GetFullPath([IO.Path]::Combine((Split-Path $t), $to)) } else { $to });`,
+  ` & cmd /d /c $(if ($i.PSIsContainer) { 'mklink /J "%MIKSY_L%" "%MIKSY_T%"' } else { 'mklink "%MIKSY_L%" "%MIKSY_T%"' }) | Out-Null; $ok = -not $LASTEXITCODE; Remove-Item Env:MIKSY_L, Env:MIKSY_T;`,
+  ` if (-not $ok) { if ($o) { & $rl $n }; throw 'mklink' };`,
+  ` if ($o) { try { if ($o.PSIsContainer) { [IO.Directory]::Delete($t) } else { [IO.File]::Delete($t) }; if ($i.PSIsContainer) { [IO.Directory]::Move($n, $t) } else { [IO.File]::Move($n, $t) } }`,
+  ` catch { if (Test-Path -LiteralPath $t) { & $rl $n }; throw } } }`,
+  ` else { $b = [IO.File]::ReadAllBytes($i.FullName); $w = [IO.File]::Open($t, 'OpenOrCreate', 'Write'); try { $w.SetLength(0); $w.Write($b, 0, $b.Length) } finally { $w.Close() } } }`,
+  ` catch { Write-Host "не возвращён: $rel"; $st.e = 1 } } }; & $f $c; $global:LASTEXITCODE = $st.e }`,
+].join("");
 export const restoreCommand = (dir: string, os: Os) => os === "windows"
-  ? `robocopy "${dir.replaceAll("/", "\\")}" $env:USERPROFILE /E /XF .claude.json`
-  : `(cd "${dir}" && find . -type f ! -path ./.claude.json -exec sh -c 'mkdir -p "$HOME/$(dirname "$1")" && cp "$1" "$HOME/$1"' _ {} \\;)`;
+  ? restorePs(dir)
+  : `(cd -- ${shQuote(dir)} && find . ! -type d ! -path ./.claude.json -exec sh -c '${RESTORE_SH}' _ {} +)`;
+// Где и чем выполнять команду возврата (вывод мастера)
+export const restoreShell = (os: Os) => (os === "windows" ? "PowerShell; " : "");
 
 // Действия с системой, которые мастер делает только после «да»: тесты подменяют их
 export interface System {
@@ -400,9 +441,17 @@ const expandEnv = (p: string) => p.replace(/%([^%]+)%/g, (m, k: string) => proce
 const inPathList = (list: string, dir: string) =>
   list.split(process.platform === "win32" ? ";" : ":").filter(Boolean).some((e) => (process.platform === "win32" ? pathKey(expandEnv(e)) === pathKey(dir) : slash(e).replace(/\/+$/, "") === slash(dir).replace(/\/+$/, "")));
 
+// Песочница тестов (test/preload.ts): настоящую систему не менять — установка программ и пользовательский PATH отказывают,
+// как test/guard.ts для файлов. Мастер в тесте — только с поддельной системой (sys, как в test/rootshelp.ts)
+function notInTests(what: string) {
+  const box = process.env.MIKSY_TEST_SANDBOX;
+  if (box) throw new Error(`тест не меняет настоящую систему: ${what} под песочницей тестов (MIKSY_TEST_SANDBOX=${slash(box)}) запрещено — передайте мастеру поддельную систему (sys), как в test/rootshelp.ts`);
+}
+
 export const realSystem: System = {
   which: (cmd) => Bun.which(cmd, { PATH: getPath() }),
   exec(command) {
+    notInTests(`установка программы «${command}»`);
     const argv = process.platform === "win32" ? ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command] : ["sh", "-c", command];
     return Bun.spawnSync(argv, { env: process.env, stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exitCode;
   },
@@ -410,6 +459,7 @@ export const realSystem: System = {
   userPath: {
     get: () => ps("(Get-Item HKCU:\\Environment).GetValue('Path', '', 'DoNotExpandEnvironmentNames')").stdout.toString().trim(),
     set(value) {
+      notInTests("запись пользовательского PATH");
       // Тип значения сохраняется (REG_EXPAND_SZ — %USERPROFILE% в путях); SetEnvironmentVariable — оповестить
       // открытые программы (Проводник, новые окна терминала) об изменении окружения
       const r = ps("[Microsoft.Win32.Registry]::SetValue('HKEY_CURRENT_USER\\Environment', 'Path', $env:MIKSY_NEW_PATH, 'ExpandString'); [Environment]::SetEnvironmentVariable('MIKSY_SETUP_NOTIFY', $null, 'User')", { MIKSY_NEW_PATH: value });
@@ -461,6 +511,28 @@ function synced(config: string): boolean {
     const m = JSON.parse(readFileSync(join(config, "local", "state", "manifest.json"), "utf8")) as { targets?: object };
     return !!m.targets && Object.keys(m.targets).length > 0;
   } catch { return false; }
+}
+
+// Отметка версии (engine) учёта новее этой копии движка (откатились на неё) — переписать на эту, иначе
+// sync и doctor повторяют «учёт записан более новой версией», пока эта версия сама не запишет учёт. Правка текста, а не
+// перезапись учёта: меняется только значение верхнего ключа engine, остальное — байт в байт (в том числе поля, которых
+// эта версия не знает). Учёт не JSON или ключ не найден однозначно — не трогать
+export function markLedger(config: string, engine: string, log: (s?: string) => void) {
+  const path = join(config, "local", "state", "manifest.json");
+  let text: string, old: unknown;
+  try { text = readFileSync(path, "utf8"); old = JSON.parse(text); } catch { return; }
+  if (!old || typeof old !== "object" || Array.isArray(old)) return;
+  const recorded = (old as { engine?: unknown }).engine;
+  if (typeof recorded !== "string" || !newerLedger(recorded, engine)) return;
+  const mine = packageVersion(engine);
+  const want = { ...(old as object), engine: mine };
+  const fits = [...text.matchAll(/"engine"\s*:\s*"(?:[^"\\]|\\.)*"/g)].map((m) => {
+    const next = `${text.slice(0, m.index)}"engine": ${JSON.stringify(mine)}${text.slice(m.index + m[0].length)}`;
+    try { return isDeepStrictEqual(JSON.parse(next), want) ? next : null; } catch { return null; }
+  }).filter((t) => t !== null);
+  if (fits.length !== 1) return;
+  writeAtomic(path, fits[0]!);
+  log(`✓ учёт: отметка версии ${baseVersion(recorded)} → ${mine} (вы перешли на эту версию движка)`);
 }
 
 // Подсказка, когда клон не удался: репо пока приватный
@@ -523,7 +595,9 @@ export function setup(o: SetupOptions): number {
   // Каталог local/ и шаблон секретов
   const local = join(config, "local");
   mkdirSync(local, { recursive: true, mode: 0o700 });
-  ensurePrivateLocal(local);
+  // Отказ (local/ не закрыть, запись в local/backups отказана) — до любой записи мастера; что затем (рецензия A круга 8c)
+  try { ensurePrivateLocal(local); }
+  catch (e) { throw new Error(`${(e as Error).message}\nЗатем запустите miksy setup снова.`); }
   const secretsPath = join(local, "secrets.env");
   if (!existsSync(secretsPath)) {
     writeFileSync(secretsPath, readFileSync(join(engine, "examples", "local", "secrets.env")), { mode: 0o600 });
@@ -565,19 +639,100 @@ export function setup(o: SetupOptions): number {
     // Основным стал один из дополнительных корней — из дополнительных он уходит (иначе один каталог дважды)
     const main = workspace;
     const was = main ? extra.findIndex((r) => rootKey(r.path) === rootKey(main)) : -1;
+    // Как вернуть прежний основной — дополнительным корнем: ветка обязательна. from — где сейчас его слои: null — в его
+    // ветке, она свободна (остаётся только root add); "" — в корне дерева (layers/tree/<папка>): их — под новую ветку;
+    // иначе — в ветке, которую забрал новый основной: её целиком (со слоем самой ветки) — под новую ветку (выпуск 0.2.1,
+    // A11; 0.2.2, круг 8b, C6 и повторная проверка, п. 1). По порядку текста: сначала перенос слоёв, потом root add — его
+    // sync --all иначе снял бы с проектов слои, которые ещё не перенесены (проверка 7a выпуска 0.2.1, B №6). Ветка в
+    // команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5); с «,» или «}» — отдельные привязки
+    // вместо {…} (круг 8b, C5)
+    const backHint = (raw: string, from: string | null) => {
+      const add = `miksy root add "${kept}" --tree ${treeArg(raw)}`;
+      if (from === null) return `${add}.`;
+      const src = from ? `${from}/` : "";
+      const braces = /[,}]/.test(raw)
+        ? `в {…} — отдельной привязкой к каждой его папке ({${src}Org,${src}Lab}/** → ${raw}/Org/** и ${raw}/Lab/**: запятая или } в имени ветки внутри {…} сломали бы шаблон)`
+        : `в {…} — к каждой его папке внутри скобок ({${src}Org,${src}Lab}/** → {${raw}/Org,${raw}/Lab}/**)`;
+      const moveLayers = from
+        ? `его ветку теперь занял новый основной — папку layers/tree/${from} целиком (с её собственными instructions, mcp, skills) переименуйте в layers/tree/${raw}, а в привязках map.yaml (match:) замените начало ${from}/ на ${raw}/ (${from}/** → ${raw}/**, шаблон ${from} → ${raw})`
+        : `у дополнительного корня своя ветка — его слои из layers/tree/<папка>/… перенесите в layers/tree/${raw}/<папка>/…, а привязки map.yaml (match:) к его проектам — под ту же ветку: <папка>/** → ${raw}/<папка>/**`;
+      return `1) ${moveLayers}, ${braces}, шаблоны, которые начинаются с **, не меняйте; 2) ${add} (README, «Несколько корней workspace»).`;
+    };
+    // Прежний основной уходит из workspace. Лежит внутри нового — его проекты остаются (слои — по пути от нового); новый
+    // внутри прежнего — уходят только проекты вне нового (повторная проверка круга 8b, п. 2; рецензия A, п. 3)
+    // Прежний внутри оставшегося дополнительного корня — так же: проекты остаются (повторная проверка 2 круга 8b, п. 3)
+    const leaving = (raw: string, from: string | null) => {
+      const below = (r: { path: string; tree: string }) => `слои — по их пути от ${slash(r.path)} (layers/tree${r.tree ? `/${r.tree}` : ""}/<путь от него>/…)`;
+      const holder = [{ path: main!, tree: mainTree }, ...extra.filter((_, i) => i !== was)]
+        .filter((r) => inside(rootKey(kept!), rootKey(r.path))).sort((a, b) => rootKey(b.path).length - rootKey(a.path).length)[0];
+      if (holder) return `прежний основной ${kept} лежит внутри ${holder.path === main ? "нового" : `корня ${slash(holder.path)}`}: его проекты остаются в workspace, ${below(holder)}`;
+      // Прежнего каталога нет (папку перенесли): рецепт «Вернуть его» снял бы слои с перенесённых проектов, а root add
+      // отказал бы — рецепта нет (выпуск 0.2.2, круг 8c, C12)
+      // Прежняя папка осталась, но пуста (перенесли содержимое) — так же (круг 8d, B №2)
+      // Проект — не только git-репо: и папка, куда miksy уже писал (проект из реестра агента, в учёте) — рецензия A круга
+      // 8d, №5
+      let recorded = false;
+      try { recorded = Object.keys(loadManifest(join(config, "local", "state", "manifest.json")).targets).some((id) => { const d = id.slice(id.indexOf("|") + 1); return d !== "global" && inside(d, kept!) && existsSync(d); }); } catch { /* учёта нет */ }
+      const empty = existsSync(kept!) && !containsProjects(kept!) && !recorded;
+      // Вложенные дополнительные корни прежнего основного и их место в новом (если папку перенесли или скопировали)
+      const nested = extra.filter((r, i) => i !== was && rootKey(r.path) !== rootKey(kept!) && inside(r.path, kept!));
+      const moved = (r: { path: string }) => slash(join(main!, relative(kept!, r.path)));
+      if (!existsSync(kept!) || empty) {
+        // Вложенные корни переехали вместе с папкой, а их путь в machine.yaml прежний: их проекты на новом месте стали бы
+        // проектами основного — назвать их и что сделать (круг 8d, E3)
+        const inner = nested.length
+          ? `; но внутри неё ${nested.length === 1 ? "был ещё корень" : "были ещё корни"} — ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если папку перенесли сюда — теперь ${moved(r)}` : ""})`).join(", ")}: в local/machine.yaml ${nested.length === 1 ? "его путь" : "их путь"} прежний, и, если папку перенесли в новую, ${nested.length === 1 ? "его проекты" : "их проекты"} на новом месте — проекты основного корня. Если папку перенесли в новую — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${nested.length === 1 ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на новое место, затем miksy sync --global и miksy sync --all — слои ветки вернутся; до этого --force из строки конфликта о ${nested.length === 1 ? "его проектах" : "их проектах"} не выполняйте: он заменил бы правила ветки правилами основного. Новая папка — не та, куда перенесли прежнюю: path: не меняйте (одноимённая папка в ней — не ${nested.length === 1 ? "его" : "их"} новое место)`
+          : "";
+        return `${empty ? `в прежнем основном ${kept} проектов нет: перенесли его содержимое или их там не было` : `прежнего основного ${kept} нет на месте: перенесли папку`} — ${nested.length ? "учёт" : "делать ничего не нужно, учёт"} обычно переедет сам при sync --all (README, «Переименовали или перенесли каталог»)${inner}; это диск, который сейчас не подключён, — когда подключите, верните прежний корень по README («Несколько корней workspace», «Сменить основной корень»). \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
+      }
+      const mainIn = inside(rootKey(main!), rootKey(kept!));
+      // Новый основной внутри прежнего с веткой: ветку занял он — переименовать её значило бы снять слои с его проектов
+      // (повторная проверка 3 круга 8b, п. 2)
+      // Прежний основной без ветки, а у нового основного папки с теми же именами: перенос layers/tree/<папка> снял бы слои
+      // и с их проектов — рецепта нет (круг 8d, B №4). Основным стал бывший дополнительный корень — у него своя ветка,
+      // layers/tree/<папка> его проекты не берут (рецензия A круга 8d, №3)
+      const dirs = (p: string) => { try { return readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } };
+      const fold = (s: string) => (process.platform === "linux" ? s : s.toLowerCase());
+      const mine = new Set(dirs(kept!).map(fold));
+      // Одноимённые папки — кроме папки, которая сама вложенный корень со своей веткой не в layers/tree/<папка>: перенос
+      // layers/tree/<папка> его слои не заденет (круг 8e, F1). Остаются в списке: вложенный корень с веткой = имени папки
+      // (его слои — в layers/tree/<папка>; круг 8f, G1), папка, где вложенный корень лежит глубже (рядом — проекты
+      // основного), и папки со слоями через привязки map.yaml — перенос задел бы и их
+      // Ветка, первая часть которой совпадает с любой папкой прежнего основного (Clients, Clients/Main, Org/X), лежит в
+      // layers/tree/<папка> — перенос её задел бы: такая папка остаётся в списке (без учёта регистра, как слои дерева)
+      const keptLower = new Set(dirs(kept!).map((d) => d.toLowerCase()));
+      const nestedTop = new Set(nested.map((r) => ({ rel: relative(kept!, r.path), tree: r.tree }))
+        .filter((x) => !/[\\/]/.test(x.rel) && !keptLower.has(x.tree.split("/")[0].toLowerCase())).map((x) => fold(x.rel)));
+      const same = from === "" && was < 0 && !mainTree
+        ? dirs(main!).filter((d) => mine.has(fold(d)) && !nestedTop.has(fold(d))).sort() : [];
+      // Вложенный корень прежнего основного остаётся в workspace по прежнему пути; его копия в новой папке — проекты
+      // основного, пока не поправлен его path: (круг 8e, F1: папку скопировали или перенесли, оставив пустые папки)
+      const one = nested.length === 1;
+      const nestedText = nested.length
+        ? ` Внутри него ${one ? "ещё корень" : "ещё корни"} ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если новая папка — копия прежней, его копия — ${moved(r)}` : ""})`).join(", ")}: ${one ? "он остаётся" : "они остаются"} в workspace по прежнему пути, ${one ? "его проекты" : "их проекты"} miksy обновляет, как раньше. Если папку скопировали или перенесли и вы переходите на новую целиком — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${one ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на ${one ? "его копию" : "их копии"} в новой папке, затем miksy sync --global и miksy sync --all — слои ${one ? "его ветки" : "их веток"} перейдут туда; до этого ${one ? "его копия" : "их копии"} в новой папке — проекты основного корня: --force из строки конфликта о них не выполняйте, он заменил бы правила ветки правилами основного. Новая папка — не копия прежней: path: не меняйте (одноимённая папка в ней — не его копия).`
+        : "";
+      // Папку скопировали: прежняя копия не нужна — clean в ней; в новой копии файлы с путями — конфликт до --force (B №5)
+      const copied = `папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет)${nested.length ? `; в ${one ? "копии вложенного корня" : "копиях вложенных корней"} — только после правки ${one ? "его" : "их"} path:` : ""}.`;
+      const back = (tangled || mainIn) && from
+        ? "Вернуть его — README, «Несколько корней workspace» («Сменить основной корень»): переносить эту ветку miksy не подсказывает — переименование задело бы слои нового основного, предка ветки или других корней."
+        : same.length
+          ? `Вернуть его — README, «Несколько корней workspace» («Сменить основной корень»): переносить его слои miksy не подсказывает — у нового основного ${same.length === 1 ? "есть папка" : "есть папки"} с тем же именем (${same.join(", ")}), перенос layers/tree/<папка> снял бы слои и с ${same.length === 1 ? "её" : "их"} проектов. Если ${copied}`
+          : `Вернуть его: ${backHint(raw, from)} Это — если новый основной другая папка, а прежняя нужна; ${copied}`;
+      return `прежний основной ${kept} из workspace уходит${mainIn ? ` (кроме проектов внутри нового основного: они остаются в workspace, ${below({ path: main!, tree: mainTree })})` : ""}: ${mainIn ? "остальные его проекты" : "его проекты"}${nested.length ? ` (кроме ${one ? "вложенного корня" : "вложенных корней"} — ниже)` : ""} miksy больше не обновляет.${nestedText} ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
+    };
+    // Ветку прежнего основного забрал новый каталог (обычно папку перенесли — ветка идёт за ней; решение основного агента
+    // 8b): переименование ветки верно только для ветки из одной части, внутри которой нет веток других корней — иначе
+    // слои предка или вложенного корня ушли бы не туда (повторная проверка 2 круга 8b, п. 1, 2)
+    const tangled = !!keptTree && (keptTree.includes("/") || extra.some((r) => r.tree.toLowerCase().startsWith(`${keptTree.toLowerCase()}/`)));
     if (was >= 0) {
       mainTree = extra[was].tree;
-      // Вернуть прежний основной — дополнительным корнем: ветка обязательна, а его слои без ветки (layers/tree/<папка>)
-      // придётся перенести под неё (выпуск 0.2.1, A11)
       const raw = keptTree || suggestTree(kept ?? "", [mainTree, ...extra.map((r) => r.tree)].filter(Boolean));
-      // В команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5)
-      const branch = treeArg(raw);
-      // По порядку текста: сначала перенос слоёв, потом root add — его sync --all иначе снял бы с проектов слои, которые
-      // ещё не перенесены (проверка 7a выпуска 0.2.1, B №6)
-      const add = `miksy root add "${kept}" --tree ${branch}`;
-      const back = keptTree ? `${add}.` : `1) у дополнительного корня своя ветка — его слои из layers/tree/<папка>/… перенесите в layers/tree/${raw}/<папка>/…, а привязки map.yaml (match:) к его проектам — под ту же ветку (Org/** → ${raw}/Org/**); 2) ${add} (README, «Несколько корней workspace»).`;
-      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; прежний основной ${kept} из workspace уходит. Вернуть его: ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}` : ""}`);
+      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; ${leaving(raw, keptTree ? null : "")}` : ""}`);
       extra.splice(was, 1);
+    } else if (main && kept && rootKey(kept) !== rootKey(main)) {
+      // Основным стал новый каталог: он берёт ветку прежнего основного (если была) — та же подсказка (её называет и
+      // подсказка clean забытой папки вне workspace; выпуск 0.2.2, круг 8b, C6)
+      log(`  ${keptTree ? `ветка layers/tree/${keptTree} перешла к новому основному ${slash(main)}; ` : ""}${leaving(suggestTree(kept, [keptTree, ...extra.map((r) => r.tree)].filter(Boolean)), keptTree)}`);
     }
     if (workspace) moreRoots(ask, workspace);
   } else if (!workspace) {
@@ -729,6 +884,9 @@ export function setup(o: SetupOptions): number {
   // Подсказки — командой, которая действительно найдётся: Homebrew-bun не кладёт ~/.bun/bin в PATH
   if (installed && !other && !ask) log(`• каталог ${slash(bunBin)} не в PATH — команда miksy не найдётся. Добавьте его в PATH (например, в ~/.zshrc: export PATH="${slash(bunBin)}:$PATH") или запускайте bun "${cli}"`);
   const cmd = installed && sys.which("miksy") && sameShim(sys.which("miksy")!) ? "miksy" : `bun "${cli}"`;
+  // Команда miksy ведёт на эту копию движка (своя команда с её путём, другой miksy в PATH нет) — переход на неё явный:
+  // отметка версии учёта новее этой — переписывается на эту
+  if (installed && readFileSync(shim, "utf8") === shimBody && (!other || sameShim(other))) markLedger(config, engine, log);
 
   // Заметка конфигурации о подготовке машины (local.example/README.md) — то, что miksy не настраивает сам
   const machineNote = () => {
@@ -828,7 +986,7 @@ export function setup(o: SetupOptions): number {
     step(3, "Копия текущих настроек агентов", "страховка до первой записи miksy: вернёте всё как было даже без miksy.");
     const root = join(local, "backups");
     const done = existsSync(root) ? readdirSync(root).filter((d) => d.startsWith("before-miksy-")).sort() : [];
-    if (done.length) return log(`✓ уже есть: ${slash(join(root, done[done.length - 1]))}\n  вернуть: ${restoreCommand(slash(join(root, done[done.length - 1])), os)}`);
+    if (done.length) return log(`✓ уже есть: ${slash(join(root, done[done.length - 1]))}\n  вернуть (${restoreShell(os)}после miksy clean): ${restoreCommand(slash(join(root, done[done.length - 1])), os)}`);
     if (synced(config)) return log("• miksy уже записывал настройки на этой машине — копия «до miksy» не получится; бэкапы его запусков — local/backups/.");
     const ids = machine?.agents ?? agents;
     const rels = [...new Set(ids.flatMap((id) => ADAPTERS[id]?.homeConfig ?? []))].filter((r) => { try { lstatSync(join(home, r)); return true; } catch { return false; } });
@@ -836,11 +994,16 @@ export function setup(o: SetupOptions): number {
     log(`  Что есть: ${rels.map((r) => "~/" + r).join(", ")}`);
     const dest = join(root, `before-miksy-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`);
     if (!agree(`Скопировать это в ${slash(dest)}?`, true)) return log("  пропущено — без копии откатить можно только по бэкапам запусков miksy");
+    // За ссылку local/backups с открытой или несуществующей целью копия не пишется (C10; обычно отказ — раньше, в local/)
+    refuseBackupPath(join(dest, "x"), config);
+    // За ссылкой local/backups — своя папка: закрыть до копирования, файлы копии наследуют (круг 8d, E1)
+    mkdirSync(dest, { recursive: true, mode: 0o700 });
+    if (behindLink(dest, config)) closeOwn(dest, true);
     const r = copyAgentSettings(home, rels, dest);
     ensurePrivateLocal(local);
     log(`✓ копия: ${slash(dest)} (файлов: ${r.files})`);
     if (r.links.length) log(`  ссылки не скопированы (ОС не дала создать): ${r.links.join(", ")}`);
-    log(`  вернуть (после miksy clean): ${restoreCommand(slash(dest), os)}`);
+    log(`  вернуть (${restoreShell(os)}после miksy clean): ${restoreCommand(slash(dest), os)}`);
   }
 
   // after — после adopt: только команды серверов, которых шаг 4 ещё не видел (перенесённые в слои);
@@ -1104,7 +1267,7 @@ export function setup(o: SetupOptions): number {
 
 // Сводка плана sync --global --dry-run и sync --all --dry-run (мастер, шаг 8; miksy update после
 // обновления движка): строки сводки и полный вывод обеих команд
-export function planSummary(run: Run): { lines: string[]; text: string; changes: number } {
+export function planSummary(run: Run): { lines: string[]; text: string; changes: number; refused: boolean } {
   const reports: TargetReport[] = [];
   const lines: string[] = [];
   let text = "";
@@ -1122,6 +1285,12 @@ export function planSummary(run: Run): { lines: string[]; text: string; changes:
       remove: acts.filter((a) => a.kind === "delete").length,
       targets: new Set(rs.filter((r) => r.actions.some((a) => a.kind !== "conflict")).map((r) => r.title)).size };
   };
+  // Запись откажет (C10): плана нет — только строка отказа, один раз (sync --global и --all печатают её оба), без «изменений
+  // нет» и «конфликтов нет» (круг 8d, A №5)
+  if (/^Ошибка \(запуск откажет\): /m.test(text)) {
+    for (const e of new Set(text.match(/^Ошибка(?: \(запуск откажет\))?: .*$/gm) ?? [])) lines.push(`  ${e}`);
+    return { lines, text, changes: 1, refused: true };
+  }
   const line = (label: string, rs: TargetReport[]) => {
     const c = tally(rs);
     lines.push(`  ${label}: ${c.create + c.update + c.remove ? `создать ${c.create}, обновить ${c.update}${c.remove ? `, удалить ${c.remove}` : ""} (целей: ${c.targets})` : "изменений нет"}`);
@@ -1139,10 +1308,12 @@ export function planSummary(run: Run): { lines: string[]; text: string; changes:
   const trust = text.match(/Нужно решение пользователя о доверии \((\d+)\)/);
   if (trust) lines.push(`  доверие: ${count(Number(trust[1]), "проект ждёт", "проекта ждут", "проектов ждут")} вашего решения — sync спросит при записи`);
   // Ошибка команды целиком (нет machine.yaml, учёт повреждён) — в сводку, а не только в полный план
-  for (const e of text.match(/^Ошибка: .*$/gm) ?? []) lines.push(`  ${e}`);
+  // и отказ записи (sync --dry-run: «Ошибка (запуск откажет): …», круг 8c, C10)
+  for (const e of text.match(/^Ошибка(?: \(запуск откажет\))?: .*$/gm) ?? []) lines.push(`  ${e}`);
+  const refused = /^Ошибка \(запуск откажет\): /m.test(text);
   const all = tally(reports);
   // Изменения, решения о доверии и ошибки плана: «записывать нечего» — только если ничего из этого нет
-  return { lines, text, changes: all.create + all.update + all.remove + (trust ? 1 : 0) + (/^Ошибка: /m.test(text) ? 1 : 0) };
+  return { lines, text, changes: all.create + all.update + all.remove + (trust ? 1 : 0) + (/^Ошибка: /m.test(text) || refused ? 1 : 0), refused };
 }
 
 // Новая переменная машины (путь к программе) — строкой в vars: в local/machine.yaml (с бэкапом)

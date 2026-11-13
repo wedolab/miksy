@@ -43,7 +43,7 @@ test("Б, вне workspace: clean без --agent → подсказка назы
   const { f, site, drive } = setup();
   const c = f.run(["clean", site]);
   expect(c.out).toMatch(/--agent codex/);
-  expect(c.out).toContain("прежний корень workspace");
+  expect(c.out).toContain("корень workspace, в котором лежала папка");
   follow(f, c.out, drive);
   expect(filesIn(site)).toEqual([]);
   expect(Object.keys((ledger(f.config) as any).forgotten ?? {})).toEqual([]);

@@ -80,7 +80,7 @@ export function finishUpdate(o: { from: string; ask: Ask | null; run: Run; log?:
 
   log("\n1. Команда miksy и local/ (setup --yes, только безопасная часть)");
   try { setup({ ask: null, force: false, hints: false, log, engine }); }
-  catch (e) { log(`Ошибка setup: ${(e as Error).message}`); }
+  catch (e) { log(`Ошибка setup: ${(e as Error).message}\nДвижок обновлён, но setup не выполнен: исправьте сказанное выше, затем miksy setup --yes`); }
 
   let machine: Machine;
   try { machine = loadMachine(); }
@@ -99,6 +99,11 @@ export function finishUpdate(o: { from: string; ask: Ask | null; run: Run; log?:
   const plan = planSummary(o.run);
   for (const l of plan.lines) log(l);
   const later = "miksy sync --global и miksy sync --all (план — с --dry-run)";
+  // Запись откажет (C10): план не построен — что исправить и что затем, без вопроса «Записать?»
+  if (plan.refused) {
+    log(`\nПлан не построен: запись откажет (строка выше). Исправьте сказанное, затем miksy setup --yes и ${later}`);
+    return 1;
+  }
   if (!plan.changes) {
     log("\nЗаписывать агентам нечего — их настройки уже совпадают с конфигурацией.");
     return 0;

@@ -121,10 +121,17 @@ export const clashText = (c: { root: Root; other: Root; dir: string }) =>
 const PARTS = ["instructions", "mcp", "skills", "hooks", "policies"];
 
 // Ветка для нового корня по имени его папки: допустимое имя (не имя части слоя, без «.» и пробелов по
-// краям), не занятое другим корнем (без учёта регистра). Корень диска — по букве диска
+// краям), не занятое другим корнем (без учёта регистра). Корень диска — по букве диска. Ветка входит в match: привязок
+// map.yaml, а их сравнивает Bun.Glob. Имя со знаками, из-за которых привязка «<ветка>/Org/**» не работала бы
+// («[», «{», «\» — не совпадает со своими проектами) или была бы шире («*», «?», «!» в начале — отрицание), — без них:
+// убираются [ ] { } \ * ? и «!» в начале, пробелы подряд — один. Остальные имена — ровно как в 0.2.1: запятая, «!» не в
+// начале, одиночные ] и } вне {…} привязку не ломают (выпуск 0.2.2, A3 г; круг 8b, C5 — проверено Bun.Glob,
+// out/8b-exp/glob-exp.ts)
+const GLOB_BREAKS = /[[{\\*?]|^!/;
 export function suggestTree(path: string, taken: string[]): string {
   const p = trimSlash(slash(path));
-  const base = (basename(p) || p.replace(/[:/]+/g, "")).replace(/^[\s.]+|[\s.]+$/g, "") || "Root";
+  const plain = (basename(p) || p.replace(/[:/]+/g, "")).replace(/^[\s.]+|[\s.]+$/g, "");
+  const base = (GLOB_BREAKS.test(plain) ? plain.replace(/[[\]{}\\*?]+/g, " ").replace(/\s+/g, " ").replace(/^[\s.!]+|[\s.]+$/g, "") : plain) || "Root";
   const name = PARTS.includes(base.toLowerCase()) ? `${base}-root` : base;
   const used = new Set(taken.map((t) => t.toLowerCase()));
   let out = name;

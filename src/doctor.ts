@@ -164,7 +164,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
     }
 
   const localAccess = checkLocalAccess();
-  if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `открытых путей или ошибок проверки: ${localAccess.bad.length}; ${localAccess.bad[0]} — sync/setup исправит права` });
+  if (localAccess.refuse) permissions.push({ agent: "—", target: "local/backups", detail: `пока так, все команды, которые пишут (sync, clean, setup, update, root, adopt, trust, target), откажут: ${localAccess.refuse}` });
+  if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `открытых путей или ошибок проверки: ${localAccess.bad.length}; ${localAccess.bad[0]} — sync/setup исправит права${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
   for (const l of localAccess.links) permissions.push({ agent: "—", target: "local/", detail: l });
 
   // Файлы секретов: нужные записанным конфигам (учёт) есть, закрыты владельцу, не устарели; лишних нет
@@ -198,9 +199,18 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
     .filter(([agent, dir]) => adapters.some((a) => a.id === agent) && dir !== "global" && !existsSync(dir))
     .filter(([, dir]) => !(unavailable(dir, machine) && awayTargets.add(dir)) && !(outsideRoots(dir, machine) && leftTargets.add(dir)))
     .map(([agent, dir]) => ({ agent, target: dir, detail: "" }));
-  // Сколько записанного miksy лежит в каталогах (по учёту всех агентов)
-  const filesIn = (dirs: Set<string>) => new Set([...dirs].flatMap((d) => Object.entries(manifest.targets)
-    .filter(([id]) => fold(id.slice(id.indexOf("|") + 1)) === fold(d)).flatMap(([, st]) => [...strandedPaths(splitState(st, d).far)]))).size;
+  // Сколько записанного miksy лежит в каталогах: own — агентами из agents (его уберёт clean без --agent; общий
+  // .git/info/exclude — тоже), иначе — только агентами, которых нет в agents (clean — с --agent: команды в строке «Учёт
+  // агентов, которых нет в agents»). Правило A4 root remove (выпуск 0.2.2) — и здесь (круг 8b, C9)
+  const enabled = new Set(agentsFor(machine).map((a) => a.id));
+  const paths = (dirs: Set<string>, own: boolean) => new Set([...dirs].flatMap((d) => Object.entries(manifest.targets)
+    .filter(([id]) => enabled.has(id.slice(0, id.indexOf("|"))) === own && fold(id.slice(id.indexOf("|") + 1)) === fold(d))
+    .flatMap(([, st]) => [...strandedPaths(splitState(st, d).far)])));
+  const filesIn = (dirs: Set<string>) => paths(dirs, true).size;
+  const othersIn = (dirs: Set<string>) => { const own = paths(dirs, true); return [...paths(dirs, false)].filter((p) => !own.has(p)).length; };
+  const othersNote = (dirs: Set<string>) => (othersIn(dirs) ? `; записанное только агентами, которых нет в agents (${files(othersIn(dirs))}), clean без --agent не убирает — команды в строке «Учёт агентов, которых нет в agents»` : "");
+  // Без агентов вне agents — текст как в 0.2.1
+  const ownFiles = (dirs: Set<string>) => `${files(filesIn(dirs))}${othersIn(dirs) ? " агентами из agents" : ""}`;
   const bothWays = `диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`;
 
   // Цели учёта, чей каталог теперь сам корень workspace: записанное туда действует и не обновляется
@@ -261,7 +271,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
 
   if (manifestError) out.push(manifestError, "Проверка без сведений о владении; файлы и учёт не изменены.", "");
   section("Конфликты первого sync", "файлы не записаны", blocked);
-  section("Небезопасные права", "sync/setup закрывает local/ владельцу (ACL Windows / 0700 Unix)", permissions);
+  section("Небезопасные права", "открытые пути local/ и права файлов miksy исправит sync/setup; о ссылках — в самих строках", permissions);
   section("Проекты без доверия", "причина для каждого агента; чужое доверие не меняется", trust);
   if (pendingTrust.length) out.push(`Нужно решение пользователя о доверии (${pendingTrust.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне Claude, чужие файлы); без решения miksy доверие не ставит:`,
     ...pendingText(pendingTrust), AGENT_NOTE, "");
@@ -327,17 +337,16 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   if (nested.length) info.push(`Вложенные корни (${nested.length}):`, ...nested.map((n) => "  " + n));
   const branches = branchNotes(machine);
   if (branches.length) info.push(`Ветки корней внутри чужих мест (${branches.length}) — не ошибка, но проекты этих корней получают слои этих мест:`, ...branches.map((n) => "  " + n));
-  if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>:`, ...outside.map((d) => "  " + d));
-  if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${files(filesIn(awayTargets))}): ${bothWays}`);
+  if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>${othersNote(new Set(outside)) ? ` (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»)` : ""}:`, ...outside.map((d) => "  " + d));
+  if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${ownFiles(awayTargets)}): ${bothWays}${othersNote(awayTargets)}`);
   // Учёт агентов, которых убрали из agents без clean: записанное им действует у агента, sync его не обновляет
   // (выпуск 0.2.1, A14). Команда — та, что действительно убирает (clean с --agent берёт и агента вне agents)
-  const enabled = new Set(agentsFor(machine).map((a) => a.id));
   // И отметки «проект забыт» таких агентов, если папка на месте: clean --agent узнает их файлы и уберёт (проверка 7b, B №1)
   const retired = [...new Map([...Object.keys(manifest.targets), ...Object.keys(manifest.forgotten ?? {}).filter((id) => existsSync(id.slice(id.indexOf("|") + 1)))]
     .map((id) => [id.slice(0, id.indexOf("|")), id.slice(id.indexOf("|") + 1)]).filter(([a]) => !enabled.has(a)).map((x) => [x.join("|"), x])).values()];
   if (retired.length) info.push(`Учёт агентов, которых нет в agents (${retired.length}) — miksy записывал им настройки, агента убрали из local/machine.yaml без clean: записанное действует, но не обновляется. Убрать (или верните агента в agents):`,
     ...retired.map(([a, d]) => `  miksy clean ${d === "global" ? "--global" : `"${d}"`} --agent ${a}`));
-  if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${files(filesIn(leftTargets))}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)`);
+  if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}`);
   // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
   const legacy = legacyAgentNames();
   if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: gemini теперь antigravity (Antigravity — агент, Gemini — модель):`, ...legacy.map((l) => "  " + l));

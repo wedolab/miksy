@@ -526,8 +526,8 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const add = want.filter((n) => !enabled.includes(n));
       const own = [...new Set([...ours.filter((n) => want.includes(n) && enabled.includes(n)), ...add])].sort();
       const remove = ours.filter((n) => !want.includes(n) && enabled.includes(n));
+      const refusal = escapes(local, target.dir) || gitWhy;
       if (add.length || remove.length || JSON.stringify([...recordedApprovals].sort()) !== JSON.stringify(own)) {
-        const refusal = escapes(local, target.dir) || gitWhy;
         if (refusal && (add.length || remove.length)) out.push({ kind: "conflict", abs: local, why: `${refusal} — одобрение серверов .mcp.json не меняю` });
         else out.push({ kind: "approve", abs: local, add, remove, own, beforeHash: sha(exists ? readFileSync(local, "utf8") : ""), roots: [target.dir], ...(back.length > 0 && { known: true }) });
       }
@@ -537,6 +537,14 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const unapproved = mcp && eligible && !basis ? mcp.names.filter((n) => (!enabled.includes(n) || remove.includes(n)) && !disabled.includes(n)) : [];
       if (unapproved.length && !pending)
         pending = { dir: target.dir, rel: target.rel, agent: "mcpjson", fingerprint: mcp!.fingerprint, lines: mcp!.lines, files: [join(target.dir, ".mcp.json").replaceAll("\\", "/")], ...(mcpDecision?.answer === "no" && { declined: true }) };
+      // Одобрение miksy снимается, а вопроса в этом запуске нет: проект не доверенный в Claude (вы сняли доверие сами;
+      // доверие miksy здесь не ставил — «нет» доверию Claude), а прежний отказ не переспрашивается. Вопрос о серверах
+      // не поможет — без доверия Claude их не запускает; подсказка — что будет дальше (выпуск 0.2.2, A2: правило R2 и
+      // для этого пути). Есть вопрос (сменились настройки, доверие снимает сам miksy) — подсказки нет: ответ решает.
+      // Не в clean, не при запрете trust: false и не когда файл одобрений менять нельзя (конфликт)
+      const asked = !!pending && !pending.declined;
+      if (remove.length && !trusted && !clean && !off && !team && !refusal && !asked && !Object.keys(prev.trust ?? {}).length)
+        advice.push(`Claude: ${target.rel || target.dir} — проект не доверенный в Claude: одобрение серверов .mcp.json (${remove.join(", ")}) снимается, без доверия Claude их всё равно не запускает. Доверитесь проекту в окне Claude — miksy sync вернёт одобрение (а если серверы сменились — спросит о них)`);
     };
     // Почему доверия быть не должно (null — должно)
     const why: string | null = clean ? "clean" : off ? offWhy

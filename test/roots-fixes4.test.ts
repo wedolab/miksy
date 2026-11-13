@@ -306,8 +306,8 @@ describe("B.7: root remove недоступного корня --dry-run — п�
     const r = x.f.run(["root", "remove", x.f.archive, "--dry-run"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("Корень недоступен (пуст, а в учёте есть его цели — диск не смонтирован?) — на нём записанное miksy: 2 файла.");
-    expect(r.out).toContain("Без терминала вопроса нет — корень убирается, а записанное (2 файла) и учёт остаются");
-    expect(r.out).toContain("Забыть сразу — --forget.");
+    expect(r.out).toContain("Без терминала вопроса нет — корень убирается, а записанное в его проекты и учёт остаются. Когда диск вернётся — miksy clean \"<путь проекта>\" уберёт 2 файла");
+    expect(r.out).toContain("данных больше нет — miksy clean \"<путь проекта>\" --forget (или сразу root remove с --forget)");
     untouched(x);
   }, 120000);
 
@@ -315,7 +315,7 @@ describe("B.7: root remove недоступного корня --dry-run — п�
     const x = setup();
     const r = inProcess(x.f, ["root", "remove", x.f.archive, "--dry-run"], x.f.dir, []);
     expect({ code: r.code, err: r.err, questions: r.questions }).toEqual({ code: 0, err: "", questions: [] });
-    expect(r.out).toContain("Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию) — корень убирается, а записанное (2 файла) и учёт остаются");
+    expect(r.out).toContain("Будет вопрос: забыть записанное в его проекты? «Нет» (по умолчанию) — корень убирается, а записанное в его проекты и учёт остаются. Когда диск вернётся — miksy clean \"<путь проекта>\" уберёт 2 файла");
     untouched(x);
   }, 120000);
 

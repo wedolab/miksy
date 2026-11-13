@@ -139,7 +139,7 @@ describe("A.2: clean каталога, до которого не дотянут
     const r = inProcess(f, ["root", "remove", f.archive], f.dir, [false]);
     expect(r.err).toBe("");
     expect(r.questions).toEqual([`Корень ${f.archive} недоступен (пуст, а в учёте есть его цели — диск не смонтирован?): диск не подключён или данных больше нет? Забыть записанное в его проекты (2 файла)?`]);
-    expect(r.out).toContain("Корень недоступен — записанное в его проекты (2 файла) и учёт не тронуты.");
+    expect(r.out).toContain("Корень недоступен — записанное в его проекты и учёт не тронуты. Когда диск вернётся — miksy clean \"<путь проекта>\" уберёт 2 файла");
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain(f.archive);
     expect(f.mine().length).toBe(1);
     // Каталога нет, корня в workspace нет — не «пропавший», а «осталось убрать»

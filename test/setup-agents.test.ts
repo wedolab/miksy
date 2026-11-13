@@ -1,11 +1,11 @@
 // setup и агенты: команда в PATH или только каталог настроек; новый агент при повторном setup
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { cliFixture, put } from "./helpers";
-import { detectAgents } from "../src/setup";
+import { detectAgents, setup as runSetup } from "../src/setup";
+import { ENGINE } from "../src/load";
 
-const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 const win = process.platform === "win32";
 
 // Поддельная команда агента в отдельном каталоге PATH
@@ -15,14 +15,26 @@ function fakeCommand(dir: string, name: string) {
   if (!win) chmodSync(file, 0o755);
 }
 
-function setup(f: ReturnType<typeof cliFixture>, path: string) {
-  const r = Bun.spawnSync([process.execPath, CLI, "setup", "--yes"], {
-    cwd: f.dir,
-    env: { ...process.env, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home, BUN_INSTALL: `${f.dir}/bun`, PATH: path },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  return r.stdout.toString() + r.stderr.toString();
+
+// Мастер в процессе (как setup --yes): движок — копия в песочнице (workspace по умолчанию — от её места, внутри
+// песочницы), система — поддельная, команды агентов — which. Настоящий движок под песочницей workspace не предлагает,
+// и setup --yes подпроцессом записал бы в конфигурацию место настоящего движка (круг 8e, F6)
+function inProcessSetup(f: ReturnType<typeof cliFixture>, which: (c: string) => string | null): string {
+  const engine = `${f.dir}/ws/home/Miksy/miksy`;
+  cpSync(join(ENGINE, "examples"), `${engine}/examples`, { recursive: true });
+  put(`${engine}/src/cli.ts`, "// движок для теста\n");
+  const saved = { ...process.env }, logs: string[] = [], orig = console.log;
+  Object.assign(process.env, { MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home, BUN_INSTALL: `${f.dir}/bun` });
+  console.log = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+  try {
+    const sys = { which, exec: () => 0, git: () => 0, userPath: { get: () => "", set: () => {} }, refreshPath: () => {} };
+    runSetup({ ask: null, force: false, engine, sys, log: (s = "") => logs.push(s) });
+  } finally {
+    console.log = orig;
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+  return logs.join("\n");
 }
 
 describe("setup: какие агенты настраивать", () => {
@@ -41,7 +53,7 @@ describe("setup: какие агенты настраивать", () => {
     const f = cliFixture();
     rmSync(`${f.config}/local/machine.yaml`);
     mkdirSync(`${f.home}/.claude`, { recursive: true });
-    const out = setup(f, "");
+    const out = inProcessSetup(f, () => null);
     expect(out).toMatch(/claude: команды нет в PATH, но есть .*\.claude/);
     expect(readFileSync(`${f.config}/local/machine.yaml`, "utf8")).toMatch(/^agents: \[\]$/m);
   }, 30000);
@@ -54,7 +66,7 @@ describe("setup: какие агенты настраивать", () => {
     const bin = `${f.dir}/bin`;
     fakeCommand(bin, "claude");
     fakeCommand(bin, "codex");
-    const out = setup(f, bin);
+    const out = inProcessSetup(f, (c) => (["claude", "codex"].includes(c) ? `${bin}/${c}` : null));
     expect(out).toContain("codex");
     const after = readFileSync(machine, "utf8");
     expect(after).toMatch(/^agents: \[claude, codex\]$/m);

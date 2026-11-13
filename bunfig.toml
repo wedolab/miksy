@@ -1,5 +1,6 @@
 # Тесты miksy — только в test/ (в local/backups могут лежать чужие репо со своими тестами)
 [test]
 root = "test"
-# Песочница: временные HOME, tmp и конфигурация miksy (test/preload.ts)
-preload = ["./test/preload.ts"]
+# Песочница: временные HOME, tmp и конфигурация miksy (test/preload.ts); test/fsguard.ts — первым: замок записи в
+# процессе ставится до первого import из "node:fs"
+preload = ["./test/fsguard.ts", "./test/preload.ts"]

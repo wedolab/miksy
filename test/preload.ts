@@ -7,6 +7,7 @@ import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { ENGINE, configRoot } from "../src/load";
 import { installGuard, realEnvironment } from "./guard";
+import { configureFsGuard, fsViolations } from "./fsguard";
 
 // Настоящее окружение — до подмены: guard не даёт запуску CLI в тесте писать туда (test/guard.ts)
 const real = realEnvironment({ ...process.env }, ENGINE, userInfo().homedir);
@@ -39,6 +40,10 @@ Object.assign(process.env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(h
 if (!inside(homeDir(), canonical(sandbox))) throw new Error("Тесты остановлены: домашний каталог вне песочницы");
 if (!inside(configRoot(), canonical(sandbox))) throw new Error("Тесты остановлены: конфигурация вне песочницы");
 installGuard(real, [sandbox, systemTmp]);
+// Запись в этом же процессе — тоже только в песочницу и системный tmp (круг 8e, F6). Отметка о попытке мимо — прогон
+// падает в конце, даже если код под тестом поймал ошибку
+configureFsGuard([sandbox, systemTmp]);
+afterAll(() => { if (fsViolations.length) throw new Error(`test/guard.ts: запись мимо песочницы в процессе:\n  ${fsViolations.join("\n  ")}`); });
 
 // Песочница всех тестов: на медленном диске (раннеры GitHub Windows) удаление дольше стандартных 5 с
 afterAll(() => rmSync(sandbox, { recursive: true, force: true }), 120000);
