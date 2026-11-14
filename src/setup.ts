@@ -5,7 +5,7 @@
 // adopt) — через run в этом же процессе, действия с системой (установка программ, PATH, git) — через
 // System: тесты подменяют все три. Без Ask (--yes, нет терминала) — только безопасная часть.
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { canonical, driveRoot, homeDir, inside, samePath, slash, trimSlash } from "./paths";
+import { canonical, driveRoot, homeDir, inside, quoteArg, samePath, slash, trimSlash } from "./paths";
 import { basename, delimiter, dirname, join, posix, relative, win32 } from "node:path";
 import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
@@ -222,14 +222,14 @@ export function repoAbove(dir: string): string | null {
 }
 
 // Ветка в команде — в кавычках, если в имени пробел и т. п.
-const treeArg = (t: string) => (/^[\w./-]+$/.test(t) ? t : `"${t}"`);
+const treeArg = (t: string) => quoteArg(t, true);
 
 // Как git-репо вне workspace сделать проектом: корнем — папка, в которой он лежит; если она — диск, дом или
 // каталог всех пользователей, — перенести репо в папку с проектами (рецензия 6x, B3)
 export function outsideRepoAdvice(repo: string, home: string, roots: Root[]): string {
   const parent = slash(dirname(repo));
   return parent !== repo && !unsafeWorkspace(parent, home)
-    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add "${parent}" --tree ${treeArg(suggestTree(parent, roots.map((r) => r.tree).filter(Boolean)))} (её проекты — git-репо внутри; --tree — её ветка в layers/tree)`
+    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add ${quoteArg(parent)} --tree ${treeArg(suggestTree(parent, roots.map((r) => r.tree).filter(Boolean)))} (её проекты — git-репо внутри; --tree — её ветка в layers/tree)`
     : `перенесите его в папку с проектами — корень workspace (${roots.map((r) => r.path).join(", ")}) или новую папку, которую добавите корнем (miksy root add "<папка>")`;
 }
 
@@ -252,9 +252,9 @@ export function projectRootText(dir: string, home: string, roots: Root[], o: { g
     : outer ? `${place ? "папка внутри проекта" : "папка внутри git-репо"} ${outer}`
     : repo && place ? `проект корня ${place.root.path}` : repo ? "git-репо" : "каталог, в который miksy уже записывал настройки";
   const outerTree = outer && place ? locate(outer, roots)?.tree : undefined;
-  const advice = outer && place ? ` Проект ${outer} и так в workspace и получает настройки: miksy sync "${outer}"; свои правила для него — в layers/tree/${outerTree}/instructions/`
+  const advice = outer && place ? ` Проект ${outer} и так в workspace и получает настройки: miksy sync ${quoteArg(outer)}; свои правила для него — в layers/tree/${outerTree}/instructions/`
     : outer ? ` Чтобы репо ${outer} стал проектом, ${outsideRepoAdvice(outer, home, roots)}`
-    : place ? ` Он и так в workspace и получает настройки: miksy sync "${dir}"; свои правила для него — в layers/tree/${place.tree}/instructions/`
+    : place ? ` Он и так в workspace и получает настройки: miksy sync ${quoteArg(dir)}; свои правила для него — в layers/tree/${place.tree}/instructions/`
     : repo ? ` Чтобы он стал проектом, ${outsideRepoAdvice(dir, home, roots)}` : "";
   // Группа: её пометка в этом месте дерева перестанет действовать — записанное sync --all уберёт сам, как у снятой
   const before = group ? `, пометка target: true (layers/tree/${place!.tree}/layer.yaml) перестанет действовать, и следующий miksy sync --all уберёт записанное в него miksy`
@@ -347,11 +347,12 @@ function copyDir(from: string, to: string) {
 export function copyAgentSettings(home: string, rels: string[], dest: string): { files: number; links: string[] } {
   let files = 0;
   const links: string[] = [];
+  const pending: { src: string; dst: string; rel: string }[] = [];
   const copy = (src: string, dst: string, rel: string) => {
     const st = lstatSync(src);
     mkdirSync(dirname(dst), { recursive: true, mode: 0o700 });
     if (st.isSymbolicLink()) {
-      try { symlinkSync(readlinkSync(src), dst); } catch { links.push(rel); }
+      pending.push({ src, dst, rel });
     } else if (st.isDirectory()) {
       mkdirSync(dst, { recursive: true, mode: 0o700 });
       for (const e of readdirSync(src)) copy(join(src, e), join(dst, e), `${rel}/${e}`);
@@ -366,7 +367,44 @@ export function copyAgentSettings(home: string, rels: string[], dest: string): {
     try { lstatSync(src); } catch { continue; }
     copy(src, join(dest, rel), rel);
   }
+  kinds = null;
+  for (const l of pending) if (!copyLink(l.src, l.dst, pending)) links.push(l.rel);
   return { files, links };
+}
+
+// Ссылка из копии — ссылкой того же вида (выпуск 0.2.3, A9). macOS, Linux — символическая ссылка с той же целью, как
+// записана. Windows: на папку (junction или символическая) — junction (прав не требует; цель — абсолютная, относительная
+// раскрыта от папки ссылки); junction не сделать (UNC и т. п.) — символическая ссылка на папку; на файл — символическая
+// ссылка на файл. Вид битой ссылки (папка или файл) знает только Windows: один запуск PowerShell на всю копию; он
+// недоступен — как прежде (ссылка без типа). Битая остаётся битой: цель не создаётся
+let kinds: Map<string, boolean> | null = null;
+function copyLink(src: string, dst: string, all: { src: string }[]): boolean {
+  let target: string;
+  try { target = readlinkSync(src).replace(/^\\\\\?\\/, ""); } catch { return false; }
+  if (process.platform !== "win32") { try { symlinkSync(target, dst); return true; } catch { return false; } }
+  const abs = win32.isAbsolute(target) ? target : win32.resolve(dirname(src), target);
+  let dir: boolean | null = null;
+  try { dir = statSync(src).isDirectory(); } catch { dir = brokenKind(src, all); }
+  if (dir === null) { try { symlinkSync(target, dst); return true; } catch { return false; } }
+  if (!dir) { try { symlinkSync(target, dst, "file"); return true; } catch { return false; } }
+  if (!/^[\\/]{2}/.test(abs)) { try { symlinkSync(abs, dst, "junction"); return true; } catch { /* ниже — символическая */ } }
+  try { symlinkSync(target, dst, "dir"); return true; } catch { return false; }
+}
+// Битые ссылки копии: папка или файл (PowerShell: PSIsContainer есть и у битой ссылки); null — узнать нельзя
+function brokenKind(src: string, all: { src: string }[]): boolean | null {
+  if (!kinds) {
+    kinds = new Map();
+    const broken = all.map((l) => l.src).filter((p) => { try { statSync(p); return false; } catch { return true; } });
+    if (broken.length) {
+      const list = broken.map((p) => `'${p.replaceAll("/", "\\").replace(/['‘’‚‛]/g, "$&$&")}'`).join(",");
+      // PowerShell нет в PATH — Bun бросает исключение: тогда вид битой ссылки неизвестен, как прежде (без падения мастера)
+      let r: { exitCode: number | null; stdout: Buffer } = { exitCode: 1, stdout: Buffer.from("") };
+      try { r = Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", `[Console]::OutputEncoding = [Text.Encoding]::UTF8; foreach ($p in @(${list})) { $i = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; if ($i) { "$([int][bool]$i.PSIsContainer)|$p" } }`], { stdout: "pipe", stderr: "pipe" }); } catch { /* как прежде */ }
+      if (r.exitCode === 0) for (const line of r.stdout.toString().split(/\r?\n/)) { const m = line.match(/^([01])\|(.+)$/); if (m) kinds.set(m[2].toLowerCase(), m[1] === "1"); }
+    }
+  }
+  const k = kinds.get(src.replaceAll("/", "\\").toLowerCase());
+  return k === undefined ? null : k;
 }
 
 // Как вернуть копию настроек на место (пути в копии — от HOME). Кроме ~/.claude.json: в нём Claude хранит вход и список
@@ -631,7 +669,17 @@ export function setup(o: SetupOptions): number {
   const listForm = Array.isArray(previous.workspace);
   // Ещё корни из файла (setup --force): остаются; убрать — правкой local/machine.yaml
   const extra: { path: string; tree: string }[] = prevRoots.slice(1).map(rootOf).filter((r): r is { path: string; tree: string } => !!r);
-  const suggested = kept ?? defaultWorkspace(engine, home);
+  // Без --force файл уже есть и не перезаписывается — его основной корень и есть выбранный workspace; иначе (движок прямо в
+  // каталоге без раскладки) мастер говорил «workspace не выбран» и не дописывал новых агентов (выпуск 0.2.3, A8)
+  let inFileMain: string | null = null;
+  if (!o.force && hadMachine) {
+    try {
+      const doc = parseYaml(readFileSync(machinePath, "utf8")) as { workspace?: unknown } | null;
+      const items: unknown[] = typeof doc?.workspace === "string" ? [doc.workspace] : Array.isArray(doc?.workspace) ? doc.workspace : [];
+      inFileMain = items.length ? rootOf(items[0])?.path ?? null : null;
+    } catch { /* разбор и ошибка — ниже, как раньше */ }
+  }
+  const suggested = kept ?? inFileMain ?? defaultWorkspace(engine, home);
   let workspace: string | null = suggested;
   if (ask && (!hadMachine || o.force)) {
     workspace = chooseWorkspace(suggested, () => ask.line(`Корень workspace (каталог с проектами)${suggested ? ` [${suggested}]` : ""}:`),
@@ -647,7 +695,7 @@ export function setup(o: SetupOptions): number {
     // команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5); с «,» или «}» — отдельные привязки
     // вместо {…} (круг 8b, C5)
     const backHint = (raw: string, from: string | null) => {
-      const add = `miksy root add "${kept}" --tree ${treeArg(raw)}`;
+      const add = `miksy root add ${quoteArg(kept)} --tree ${treeArg(raw)}`;
       if (from === null) return `${add}.`;
       const src = from ? `${from}/` : "";
       const braces = /[,}]/.test(raw)
@@ -709,15 +757,24 @@ export function setup(o: SetupOptions): number {
       // основного, пока не поправлен его path: (круг 8e, F1: папку скопировали или перенесли, оставив пустые папки)
       const one = nested.length === 1;
       const nestedText = nested.length
-        ? ` Внутри него ${one ? "ещё корень" : "ещё корни"} ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если новая папка — копия прежней, его копия — ${moved(r)}` : ""})`).join(", ")}: ${one ? "он остаётся" : "они остаются"} в workspace по прежнему пути, ${one ? "его проекты" : "их проекты"} miksy обновляет, как раньше. Если папку скопировали или перенесли и вы переходите на новую целиком — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${one ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на ${one ? "его копию" : "их копии"} в новой папке, затем miksy sync --global и miksy sync --all — слои ${one ? "его ветки" : "их веток"} перейдут туда; до этого ${one ? "его копия" : "их копии"} в новой папке — проекты основного корня: --force из строки конфликта о них не выполняйте, он заменил бы правила ветки правилами основного. Новая папка — не копия прежней: path: не меняйте (одноимённая папка в ней — не его копия).`
+        ? ` Внутри него ${one ? "ещё корень" : "ещё корни"} ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если новая папка — копия прежней, его копия — ${moved(r)}` : ""})`).join(", ")}: ${one ? "он остаётся" : "они остаются"} в workspace по прежнему пути, ${one ? "его проекты" : "их проекты"} miksy обновляет, как раньше. Если папку скопировали или перенесли и вы переходите на новую целиком — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${one ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на ${one ? "его копию" : "их копии"} в новой папке, затем miksy sync --global и miksy sync --all — слои ${one ? "его ветки" : "их веток"} перейдут туда; до этого ${one ? "его копия" : "их копии"} в новой папке — проекты основного корня: --force из строки конфликта о них не выполняйте, он заменил бы правила ветки правилами основного. Новая папка — не копия прежней: path: не меняйте (одноимённая папка в ней — не ${one ? "его копия" : "их копии"}).`
         : "";
       // Папку скопировали: прежняя копия не нужна — clean в ней; в новой копии файлы с путями — конфликт до --force (B №5)
       const copied = `папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет)${nested.length ? `; в ${one ? "копии вложенного корня" : "копиях вложенных корней"} — только после правки ${one ? "его" : "их"} path:` : ""}.`;
+      // Основным стал бывший дополнительный корень, а у прежнего основного (без ветки) есть папка с именем его ветки:
+      // рецепт перенёс бы layers/tree/<ветка нового основного> — рецепта нет (выпуск 0.2.3, A10)
+      // Так же — ветка любого другого корня (рецензия 9a, №4)
+      const branchRoots = [{ path: main!, tree: mainTree }, ...extra.filter((_, i) => i !== was)].filter((r) => r.tree);
+      const hit = from === "" ? dirs(kept!).map((d) => ({ d, r: branchRoots.find((r) => fold(d) === fold(r.tree.split("/")[0])) })).find((x) => x.r) : undefined;
+      const branchHit = hit?.d;
+      const branchOf = hit?.r ? `${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} (layers/tree/${hit.r.tree})` : "";
       const back = (tangled || mainIn) && from
         ? "Вернуть его — README, «Несколько корней workspace» («Сменить основной корень»): переносить эту ветку miksy не подсказывает — переименование задело бы слои нового основного, предка ветки или других корней."
         : same.length
           ? `Вернуть его — README, «Несколько корней workspace» («Сменить основной корень»): переносить его слои miksy не подсказывает — у нового основного ${same.length === 1 ? "есть папка" : "есть папки"} с тем же именем (${same.join(", ")}), перенос layers/tree/<папка> снял бы слои и с ${same.length === 1 ? "её" : "их"} проектов. Если ${copied}`
-          : `Вернуть его: ${backHint(raw, from)} Это — если новый основной другая папка, а прежняя нужна; ${copied}`;
+          : branchHit
+            ? `Вернуть его — README, «Несколько корней workspace» («Сменить основной корень»): переносить его слои miksy не подсказывает — его папка ${branchHit} совпадает с веткой ${branchOf}, перенос layers/tree/${branchHit} снял бы его слои. Если ${copied}`
+            : `Вернуть его: ${backHint(raw, from)} Это — если новый основной другая папка, а прежняя нужна; ${copied}`;
       return `прежний основной ${kept} из workspace уходит${mainIn ? ` (кроме проектов внутри нового основного: они остаются в workspace, ${below({ path: main!, tree: mainTree })})` : ""}: ${mainIn ? "остальные его проекты" : "его проекты"}${nested.length ? ` (кроме ${one ? "вложенного корня" : "вложенных корней"} — ниже)` : ""} miksy больше не обновляет.${nestedText} ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
     };
     // Ветку прежнего основного забрал новый каталог (обычно папку перенесли — ветка идёт за ней; решение основного агента
@@ -882,8 +939,8 @@ export function setup(o: SetupOptions): number {
   if (other && !sameShim(other))
     log(`• команда miksy в PATH — ${slash(other)}, а не ${slash(shim)}`);
   // Подсказки — командой, которая действительно найдётся: Homebrew-bun не кладёт ~/.bun/bin в PATH
-  if (installed && !other && !ask) log(`• каталог ${slash(bunBin)} не в PATH — команда miksy не найдётся. Добавьте его в PATH (например, в ~/.zshrc: export PATH="${slash(bunBin)}:$PATH") или запускайте bun "${cli}"`);
-  const cmd = installed && sys.which("miksy") && sameShim(sys.which("miksy")!) ? "miksy" : `bun "${cli}"`;
+  if (installed && !other && !ask) log(`• каталог ${slash(bunBin)} не в PATH — команда miksy не найдётся. Добавьте его в PATH (например, в ~/.zshrc: export PATH="${slash(bunBin)}:$PATH") или запускайте bun ${quoteArg(cli)}`);
+  const cmd = installed && sys.which("miksy") && sameShim(sys.which("miksy")!) ? "miksy" : `bun ${quoteArg(cli)}`;
   // Команда miksy ведёт на эту копию движка (своя команда с её путём, другой miksy в PATH нет) — переход на неё явный:
   // отметка версии учёта новее этой — переписывается на эту
   if (installed && readFileSync(shim, "utf8") === shimBody && (!other || sameShim(other))) markLedger(config, engine, log);
@@ -965,8 +1022,8 @@ export function setup(o: SetupOptions): number {
         && sys.git(["commit", "-q", "-m", "Initial miksy config"], dir) === 0;
       log(ok ? `✓ git-репо с первым коммитом: ${dir}
   Удалённый репо мастер не создаёт. Заведите приватный (GitHub, GitLab) и подключите:
-    git -C "${dir}" remote add origin <адрес>
-    git -C "${dir}" push -u origin HEAD`
+    git -C ${quoteArg(dir)} remote add origin <адрес>
+    git -C ${quoteArg(dir)} push -u origin HEAD`
         : `• git не выполнился до конца — проверьте git config user.name / user.email и повторите в ${dir}: git add -A; git commit -m "Initial miksy config"`);
     }
     return dir;
@@ -1067,7 +1124,7 @@ export function setup(o: SetupOptions): number {
     if (os === "windows") {
       const user = sys.userPath.get();
       if (inPathList(user, dir)) return log(`✓ ${slash(dir)} в пользовательском PATH`);
-      if (!ask!.yes(`Каталога ${slash(dir)} нет в PATH — добавить его в пользовательский PATH?`, true)) return log(`  без этого запускайте: bun "${cli}"`);
+      if (!ask!.yes(`Каталога ${slash(dir)} нет в PATH — добавить его в пользовательский PATH?`, true)) return log(`  без этого запускайте: bun ${quoteArg(cli)}`);
       sys.userPath.set(user ? `${user.replace(/;+$/, "")};${dir.replaceAll("/", "\\")}` : dir.replaceAll("/", "\\"));
       log(`✓ добавлено в пользовательский PATH — в новых окнах терминала команда miksy найдётся`);
     } else {
@@ -1086,7 +1143,7 @@ export function setup(o: SetupOptions): number {
       else if (ask!.yes(`Каталога ${dir} нет в PATH — дописать в ~/${rc} строку ${line}?`, true)) {
         appendFileSync(file, `${text && !text.endsWith("\n") ? "\n" : ""}# miksy\n${line}\n`);
         log(`✓ дописано в ~/${rc} — в новых окнах терминала команда miksy найдётся (в этом: source ~/${rc})`);
-      } else return log(`  без этого запускайте: bun "${cli}"`);
+      } else return log(`  без этого запускайте: bun ${quoteArg(cli)}`);
     }
     if (!inPathList(getPath(), dir)) prependPath(dir);
   }

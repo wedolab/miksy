@@ -1,13 +1,15 @@
 // Выпуск 0.2.2, A1 — команда возврата для Windows: символы, которые cmd разбирает сам (^ & , ; = %…%), в путях
 // домашнего каталога и цели ссылки; остаток <имя>.miksy-new. Тест повторной проверки 2 (out/review022d/recheck-2.md)
 import { expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { copyAgentSettings, restoreCommand } from "../src/setup";
 
 const win = process.platform === "win32";
-const tmp = () => mkdtempSync(join(tmpdir(), "rc022d-")).replaceAll("\\", "/");
+// Канонический путь (длинные имена): на GitHub Windows временная папка — короткое имя C:\Users\RUNNER~1\…, а цель ссылки
+// после возврата — длинное (выпуск 0.2.3, часть 0)
+const tmp = () => realpathSync.native(mkdtempSync(join(tmpdir(), "rc022d-"))).replaceAll("\\", "/");
 const put = (p: string, s: string) => { mkdirSync(join(p, ".."), { recursive: true }); writeFileSync(p, s); };
 const isLink = (p: string) => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
 const tgt = (p: string) => { try { return readlinkSync(p).replaceAll("\\", "/").replace(/^\/\/\?\//, "").replace(/\/$/, ""); } catch { return "нет ссылки"; } };

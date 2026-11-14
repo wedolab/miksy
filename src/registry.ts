@@ -6,7 +6,7 @@ import { opencode } from "../adapters/opencode";
 import type { Adapter, RenderedFile, RenderResult, Target } from "./adapter";
 import { createLauncher, stableBun } from "./launch";
 import { existsSync } from "node:fs";
-import { canonical, fold, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { canonical, fold, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import { dirname, join, relative, resolve } from "node:path";
 import { agentId } from "./agentid";
 import { clashText, dirsOf, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, treeAbove, treeClashes, treeJoin, treeOf } from "./roots";
@@ -470,7 +470,7 @@ export function literalHints(actions: Action[], secrets: Record<string, string>,
     } catch { continue; }
     const names = values.filter(([, v]) => text.includes(v) || text.includes(JSON.stringify(v).slice(1, -1))).map(([n]) => n);
     if (!names.length) continue;
-    const fix = toml && where === "--global" ? `miksy adopt --global ${toml[2]} --to global --agent ${agent}, затем miksy sync --global` : `miksy sync ${where} --agent ${agent} --force`;
+    const fix = toml && where === "--global" ? `miksy adopt --global ${toml[2]} --to global --agent ${agent}, затем miksy sync --global` : `miksy sync ${where === "--global" ? where : quoteArg(where)} --agent ${agent} --force`;
     out.push(`${a.abs}: вне учёта, а в нём значение секрета ${names.join(", ")} из local/secrets.env — похоже на сервер miksy до фазы 2а (учёта нет: новая машина, конфиг без manifest). Взять под учёт и заменить обёрткой: ${fix} (в бэкап значение не попадёт)`);
   }
   return out;
@@ -583,9 +583,9 @@ export function rootedTargets(manifest: Manifest, machine: Machine): string[] {
 // корне (0.1.x) или workspace сменили на бывший проект (микроправка перед 0.2.0)
 export const isMainRoot = (dir: string, machine: Machine) => rootKey(machineRoots(machine)[0].path) === rootKey(dir);
 export function rootedText(dir: string, machine: Machine): string {
-  if (isMainRoot(dir, machine)) return `${dir} — основной корень workspace (папка с проектами), а не проект: miksy раньше записал настройки в сам корень (например, miksy sync в нём в 0.1.x или он был проектом до смены workspace) — CLAUDE.local.md и др. действуют, но больше не обновляются. Убрать записанное: miksy clean "${dir}"`;
+  if (isMainRoot(dir, machine)) return `${dir} — основной корень workspace (папка с проектами), а не проект: miksy раньше записал настройки в сам корень (например, miksy sync в нём в 0.1.x или он был проектом до смены workspace) — CLAUDE.local.md и др. действуют, но больше не обновляются. Убрать записанное: miksy clean ${quoteArg(dir)}`;
   const outer = machineRoots(machine).find((r) => rootKey(r.path) !== rootKey(dir) && inside(dir, r.path));
-  return `${dir} — теперь корень workspace (папка с проектами), а не проект: записанное туда miksy раньше (CLAUDE.local.md и др.) действует, но больше не обновляется. Корень добавлен по ошибке — miksy root remove "${dir}"${outer ? ` (записанное останется; следующий miksy sync --all снова обновит его как проект корня ${outer.path})` : ""}; так и задумано — убрать записанное: miksy clean "${dir}"`;
+  return `${dir} — теперь корень workspace (папка с проектами), а не проект: записанное туда miksy раньше (CLAUDE.local.md и др.) действует, но больше не обновляется. Корень добавлен по ошибке — miksy root remove ${quoteArg(dir)}${outer ? ` (записанное останется; следующий miksy sync --all снова обновит его как проект корня ${outer.path})` : ""}; так и задумано — убрать записанное: miksy clean ${quoteArg(dir)}`;
 }
 
 export const movesText = (moves: Move[]) => moves.map((m) => `  ${m.from} → ${m.to}  (${HOW[m.how]})`);

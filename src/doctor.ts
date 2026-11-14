@@ -1,6 +1,6 @@
 // miksy doctor — что разошлось между слоями и тем, что лежит на диске. Только чтение.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
 import { caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
@@ -8,11 +8,11 @@ import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger } from "./version";
 import { emptyState, ManifestError, type Manifest, otherOwners, splitState, strandedPaths } from "./manifest";
 import type { Move } from "./relocate";
-import { fold, pathKey } from "./paths";
+import { fold, pathKey, quoteArg, slash } from "./paths";
 import { foreignMcp, foreignSkills } from "./foreign";
 import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
-import { checkLocalAccess, checkSecretFiles } from "./secretfiles";
+import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
@@ -166,7 +166,12 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   const localAccess = checkLocalAccess();
   if (localAccess.refuse) permissions.push({ agent: "—", target: "local/backups", detail: `пока так, все команды, которые пишут (sync, clean, setup, update, root, adopt, trust, target), откажут: ${localAccess.refuse}` });
   if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `открытых путей или ошибок проверки: ${localAccess.bad.length}; ${localAccess.bad[0]} — sync/setup исправит права${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
-  for (const l of localAccess.links) permissions.push({ agent: "—", target: "local/", detail: l });
+  // Ссылка local/secrets — одной строкой, в «Файлах секретов» (там и что делает sync); здесь — без повтора (выпуск 0.2.3, A7)
+  // Путь — как записан и через настоящий путь local/ (local/ сама — ссылка; рецензия 9a, №8)
+  const secretsLinks = [slash(secretsDir())];
+  try { secretsLinks.push(slash(join(realpathSync(dirname(secretsDir())), "secrets"))); } catch { /* local/ нет */ }
+  const aboutSecrets = (l: string) => secretsLinks.some((p) => fold(l).startsWith(fold(`${p} →`)) || fold(l).startsWith(fold(`${p}:`)));
+  for (const l of localAccess.links) if (!aboutSecrets(l)) permissions.push({ agent: "—", target: "local/", detail: l });
 
   // Файлы секретов: нужные записанным конфигам (учёт) есть, закрыты владельцу, не устарели; лишних нет
   const needed = new Map<string, string[]>();
@@ -345,7 +350,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
   const retired = [...new Map([...Object.keys(manifest.targets), ...Object.keys(manifest.forgotten ?? {}).filter((id) => existsSync(id.slice(id.indexOf("|") + 1)))]
     .map((id) => [id.slice(0, id.indexOf("|")), id.slice(id.indexOf("|") + 1)]).filter(([a]) => !enabled.has(a)).map((x) => [x.join("|"), x])).values()];
   if (retired.length) info.push(`Учёт агентов, которых нет в agents (${retired.length}) — miksy записывал им настройки, агента убрали из local/machine.yaml без clean: записанное действует, но не обновляется. Убрать (или верните агента в agents):`,
-    ...retired.map(([a, d]) => `  miksy clean ${d === "global" ? "--global" : `"${d}"`} --agent ${a}`));
+    ...retired.map(([a, d]) => `  miksy clean ${d === "global" ? "--global" : `${quoteArg(d)}`} --agent ${a}`));
   if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}`);
   // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
   const legacy = legacyAgentNames();

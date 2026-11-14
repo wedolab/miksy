@@ -9,7 +9,7 @@ import { entriesBetween, entryText, hasSection, isEmpty, parseChangelog, type En
 import { doctor } from "./doctor";
 import { gitEnv } from "./git";
 import { ENGINE, loadMachine } from "./load";
-import { slash } from "./paths";
+import { quoteArg, slash } from "./paths";
 import { agentsFor } from "./registry";
 import { planSummary, type Run, setup } from "./setup";
 import type { Machine } from "./types";
@@ -152,7 +152,7 @@ export function changesText(changelog: string | null, from: string | null, to: s
 export function update(o: UpdateOptions): number {
   const engine = o.engine ?? ENGINE;
   const log = o.log ?? ((s = "") => console.log(s));
-  const at = `"${slash(engine)}"`;
+  const at = quoteArg(slash(engine));
   const g = gitIn(engine, !!o.ask);
   // Не репо (или каталог внутри чужого репо) — отказ «не git-клон»; другой сбой git — его сообщение
   const top = g(["rev-parse", "--show-toplevel"]);

@@ -54,3 +54,15 @@ test("ACL Windows: встроенный Администратор («LA» в SD
   expect(foreignAces("D:PAI(A;OICI;FA;;;LG)", `${machine}-500`)).toEqual(["LG"]);
   expect(foreignAces("D:PAI(D;OICI;FA;;;WD)", `${machine}-500`)).toEqual([]); // запрещающие — не доступ
 });
+
+// Выпуск 0.2.3, часть 0: встроенный Администратор с полным токеном — его новые папки получают явные записи SYSTEM и
+// «Администраторы» (так на GitHub Windows цель ссылки, закрытая «только вам» или командой miksy, оставалась «открытой»).
+// Для него SY и BA — свои; Пользователи, Все и другие учётки — по-прежнему чужие. Для обычной учётки — как раньше
+test("ACL Windows: встроенный Администратор — SY и BA не чужие; обычная учётка — чужие", async () => {
+  const { foreignAces } = await import("../src/secretfiles");
+  const machine = "S-1-5-21-1111111111-2222222222-3333333333";
+  const sddl = `D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;S-1-5-32-544)`;
+  expect(foreignAces(sddl, `${machine}-500`)).toEqual([]);
+  expect(foreignAces(`${sddl}(A;OICI;FR;;;BU)(A;OICI;FR;;;WD)(A;OICI;FA;;;${machine}-1001)`, `${machine}-500`)).toEqual(["BU", "WD", `${machine}-1001`]);
+  expect(foreignAces(`D:PAI(A;OICI;FA;;;${machine}-1001)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`, `${machine}-1001`)).toEqual(["SY", "BA"]);
+});

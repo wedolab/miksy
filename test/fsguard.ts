@@ -1,7 +1,7 @@
 // Замок записи в этом же процессе (круг 8e, F6): мастер и команды через runCommand в тесте, помощники тестов пишут
 // функциями node:fs (синхронными, с обратным вызовом, fs.promises и node:fs/promises, потоками записи) и Bun.write —
 // только в безопасные корни (песочница preload, системный tmp). Иначе — ошибка до записи и отметка: даже если код под
-// тестом поймает ошибку, preload в конце прогона его остановит. Не охвачены: методы Bun.file() (writer, write, delete),
+// тестом поймает ошибку, preload в конце прогона его остановит. Не охвачены: Bun.file() из файлового дескриптора,
 // вывод подпроцесса в файл (Bun.spawn с stdout: Bun.file), перенаправления Bun.$ — ни src, ни тесты ими не пишут.
 // Первый файл preload (bunfig.toml) и без import из "node:fs": Bun связывает импорт по имени (import { writeFileSync }
 // from "node:fs") при первом таком импорте в процессе — подмена после него до импортов по имени не доходит (опыт круга
@@ -90,3 +90,16 @@ Bun.write = ((dest: any, ...rest: any[]) => {
   else if (dest && typeof dest.name === "string") check("Bun.write", dest.name);
   return (bunWrite as any)(dest, ...rest);
 }) as typeof Bun.write;
+// Bun.file(путь): методы записи write, writer, delete — та же проверка (выпуск 0.2.3, часть C). Свойства задаются на
+// самом объекте файла; не удалось (объект закрыт для записи) — без проверки, как прежде
+const bunFile = Bun.file;
+Bun.file = ((p: any, ...rest: any[]) => {
+  const f = (bunFile as any)(p, ...rest);
+  const name = typeof p === "string" ? p : p instanceof URL ? Bun.fileURLToPath(p) : null;
+  if (name) for (const m of ["write", "writer", "delete", "unlink"]) {
+    const orig = f[m];
+    if (typeof orig !== "function") continue;
+    try { Object.defineProperty(f, m, { value: (...a: any[]) => { check(`Bun.file().${m}`, name, m === "delete" || m === "unlink"); return orig.apply(f, a); }, configurable: true }); } catch { /* как прежде */ }
+  }
+  return f;
+}) as typeof Bun.file;

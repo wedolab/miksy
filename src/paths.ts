@@ -7,6 +7,17 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 
 export const slash = (p: string) => p.replaceAll("\\", "/");
 
+// Путь или имя в готовой команде подсказки — в кавычках, которые его не меняют: обычный — в двойных, как раньше; с `$`,
+// «`», `!` или `"` — в одинарных (PowerShell и sh подставили бы переменную, интерактивный bash и zsh — историю «!»);
+// одинарная кавычка внутри — по правилам оболочки этой машины: PowerShell — удвоение (и для ‘ ’ ‚ ‛), sh — '\''
+// (выпуск 0.2.3, A2)
+export function quoteArg(s: string, bare = false): string {
+  if (bare && /^[\w./-]+$/.test(s)) return s;
+  // PowerShell считает двойной кавычкой и типографские “ ” „ ‟ — на Windows и они ведут к одинарным
+  if (!(process.platform === "win32" ? /[$`!"“”„‟]/ : /[$`!"]/).test(s)) return `"${s}"`;
+  return process.platform === "win32" ? `'${s.replace(/['‘’‚‛]/g, "$&$&")}'` : `'${s.replaceAll("'", "'\\''")}'`;
+}
+
 // Косая в конце пути — прочь, кроме корня (/, X:/): «X:» без косой на Windows — текущий каталог диска X,
 // а не его корень
 export const trimSlash = (p: string) => p.replace(/(?<=[^/:])\/+$/, "");
@@ -91,7 +102,12 @@ export function inside(path: string, root: string): boolean {
 export function escapes(path: string, ...roots: string[]): string | null {
   try {
     const real = canonical(path);
-    if (roots.some((r) => inside(real, canonical(r)))) return null;
+    // Корень, который не раскрыть (каталог проекта на диске, буквы которого больше нет), пропускается — проверка по
+    // остальным: ~/.claude.json в домашнем каталоге при пропавшем диске проекта (выпуск 0.2.3, A1). Не раскрылся ни
+    // один — причина, как раньше
+    let resolved = 0, lastError: Error | null = null;
+    if (roots.some((r) => { try { const c = canonical(r); resolved++; return inside(real, c); } catch (e) { lastError = e as Error; return false; } })) return null;
+    if (!resolved && lastError) return (lastError as Error).message;
     const plain = slash(resolve(path));
     const where = roots.map(slash).join(" или ");
     return fold(real) === fold(plain) ? `путь вне ${where}` : `путь ведёт через симлинк в ${real} — вне ${where}`;

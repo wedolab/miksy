@@ -62,7 +62,10 @@ function followSetupHint(f: F, out: string, folders: string[]) {
   const split = /[,}]/.test(branch);
   expect(line).toContain(split ? `({Org,Lab}/** → ${branch}/Org/** и ${branch}/Lab/**` : `({Org,Lab}/** → {${branch}/Org,${branch}/Lab}/**)`);
   expect(line).toContain("шаблоны, которые начинаются с **, не меняйте");
-  const add = line.match(/2\) miksy root add "([^"]+)" --tree ("[^"]*"|\S+) /)!;
+  // Путь — в двойных кавычках или, с $ ` ! " в имени, в одинарных (выпуск 0.2.3, A2)
+  const m = line.match(/2\) miksy root add (?:"([^"]+)"|'((?:[^']|'')+)') --tree ("[^"]*"|'(?:[^']|'')*'|\S+) /)!;
+  const unq = (s: string) => (s.startsWith("'") ? s.slice(1, -1).replaceAll("''", "'") : s);
+  const add = [m[0], m[1] ?? unq(`'${m[2]}'`), m[3].startsWith("'") ? `"${unq(m[3])}"` : m[3]];
   for (const d of folders) if (existsSync(`${f.config}/layers/tree/${d}`)) {
     mkdirSync(`${f.config}/layers/tree/${branch}`, { recursive: true });
     renameSync(`${f.config}/layers/tree/${d}`, `${f.config}/layers/tree/${branch}/${d}`);
@@ -304,7 +307,10 @@ test("C6: прежний основной с веткой, основной — 
   // Дословно: ветку целиком — под новое имя, привязки «Main/…» — под него, root add
   renameSync(`${f.config}/layers/tree/Main`, `${f.config}/layers/tree/${branch}`);
   writeFileSync(`${f.config}/map.yaml`, readFileSync(`${f.config}/map.yaml`, "utf8").replaceAll("Main/", `${branch}/`));
-  const add = line.match(/2\) miksy root add "([^"]+)" --tree ("[^"]*"|\S+) /)!;
+  // Путь — в двойных кавычках или, с $ ` ! " в имени, в одинарных (выпуск 0.2.3, A2)
+  const m = line.match(/2\) miksy root add (?:"([^"]+)"|'((?:[^']|'')+)') --tree ("[^"]*"|'(?:[^']|'')*'|\S+) /)!;
+  const unq = (s: string) => (s.startsWith("'") ? s.slice(1, -1).replaceAll("''", "'") : s);
+  const add = [m[0], m[1] ?? unq(`'${m[2]}'`), m[3].startsWith("'") ? `"${unq(m[3])}"` : m[3]];
   expect(inProcess(f, ["root", "add", add[1], "--tree", add[2].replace(/^"|"$/g, "")], f.dir, [true]).err).toBe("");
   expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
   expect(rules(`${ws}/Org/p1/CLAUDE.local.md`)).toEqual(["main", "org", "orgx", "both", "deep"]);

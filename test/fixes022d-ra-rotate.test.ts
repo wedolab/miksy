@@ -15,7 +15,10 @@ const put = (p: string, s = "x\n") => { mkdirSync(dirname(p), { recursive: true 
 const sid = () => new TextDecoder("latin1").decode(Bun.spawnSync([sysx("whoami.exe"), "/user", "/fo", "csv", "/nh"], { stdout: "pipe" }).stdout).trim().match(/,"(S-[0-9-]+)"$/)![1];
 const icacls = (...a: string[]) => Bun.spawnSync([sysx("icacls.exe"), ...a], { stdout: "pipe", stderr: "pipe" }).exitCode;
 
-test.skipIf(!win)("старая папка запуска без доступа за ссылкой: rotate", () => {
+// Встроенный Администратор (…-500, GitHub Windows): его папки получают явные записи SYSTEM и «Администраторы» — после
+// /reset папка не остаётся без доступа, сценария нет (выпуск 0.2.3, часть 0)
+const builtinAdmin = () => /-500$/.test(sid());
+test.skipIf(!win || builtinAdmin())("старая папка запуска без доступа за ссылкой: rotate", () => {
   const root = tmp("r8da-rot-");
   const home = `${root}/home`, config = `${root}/config`, vault = `${root}/vault`;
   put(`${config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");

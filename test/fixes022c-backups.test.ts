@@ -251,4 +251,6 @@ test.skipIf(!win)("Windows: закрытая цель local/backups, глубж�
     named: /ОШИБКА \(цель синхронизирована частично\): .*originals\/C: .*miksy не пишет туда бэкапы.*Закройте папку оригиналов и всё в ней \(PowerShell\): icacls '[^']*originals' \/reset; .*F'; function Reset-MiksyTree\(\$d\) \{ .* \}; Reset-MiksyTree '[^']*originals'$/m.test(sync.out),
     vault: walk(w.vault),
   }).toEqual({ named: true, vault: before });
+  // Выпуск 0.2.3, A6: итог — «записано частично», а не «конфликтов … эти места не изменены»
+  expect({ partial: /Целей записано частично: [0-9]+ — запись остановилась на ошибке/.test(sync.out), conflicts: /Конфликтов: /.test(sync.out) }).toEqual({ partial: true, conflicts: false });
 }, 300000);

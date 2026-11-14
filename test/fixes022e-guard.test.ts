@@ -89,6 +89,8 @@ test("F6: обходы замка — асинхронные функции, Bun
     await tryIt("createWriteStream", () => fsm.createWriteStream(join(probe, "c")));
     await tryIt("promises.copyFile", () => fsp.copyFile(join(ENGINE, "package.json"), join(probe, "d")));
     await tryIt("Bun.write(Bun.file)", () => Bun.write(Bun.file(join(probe, "e")), "x"));
+    await tryIt("Bun.file().write", () => Bun.file(join(probe, "e2")).write("x"));
+    await tryIt("Bun.file().writer", () => { const w = Bun.file(join(probe, "e3")).writer(); w.write("x"); return w.end(); });
     await tryIt("openSync O_CREAT", () => fsm.closeSync(fsm.openSync(join(probe, "f"), fsm.constants.O_CREAT | fsm.constants.O_WRONLY)));
     fsm.symlinkSync(probe, join(box, "j"), win ? "junction" : "dir");
     await tryIt("через ссылку на каталог", () => fsm.writeFileSync(join(box, "j", "g"), "x"));
@@ -100,7 +102,7 @@ test("F6: обходы замка — асинхронные функции, Bun
   }
   fsViolations.splice(before);
   expect({ res, unlink, probe: existsSync(probe) }).toEqual({
-    res: Object.fromEntries(["promises.writeFile", "fs.writeFile", "createWriteStream", "promises.copyFile", "Bun.write(Bun.file)", "openSync O_CREAT", "через ссылку на каталог", "через висячую ссылку"].map((k) => [k, "остановлено"])),
+    res: Object.fromEntries(["promises.writeFile", "fs.writeFile", "createWriteStream", "promises.copyFile", "Bun.write(Bun.file)", "Bun.file().write", "Bun.file().writer", "openSync O_CREAT", "через ссылку на каталог", "через висячую ссылку"].map((k) => [k, "остановлено"])),
     unlink: "убрана", probe: false,
   });
 }, 60000);

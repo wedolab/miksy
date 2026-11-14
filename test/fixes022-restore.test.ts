@@ -2,7 +2,7 @@
 // выполняется в песочнице текущей ОС: sh на macOS и Linux, PowerShell на Windows; временный домашний каталог. Копию
 // делает тот же copyAgentSettings, что и мастер: ссылки (dotfiles) в ней — ссылками (рецензия A 0.2.2, п. 2, 3)
 import { expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENGINE } from "../src/load";
@@ -34,7 +34,7 @@ function run(copy: string, home: string) {
 // Домашний каталог: ~/.claude — ссылка на dotfiles (junction на Windows), в ней skills — ссылка на папку dotfiles,
 // ~/.codex — обычная папка; копия — copyAgentSettings мастера в папку с пробелом, ' $ ` ’ (и " — где ОС позволяет)
 function sandbox() {
-  const t = mkdtempSync(join(tmpdir(), "r022-")).replaceAll("\\", "/");
+  const t = realpathSync.native(mkdtempSync(join(tmpdir(), "r022-"))).replaceAll("\\", "/");
   const home = `${t}/home`, dot = `${t}/dot/claude`, skills = `${t}/dot/skills`;
   put(`${home}/.claude.json`, "backup");
   put(`${home}/.codex/config.toml`, "cfg");

@@ -73,3 +73,27 @@ describe("setup: какие агенты настраивать", () => {
     expect(after.replace(/^agents: .*$/m, "")).toBe(before.replace(/^agents: .*$/m, ""));
   }, 30000);
 });
+
+// Выпуск 0.2.3, A8 («Открытое» 8e): без --force, при готовом machine.yaml, движок прямо в каталоге без раскладки
+// (workspace по умолчанию не определить) — мастер берёт workspace из файла и дописывает нового агента
+test("A8: движок без раскладки, machine.yaml есть — новый агент в PATH дописан, «workspace не выбран» нет", () => {
+  const f = cliFixture({ agents: ["claude"] });
+  const machine = `${f.config}/local/machine.yaml`;
+  const engine = `${f.home}/miksy`;
+  cpSync(join(ENGINE, "examples"), `${engine}/examples`, { recursive: true });
+  put(`${engine}/src/cli.ts`, "// движок для теста\n");
+  const saved = { ...process.env }, logs: string[] = [], orig = console.log;
+  Object.assign(process.env, { MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home, BUN_INSTALL: `${f.dir}/bun` });
+  console.log = (...a: unknown[]) => { logs.push(a.map(String).join(" ")); };
+  try {
+    const which = (c: string) => (["claude", "codex"].includes(c) ? `${f.dir}/bin/${c}` : null);
+    const sys = { which, exec: () => 0, git: () => 0, userPath: { get: () => "", set: () => {} }, refreshPath: () => {} };
+    runSetup({ ask: null, force: false, engine, sys, log: (s = "") => logs.push(s) });
+  } finally {
+    console.log = orig;
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+  const out = logs.join("\n");
+  expect({ notChosen: /workspace не выбран/.test(out), agents: readFileSync(machine, "utf8").match(/^agents: .*$/m)?.[0] }).toEqual({ notChosen: false, agents: "agents: [claude, codex]" });
+}, 30000);

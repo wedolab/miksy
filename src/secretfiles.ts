@@ -28,6 +28,9 @@ export function secretFileState(name: string, secrets: Record<string, string>, d
   }
 }
 
+// Файл секрета, который miksy пишет: имя переменной и однострочное значение из secrets.env
+export const secretWritable = (n: string, secrets: Record<string, string>) => NAME.test(n) && n in secrets && !/[\r\n]/.test(secrets[n]);
+
 // Записывает файлы секретов names (только однострочные значения из secrets.env); возвращает
 // строки для вывода — только имена; created — файлы, которые создал этот вызов (только они переходят
 // во владение miksy: заранее положенный пользователем файл остаётся его)
@@ -35,7 +38,10 @@ export function writeSecretFiles(names: string[], secrets: Record<string, string
   const lines: string[] = [];
   const created: string[] = [];
   let wrote = false;
-  const todo = names.filter((n) => NAME.test(n) && n in secrets && !/[\r\n]/.test(secrets[n]));
+  // Каталог проверяется (и создаётся), только когда есть что записать: --dry-run говорит так же (выпуск 0.2.3, A5)
+  // Файл-ссылку (и битую) miksy не перезаписывает — и каталог из-за неё не проверяет: --dry-run говорит «не перезаписываю»
+  // без ошибки (повторная проверка 9a, №1)
+  const todo = names.filter((n) => secretWritable(n, secrets) && secretFileState(n, secrets, dir) !== "same" && !isLink(join(dir, n)));
   if (!todo.length) return { lines, created };
   privateDir(dir);
   for (const n of todo) {
@@ -486,9 +492,15 @@ function others(path: string): string[] {
 // Разрешающие записи SDDL не для me. Встроенные учётки машины SDDL пишет сокращением, а не SID: «LA» —
 // Администратор (…-500, так работают раннеры GitHub Windows), «LG» — Гость (…-501). Иначе miksy счёл бы
 // свою же запись чужой, удалил её и закрыл local/ от самого себя
+// Встроенный Администратор (…-500) работает с полным токеном администратора: его новые файлы и папки получают явные
+// записи SYSTEM и «Администраторы», а сам он входит в «Администраторы» — для него это не чужой доступ. Иначе цель ссылки
+// local/secrets или local/backups, закрытая командой miksy, у него никогда не «закрыта» (выпуск 0.2.3, часть 0: тесты на
+// GitHub Windows идут под этой учётной записью)
+const ADMIN_OWN = new Set(["SY", "BA", "S-1-5-18", "S-1-5-32-544"]);
 export function foreignAces(sddl: string, me: string): string[] {
   const alias: Record<string, string> = { LA: "-500", LG: "-501" };
-  const mine = (t: string) => t === me || (alias[t] !== undefined && me.endsWith(alias[t]));
+  const builtinAdmin = /-500$/.test(me);
+  const mine = (t: string) => t === me || (alias[t] !== undefined && me.endsWith(alias[t])) || (builtinAdmin && ADMIN_OWN.has(t));
   const aces = [...sddl.matchAll(/\(([A-Z]+);[^;]*;[^;]*;[^;]*;[^;]*;([^)]+)\)/g)];
   return [...new Set(aces.filter((a) => a[1] === "A" && !mine(a[2])).map((a) => a[2]))];
 }
@@ -548,7 +560,13 @@ export function checkSecretFiles(needed: Map<string, string[]>, secrets: Record<
       continue;
     }
     if (state === "missing") info.push(`${n}: не задан в local/secrets.env — файл от прошлого sync оставлен, пока сервер записан (${who})`);
-    else if (state === "update") problems.push(`${n}: ${isLink(path) ? "файл секрета — ссылка: miksy её не перезаписывает (значение в secrets.env другое или файл не читается — проверьте цель ссылки)" : `файл секрета устарел (значение в secrets.env другое) — miksy sync обновит${blocked}`}`);
+    // Файл не читается (нет доступа даже вам — так его оставляла 0.2.1 за ссылкой на цель без наследования): причина —
+    // доступ, а не «значение другое» (выпуск 0.2.3, A7)
+    else if (state === "update") {
+      let unreadable = false;
+      try { readFileSync(path); } catch (e) { unreadable = ["EPERM", "EACCES"].includes((e as NodeJS.ErrnoException).code ?? ""); }
+      problems.push(`${n}: ${isLink(path) ? "файл секрета — ссылка: miksy её не перезаписывает (значение в secrets.env другое или файл не читается — проверьте цель ссылки)" : unreadable ? `файл секрета не читается (нет доступа даже вам) — miksy sync перезапишет его${blocked}` : `файл секрета устарел (значение в secrets.env другое) — miksy sync обновит${blocked}`}`);
+    }
     let why: string | null;
     try { why = aclProblem(path); } catch { why = "не читается (битая ссылка?)"; }
     // Файл-ссылку sync не перезаписывает и не закрывает; свой файл за ссылкой local/secrets — как сказано выше (behind)

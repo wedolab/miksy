@@ -25,7 +25,8 @@ jobs:
       matrix:
         os: ${{ fromJSON(github.event.repository.private && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Тесты на Windows — 15–17 минут на стенде, машины GitHub медленнее (выпуск 0.2.3)
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2

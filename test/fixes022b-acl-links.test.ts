@@ -373,7 +373,7 @@ test.skipIf(!win || !can.file)("Windows: local/secrets — ссылка на з�
   const w = writeSecretFiles(["LINKED"], { TOKEN: "v", LINKED: "new" }, `${local}/secrets`);
   const token = checkSecretFiles(new Map([["TOKEN", ["claude p"]]]), { TOKEN: "v" }, [], `${local}/secrets`).problems.filter((p) => p.includes("TOKEN:"));
   expect({ lines: w.lines.length, tokenStillOpen: token.length, text: /когда записывает в этот каталог файл секрета/.test(token[0] ?? "") })
-    .toEqual({ lines: 1, tokenStillOpen: 1, text: true });
+    .toEqual({ lines: 0, tokenStillOpen: 1, text: true }); // строку о ссылке печатает план sync (выпуск 0.2.3: файл-ссылка отсеивается до записи)
 }, 60000);
 
 // Повторная проверка 3 круга 8b, п. 4: битый файл-ссылка в local/secrets — sync его не перезаписывает и не создаёт файл;

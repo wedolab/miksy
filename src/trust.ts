@@ -6,7 +6,7 @@ import type { RenderResult, Target } from "./adapter";
 import type { Machine } from "./types";
 import type { ForgottenMark, Manifest, TargetState } from "./manifest";
 import { emptyState, sha, writeAtomic } from "./manifest";
-import { canonical, fold, pathKey, slash } from "./paths";
+import { canonical, fold, pathKey, quoteArg, slash } from "./paths";
 import { protectedBy, trackedPaths } from "./git";
 import { escapes } from "./bounds";
 import { configRoot } from "./load";
@@ -549,7 +549,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
     // Почему доверия быть не должно (null — должно)
     const why: string | null = clean ? "clean" : off ? offWhy
       : exec && !approved ? (declined ? "пользователь отказал в доверии (miksy trust)"
-        : `нужно решение пользователя: исполняемые настройки агента не от miksy (${exec.lines.length}) — miksy trust ${target.rel || target.dir}`)
+        : `нужно решение пользователя: исполняемые настройки агента не от miksy (${exec.lines.length}) — miksy trust ${quoteArg(target.rel || target.dir)}`)
       : !exec && !rendered ? "miksy не доставляет конфигурацию для этого агента (командный файл или нечего доставлять)"
       : null;
     if (why !== null) {
