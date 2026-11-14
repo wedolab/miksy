@@ -154,6 +154,9 @@ describe("C10: local/backups — ссылка с открытой или нес�
     const config = `${root}/config`, vault = `${root}/vault`;
     put(`${config}/local/machine.yaml`, "agents: [claude]\n");
     mkdirSync(vault, { recursive: true });
+    // Открытая — явной чужой записью: наследования от временной папки под …-500 мало (круг 9c)
+    openToOthers(vault);
+    expect(foreignForBuiltinAdmin(vault).length).toBeGreaterThan(0);
     put(`${root}/home/f.txt`, "secret\n");
     newBackupRun();
     // Первый бэкап создаёт папку запуска; затем её заменяет ссылка на открытую цель
