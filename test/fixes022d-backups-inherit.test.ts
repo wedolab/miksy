@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
 import { CLI } from "./helpers";
+import { foreignForBuiltinAdmin, openToOthers, USERS } from "./openacl";
 
 const win = process.platform === "win32";
 const sys = (exe: string) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", exe);
@@ -96,6 +97,9 @@ describe("E1: цель ссылки закрыта с наследованием
     // Как оставила бы прежняя версия: originals и подпапки созданы без закрытия — права по умолчанию (SY, BA)
     for (const d of ["originals", "originals/C", "originals/C/Users", "originals/C/Users/x"]) mkdirSync(`${w.vault}/${d}`);
     put(`${w.vault}/originals/C/Users/x/old.md`);
+    // Под встроенным Администратором (…-500) SY и BA свои — открыть явной записью «Пользователей» (круг 9c)
+    openToOthers(`${w.vault}/originals`, USERS);
+    expect(foreignForBuiltinAdmin(`${w.vault}/originals`).length).toBeGreaterThan(0);
     expect(openPaths(`${w.vault}/originals`).length).toBeGreaterThan(0);
     const first = w.run(["sync", "--global", "--force"]);
     expect(first.code).toBe(1);

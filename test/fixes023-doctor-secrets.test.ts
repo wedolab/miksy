@@ -39,7 +39,21 @@ test("A7: ссылка local/secrets на открытую папку — в doc
   expect(lines[0]).toMatch(/закройте вручную(?: \(PowerShell\))?: /);
 }, 300000);
 
-test.skipIf(!win)("A7: файл секрета без доступа даже вам — «не читается», а не «устарел»; sync перезаписывает", () => {
+// Можно ли отнять у себя чтение файла: встроенный Администратор (…-500, раннеры GitHub Windows) читает его всё равно —
+// через «Администраторов» или привилегию резервного копирования. Тогда сценария «не прочесть даже вам» нет — пропуск
+const cantUnread = win && (() => {
+  const d = tmp("a7probe-");
+  put(`${d}/f`);
+  icacls(`${d}\\f`.replaceAll("/", "\\"), "/inheritance:r");
+  icacls(`${d}\\f`.replaceAll("/", "\\"), "/remove:g", `*${sid()}`);
+  let readable = true;
+  try { readFileSync(`${d}/f`); } catch { readable = false; }
+  // Вернуть доступ самому файлу: у него нет наследования, а (OI)(CI) к файлу не применяется
+  icacls(`${d}\\f`.replaceAll("/", "\\"), "/grant", `*${sid()}:F`);
+  return readable;
+})();
+
+test.skipIf(!win || cantUnread)("A7: файл секрета без доступа даже вам — «не читается», а не «устарел»; sync перезаписывает", () => {
   const w = world(false);
   expect([0, 3]).toContain(w.run(["sync", "--global"]).code);
   const file = `${w.config}/local/secrets/A_TOKEN`;

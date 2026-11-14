@@ -14,6 +14,7 @@ import { runCommand } from "../src/commands";
 import { privateLocal } from "../src/secretfiles";
 import { finishUpdate } from "../src/update";
 import { CLI } from "./helpers";
+import { foreignForBuiltinAdmin, openToOthers } from "./openacl";
 
 const win = process.platform === "win32";
 const ENGINE = join(import.meta.dir, "..");
@@ -51,7 +52,8 @@ function world(where: "backups" | "originals", k: Kind, open: boolean) {
   // Цель ссылки: 25 старых запусков (rotate удалил бы лишние) и оригинал
   for (let i = 0; i < 25; i++) put(`${vault}/2026-01-${String(i + 1).padStart(2, "0")}T00-00-00-000Z/x.md`);
   if (where === "originals") { mkdirSync(`${config}/local/backups`, { recursive: true }); put(`${vault}/C/old.md`); }
-  if (!open) privateLocal(vault);
+  // Открытая — явной чужой записью: наследования от временной папки под …-500 мало (круг 9c)
+  if (open) { openToOthers(vault); if (win) expect(foreignForBuiltinAdmin(vault).length).toBeGreaterThan(0); } else privateLocal(vault);
   link(k, where === "originals" ? vault : vault, where === "originals" ? `${config}/local/backups/originals` : `${config}/local/backups`);
   const env = { MIKSY_CONFIG: config, HOME: home, USERPROFILE: home, BUN_INSTALL: `${root}/bun` };
   const run = (args: string[]) => {
@@ -199,6 +201,8 @@ test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("ссылка глубж�
   unlink(`${w.config}/local/backups`);
   const deep = `${w.root}/deep`;
   mkdirSync(deep, { recursive: true });
+  openToOthers(deep);
+  if (win) expect(foreignForBuiltinAdmin(deep).length).toBeGreaterThan(0);
   link(win ? "junction" : "dir", deep, `${w.config}/local/backups/originals/C`);
   const dry = w.run(["sync", "--global", "--force", "--dry-run"]);
   const sync = w.run(["sync", "--global", "--force"]);

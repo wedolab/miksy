@@ -11,6 +11,7 @@ import { backup, newBackupRun, runDir } from "../src/backup";
 import { loadManifest } from "../src/manifest";
 import { aclProblem } from "../src/secretfiles";
 import { tomlValue } from "../src/toml";
+import { foreignForBuiltinAdmin, openToOthers } from "./openacl";
 
 const win = process.platform === "win32";
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
@@ -271,7 +272,9 @@ describe("Г11: ссылка-каталог local/secrets", () => {
     const f = cliFixture();
     const vault = `${f.dir}/vault`;
     mkdirSync(vault, { recursive: true, mode: 0o755 });
-    if (!win) Bun.spawnSync(["chmod", "755", vault]);
+    // Открытая — явной чужой записью (Windows): наследования под …-500 мало (круг 9c)
+    openToOthers(vault);
+    if (win) expect(foreignForBuiltinAdmin(vault).length).toBeGreaterThan(0);
     const before = win ? aclProblem(vault) : statSync(vault).mode & 0o777;
     mkdirSync(`${f.config}/local`, { recursive: true });
     symlinkSync(vault, `${f.config}/local/secrets`, win ? "junction" : "dir");

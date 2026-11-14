@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
 import { CLI } from "./helpers";
+import { foreignForBuiltinAdmin, openToOthers, USERS } from "./openacl";
 
 const win = process.platform === "win32";
 const sys = (exe: string) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", exe);
@@ -24,10 +25,17 @@ const can = (() => {
 const sid = () => new TextDecoder("latin1").decode(Bun.spawnSync([sys("whoami.exe"), "/user", "/fo", "csv", "/nh"], { stdout: "pipe" }).stdout).trim().match(/,"(S-[0-9-]+)"$/)![1];
 
 type Rights = "унаследованные" | "явная чужая" | "только ваша";
-// Права цели: унаследованные (Windows — от временной папки, она открыта; sh — 0755/0644), явная чужая запись
+// Права цели: унаследованные (Windows — от временной папки и явная запись «Пользователей»; sh — 0755/0644), явная чужая запись
 // (Everyone / Users), только ваша явная запись (уже закрыта)
 function setRights(p: string, dir: boolean, r: Rights) {
   if (!win) return chmodSync(p, r === "только ваша" ? (dir ? 0o700 : 0o600) : (dir ? 0o755 : 0o644));
+  // Унаследованные + явная запись «Пользователей»: под встроенным Администратором (…-500, раннеры GitHub) унаследованные
+  // SYSTEM и «Администраторы» для miksy свои, цель без явной чужой записи не открыта (круг 9c). Унаследованные остаются —
+  // команда из строки doctor должна снять и их
+  if (r === "унаследованные") {
+    openToOthers(p, USERS);
+    expect(foreignForBuiltinAdmin(p).length).toBeGreaterThan(0);
+  }
   if (r === "явная чужая") Bun.spawnSync([sys("icacls.exe"), nat(p), "/grant", dir ? "*S-1-1-0:(OI)(CI)(R)" : "*S-1-5-32-545:(R)"], { stdout: "pipe" });
   if (r === "только ваша") Bun.spawnSync([sys("icacls.exe"), nat(p), "/inheritance:r", "/grant:r", `*${sid()}:${dir ? "(OI)(CI)" : ""}F`], { stdout: "pipe" });
 }
