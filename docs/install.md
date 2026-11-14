@@ -62,6 +62,8 @@ miksy агентов не ставит. Команды — из официаль
 IDE Antigravity — [antigravity.google/download](https://antigravity.google/download). Поставили агента после
 miksy — запустите `miksy setup` ещё раз: он предложит добавить агента.
 
+Antigravity в редакторе Zed — своей записью `agy acp`, не расширением из каталога Zed: [antigravity.md](antigravity.md).
+
 ## Установка вручную
 
 Те же шаги, что у мастера, но командами. Ставили мастером — раздел не нужен.

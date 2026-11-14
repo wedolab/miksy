@@ -50,7 +50,8 @@ has to replace a file, it keeps the original and restores it when you remove mik
 
 - **Agents:** Claude Code, Codex, opencode **2.x**, Antigravity (`claude`, `codex`, `opencode`,
   `antigravity` in the config) — any of them; miksy configures only the ones you have installed. Works in the terminal and in editors that run agents through ACP (Zed);
-  Antigravity gets them in its IDE and CLI (`agy`), not yet through ACP in Zed.
+  Antigravity also in its IDE; in Zed — through your own `agy acp` agent server (`agy` 1.5.0 or newer), not through the
+  "Google Antigravity" extension from Zed's catalog.
 - **OS:** Windows, macOS and Linux (Ubuntu 24.04) are tested on real machines and in CI.
 - **git** and **[Bun](https://bun.sh)** 1.3.14 or newer (the installer offers to install Bun).
 
@@ -104,7 +105,7 @@ reads Russian fine and can explain the steps to you in English.
 - Full documentation (Russian): [README.md](README.md) and the [docs/](docs/) folder — detailed installation
   ([install](docs/install.md)), several project folders ([roots](docs/roots.md)), trust ([trust](docs/trust.md)),
   update and rollback ([update](docs/update.md)), troubleshooting ([troubleshooting](docs/troubleshooting.md)),
-  uninstall ([uninstall](docs/uninstall.md)), how layers work ([layers](docs/layers.md)); design: [DESIGN.md](DESIGN.md)
+  uninstall ([uninstall](docs/uninstall.md)), Antigravity and Zed ([antigravity](docs/antigravity.md)), how layers work ([layers](docs/layers.md)); design: [DESIGN.md](DESIGN.md)
 - Changes by version: [CHANGELOG.md](CHANGELOG.md)
 - Security issues: report privately via **Security → Report a vulnerability** ([SECURITY.md](SECURITY.md))
 - License: [MIT](LICENSE)

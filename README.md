@@ -38,8 +38,9 @@
 `opencode`, `antigravity` (прежнее имя Antigravity — `gemini` — тоже работает).
 
 **Где запускать агентов — где удобно**: агент сам читает файлы, которые разложил miksy. Проверено в терминале (все
-четыре), в редакторе Zed через ACP (Claude Code, Codex, opencode), Antigravity — в его IDE и CLI (`agy`); через ACP
-в Zed Antigravity настройки от miksy пока не получает. Другие редакторы читают те же файлы, но не проверялись.
+четыре), в редакторе Zed через ACP (все четыре) и в IDE Antigravity. Antigravity в Zed подключайте своей записью
+`agy acp`: расширение «Google Antigravity» из каталога Zed настроек miksy не видит — [docs/antigravity.md](docs/antigravity.md).
+Другие редакторы читают те же файлы, но не проверялись.
 
 **ОС** — Windows, macOS и Linux (Ubuntu 24.04). **Нужны** git и [Bun](https://bun.sh) 1.3.14 или новее — программа,
 которая запускает miksy (Bun установщик предложит поставить сам).
@@ -505,6 +506,7 @@ miksy update             # что изменилось — и после «y» �
 ## Подробнее
 
 - [docs/install.md](docs/install.md) — как поставить агентов и как установить miksy вручную, без мастера.
+- [docs/antigravity.md](docs/antigravity.md) — где Antigravity видит настройки miksy и как подключить его в Zed.
 - [docs/layers.md](docs/layers.md) — что ещё бывает в слое, куда miksy пишет файлы каждого агента, учёт, бэкапы и
   оригиналы: когда хотите понять, откуда у агента настройка.
 - [docs/roots.md](docs/roots.md) — несколько папок с проектами (второй диск, облачная папка), смена основной,

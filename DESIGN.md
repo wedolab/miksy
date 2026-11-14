@@ -1160,7 +1160,7 @@ opencode: config, precedence). (3) Конфигурация задана `MIKSY_
 | Агент | Режимы |
 |---|---|
 | Claude Code, Codex, opencode | CLI, Zed (через ACP) |
-| Antigravity | CLI `agy`, Antigravity IDE и Antigravity 2.0 (графический клиент) |
+| Antigravity | CLI `agy`, Zed через `agy acp` (не расширение `antigravity-acp` из реестра ACP), Antigravity IDE и Antigravity 2.0 (графический клиент) |
 
 Особенности, которые адаптер обязан проверить: рабочий каталог в IDE — открытая папка
 (проект открывается сам по себе); окружение IDE может отличаться от консольного (секреты

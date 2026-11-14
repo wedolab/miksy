@@ -11,8 +11,9 @@ Antigravity — агент Google в двух режимах: CLI `agy` и гр�
 
 - `agy` 1.3.3, 1.4.2, 1.4.3–1.4.7 — Windows 11; `agy` 1.4.0, 1.4.2, 1.4.7 — macOS 26.6;
   `agy` 1.4.12 — Linux (Ubuntu 24.04; процессор без AES-NI/AVX — через обёртку qemu, не miksy);
-- Antigravity IDE и Antigravity 2.0 — Windows;
-- ACP-адаптер `antigravity-acp` 1.4.5 (Zed) — Windows и Linux: настройки miksy не получает (ниже).
+- `agy` 1.5.9 — Windows 11 и Linux, в том числе `agy acp` в Zed 1.28.1 (Windows) и тем же ACP-клиентом (Linux);
+- Antigravity IDE и Antigravity 2.0 — Windows; IDE 2.6.0 — Windows (2026-11-14);
+- ACP-адаптер `antigravity-acp` 1.4.5 и 1.5.0 из реестра Zed — настройки miksy не получает (ниже).
 
 Источники: документация `https://antigravity.google/docs` (customizations, rules, skills,
 MCP, plugins), встроенные руководства CLI
@@ -84,6 +85,10 @@ MCP, plugins), встроенные руководства CLI
 | Общее | `~/.gemini/GEMINI.md`, `~/.gemini/config/skills/`, `~/.gemini/projects.json` | то же |
 | MCP плагина | работает | работает; серверы — потомки `language_server_windows_x64.exe`, окон консоли нет |
 
+IDE 2.6.0 (Windows, 2026-11-14): беседа легла в `~/.gemini/antigravity/brain/`, не в `antigravity-ide/`; сервер
+только из `~/.gemini/config/mcp_config.json` IDE увидела и вызвала. Читает ли она ещё
+`antigravity-ide/mcp_config.json` — не проверялось (miksy пишет в оба файла, вреда нет).
+
 ## Поведение MCP
 
 - Серверы плагина агент видит с префиксом `<плагин>_<сервер>`: `context7` из плагина
@@ -102,23 +107,52 @@ MCP, plugins), встроенные руководства CLI
 
 ## Через ACP в Zed
 
-ACP-адаптер Antigravity в Zed — **отдельная программа** `antigravity-acp` (1.4.5 на 2026-11-02:
-`agy_acp_server.par` — Python, и движок `localharness_external`; Zed скачивает её в
-`~/.local/share/zed/external_agents/registry/antigravity-acp/`), а не `agy`. Свой каталог настроек —
-`~/.gemini/antigravity-acp/` (`settings.json` со способом входа, `trusted_workspaces.json`), вход —
-отдельный от `agy` (`oauth-personal`).
+В Zed у Antigravity два пути — с разным результатом.
+
+### `agy acp` — своя запись в Zed (работает)
+
+С `agy` 1.5.0 сам CLI умеет быть ACP-сервером: `agy acp` (stdio, «Antigravity ACP Server»). В Zed — своя запись
+`agent_servers` (`"type": "custom"`, `command` — путь к `agy`, `args: ["acp"]`; пошагово — `docs/antigravity.md`,
+«Antigravity в Zed»). Агент, инструменты, вход и настройки — от `agy`: состояние в `~/.gemini/antigravity-cli/`
+(`brain/`, `log/acp-server-*.log`), вход общий с `agy`.
+
+Проба 2026-11-14 (`agy` 1.5.9; метки во всех местах, свои stdio-MCP; Windows — Zed 1.28.1 руками владельца и
+своим ACP-клиентом теми же вызовами, что у Zed; Linux — тем же клиентом):
+
+| Место | `agy acp` | `agy -p` | IDE 2.6.0 |
+|---|---|---|---|
+| `~/.gemini/GEMINI.md` | да | да | да |
+| `AGENTS.md`, `GEMINI.md`, `.agents/{AGENTS,GEMINI}.md`, `.agents/rules/*.md` (`always_on`) | да | да | да |
+| `rules/AGENTS.md` плагина `.agents/plugins/<имя>/` | да | да | да |
+| skills: `~/.gemini/config/skills/`, `.agents/skills/`, `skills/` плагина (описание) | да | да | да |
+| MCP `~/.gemini/config/mcp_config.json` | да, с 1-го сообщения | да | да |
+| MCP `mcp_config.json` плагина и `.agents/mcp_config.json` | да; Windows — со 2-го сообщения сессии, Linux — с 1-го | да | да |
+| MCP, переданный клиентом (`mcpServers` в `session/new`) | да, инструменты «eager» (`mcp_<сервер>_<инструмент>`) | — | — |
+| Вызов инструмента MCP (`call_mcp_tool`) | да, все три | — | да |
+
+- Доверие к папке не понадобилось: проект без записи в списках доверия грузится полностью.
+- Возможности (`initialize`): `loadSession`, `resume`, режимы `default`, `accept-edits`, `auto`, `plan`;
+  `mcpCapabilities` пустые (HTTP-серверы от клиента — флаг `--process-per-session`, не проверялось).
+- Итог: miksy доставляет всё уже сейчас, правок адаптера не нужно.
+
+### Расширение `antigravity-acp` из реестра Zed (не работает)
+
+«Google Antigravity» в каталоге агентов Zed — **отдельная программа** `antigravity-acp` (1.4.5 — 2026-11-02, 1.5.0 —
+2026-11-10; Python в PyInstaller `agy_acp_server.exe`/`.par` и движок `localharness_external`; Zed скачивает её в
+`external_agents/registry/antigravity-acp/`), а не `agy`. Свой каталог — `~/.gemini/antigravity-acp/` (способ входа,
+`trusted_workspaces.json`, `conversations/`, `brain/`), вход отдельный (`oauth-personal`).
 
 - **Правила** — не грузит никакие: ни плагин проекта, ни `AGENTS.md`/`GEMINI.md`/`.agents/rules/*.md`
-  проекта (даже в доверенной папке), ни глобальные `~/.gemini/GEMINI.md`. Проверено маркерами: Windows
-  (локальный проект) и Linux (Ubuntu 24.04, Zed Remote и локально), 2026-11-01…02. Движок файлы правил
-  знает, но адаптер, видимо, ждёт их от клиента (`_meta.antigravity.systemPrompt.append`), а Zed их не
+  проекта (даже в доверенной папке), ни глобальные `~/.gemini/GEMINI.md`. Проверено маркерами 1.4.5: Windows и
+  Linux, 2026-11-01…02; 1.5.0 — владелец 2026-11-14: агент сказал, что MCP-инструментов нет, и нарушил глобальные
+  правила. В коде 1.5.0 системный промпт — только `_meta.antigravity.systemPrompt.append` от клиента; Zed его не
   передаёт.
-- **MCP** — по коду адаптера только глобальный `~/.gemini/config/mcp_config.json` и серверы, переданные
-  клиентом (Zed передаёт `mcpServers: []`); проектных `.agents/mcp_config.json` и плагинов в коде нет.
-  Вживую не проверено.
-- Итог: через ACP в Zed настройки miksy до Antigravity не доходят, и писать их некуда; в терминале
-  Zed (`agy`) — доходят. Документация Antigravity: плагины читает только CLI; IDE и расширения —
-  правила проекта и глобальные. При новой версии адаптера — повторить пробу маркерами.
+- **MCP** — по коду 1.5.0 только глобальный `~/.gemini/config/mcp_config.json` (путь от `~`, `GEMINI_HOME` не
+  учитывает) и серверы клиента; проектных `mcp_config.json` и плагинов в коде нет.
+- **Skills** (по коду 1.5.0) — `.agents/skills/`, `.gemini/skills/` проекта, `~/.gemini/config/skills/`,
+  `~/.gemini/antigravity-cli/skills/`; **hooks** — `config/hooks.json` и проектные (только при доверии).
+- Итог: miksy писать для него некуда; поддержку не заявляем, следим за обновлениями (реестр
+  `agentclientprotocol/registry`, `antigravity-acp/agent.json`) — при новой версии повторить пробу.
 - Linux: на процессоре без AES-NI/AVX скачанный Zed бинарник падает (`go/sigill-fail-fast`) — лечится
   обёрткой qemu, как `agy`; к miksy не относится.
 
@@ -181,4 +215,7 @@ OAuth не нужен.
   плагины не показывают ни на Windows, ни на Linux — не показатель.
 - 2026-11-01…02: интерактивный agy 1.4.7 Windows — нужна подсказка `call_mcp_tool` (выше); ACP-адаптер
   1.4.5 в Zed (Windows, Linux) — настроек miksy не видит.
+- 2026-11-14: `agy` 1.5.9 (Windows, Linux) — `agy acp` в Zed видит правила, skills и MCP miksy (таблица в
+  «Через ACP в Zed»); `agy -p` 1.4.12 и 1.5.9 — то же; IDE 2.6.0 — то же; `antigravity-acp` 1.5.0 — по коду и
+  со слов владельца настроек не видит.
 - Базовая проверка адаптера — `bun test/antigravity-live.ts` (все вызовы `agy` с временным HOME).
