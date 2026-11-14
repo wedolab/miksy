@@ -160,7 +160,7 @@ export function parseRoots(value: unknown, file: string, memory?: LedgerRoots): 
     if (i > 0 && !tree)
       throw new Error(`${file}: у корня ${given} не указана ветка дерева слоёв — укажите: { path: ${JSON.stringify(given)}, tree: <ветка, например Clients> }. У дополнительных корней ветка обязательна: без неё правила основного корня молча доставались бы папкам с теми же именами`);
     const busy = roots.find((r) => tree && r.tree.toLowerCase() === tree.toLowerCase());
-    if (busy) throw new Error(`${file}: tree: ${tree} уже у корня ${busy.given} — выберите корню ${given} другое имя ветки (общие правила для нескольких корней — слоем в map.yaml, README «Несколько корней workspace»)`);
+    if (busy) throw new Error(`${file}: tree: ${tree} уже у корня ${busy.given} — выберите корню ${given} другое имя ветки (общие правила для нескольких корней — слоем в map.yaml, docs/roots.md, «Правила нескольких корней»)`);
     const expanded = given.replace(/^~(?=$|[\\/])/, homeDir());
     let { path, away } = rootAway(expanded);
     if (!away && memory && emptyDir(path) && memory.hasTargets(path)) away = "пуст, а в учёте есть его цели — диск не смонтирован?";

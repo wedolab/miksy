@@ -136,7 +136,7 @@ describe("мастер setup", () => {
     const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: string; agents: string[] };
     expect(canonical(machine.workspace)).toBe(canonical(f.ws));
     expect(machine.agents).toEqual(["claude"]);
-    expect(t).toMatch(/не найдены: codex, opencode, antigravity — miksy их не ставит.*README/);
+    expect(t).toMatch(/не найдены: codex, opencode, antigravity — miksy их не ставит.*docs\/install\.md, «Установка агентов»/);
     // 3. Копия настроек до записи — исходный ~/.claude.json
     const backups = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-miksy-"));
     expect(backups.length).toBe(1);

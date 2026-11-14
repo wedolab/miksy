@@ -115,7 +115,7 @@ export function treeClashes(roots: Root[]): { root: Root; other: Root; dir: stri
   return out;
 }
 export const clashText = (c: { root: Root; other: Root; dir: string }) =>
-  `ветка layers/tree/${c.root.tree} корня ${c.root.path} совпадает с папкой ${c.dir} корня ${c.other.path}: слои этой ветки получат обе. Если это не задумано — смените tree корня или переименуйте папку; общие правила для нескольких корней задают явно — слоем в map.yaml (README, «Несколько корней workspace»)`;
+  `ветка layers/tree/${c.root.tree} корня ${c.root.path} совпадает с папкой ${c.dir} корня ${c.other.path}: слои этой ветки получат обе. Если это не задумано — смените tree корня или переименуйте папку; общие правила для нескольких корней задают явно — слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
 
 // Имена частей слоя (load.ts: LAYER_PARTS) — не имена веток
 const PARTS = ["instructions", "mcp", "skills", "hooks", "policies"];

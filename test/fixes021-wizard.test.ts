@@ -145,7 +145,7 @@ describe("A11 — setup --force: основным стал бывший допо
     ], { force: true });
     expect(code).toBe(0);
     const t = f.text();
-    const cmd = t.match(/Вернуть его: 1\) .*; 2\) (miksy root add "[^"]+" --tree (\S+)) \(README/);
+    const cmd = t.match(/Вернуть его: 1\) .*; 2\) (miksy root add "[^"]+" --tree (\S+)) \(docs\/roots\.md/);
     expect(cmd?.[1]).toBe(`miksy root add "${f.ws}" --tree ${cmd?.[2]}`);
     expect(t).toContain(`его слои из layers/tree/<папка>/… перенесите в layers/tree/${cmd?.[2]}/<папка>/…`);
     // Предложенная ветка свободна: не Clients (она теперь у основного)
@@ -172,6 +172,6 @@ describe("рецензия 0.2.1 A, п. 5 — подсказка setup --force �
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
     expect(code).toBe(0);
-    expect(f.text()).toContain(`2) miksy root add "${old}" --tree "My Projects" (README`);
+    expect(f.text()).toContain(`2) miksy root add "${old}" --tree "My Projects" (docs/roots.md`);
   }, 120000);
 });

@@ -236,7 +236,7 @@ describe("A.1 и R9: ветка корня внутри чужого места 
     put(`${f.config}/layers/tree/Org/instructions/10-org.md`, "# org\n");
     const add = f.run(["root", "add", `${f.dir}/drive`, "--tree", "Org/Sub"]);
     expect(add.code).toBe(0);
-    const note = `корень ${f.dir}/drive: ветка layers/tree/Org/Sub лежит внутри места Org (там же: ${f.ws}/Org — папка корня ${f.ws}) — его проекты получают и слои layers/tree/Org (правила 10-org.md; MCP org). Не нужно — вынесите ветку из Org (например, tree: Org-Sub), а общее задайте явно слоем в map.yaml (README, «Несколько корней workspace»)`;
+    const note = `корень ${f.dir}/drive: ветка layers/tree/Org/Sub лежит внутри места Org (там же: ${f.ws}/Org — папка корня ${f.ws}) — его проекты получают и слои layers/tree/Org (правила 10-org.md; MCP org). Не нужно — вынесите ветку из Org (например, tree: Org-Sub), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
     expect(add.out).toContain(`справка: ${note}`);
     expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
     expect(f.run(["sync", "--global"]).code).toBe(0);

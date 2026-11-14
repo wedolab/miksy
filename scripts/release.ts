@@ -1,11 +1,11 @@
 // Выпуск версии miksy (для владельца): bun run release [--dry-run] [--yes] [--push]. Порядок — RELEASING.md.
 // Работает в git-репо текущего каталога (bun run — корень движка). По записи «Не выпущено» в CHANGELOG.md
 // сам определяет номер (SemVer, DESIGN §12), показывает номер и текст, после «да»: version в package.json,
-// «Не выпущено» → «X.Y.Z — дата» (сверху — новая пустая), коммит «Release X.Y.Z», тег vX.Y.Z, ветка
+// «Не выпущено» → «X.Y.Z — дата» (новой пустой нет), коммит «Release X.Y.Z», тег vX.Y.Z, ветка
 // stable — на него. Пуш и GitHub Release — отдельным «да» или --push. --dry-run — только показать
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compareVersions, entryText, isEmpty, nextVersion, parseChangelog, releaseText, SEMVER, UNRELEASED } from "../src/changelog";
+import { compareVersions, type Entry, entryText, isEmpty, nextVersion, parseChangelog, releaseText, SEMVER, UNRELEASED } from "../src/changelog";
 
 const STABLE = "stable", MAIN = "main", REMOTE = "origin";
 const args = process.argv.slice(2);
@@ -50,18 +50,18 @@ if (dirty && !dryRun) fail(`есть незакоммиченные измене
 const logText = readFileSync(logPath, "utf8");
 let parsed;
 try { parsed = parseChangelog(logText); } catch (e) { fail((e as Error).message); }
-const unreleased = parsed.entries.find((e) => e.version === null);
-if (!unreleased) fail(`в CHANGELOG.md нет записи «${UNRELEASED}»`);
+// «Не выпущено» нет — то же, что пустая: выпускать нечего (кроме первого выпуска)
+const unreleased: Entry = parsed.entries.find((e) => e.version === null) ?? { version: null, sections: {}, loose: [] };
 const tagExists = (v: string) => git("rev-parse", "--verify", "-q", `refs/tags/v${v}`).code === 0;
 const now = new Date();
 const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
-// Первый выпуск: версия из package.json ещё без тега, её запись в CHANGELOG уже есть, «Не выпущено» пуста —
+// Первый выпуск: версия из package.json ещё без тега, её запись в CHANGELOG уже есть, «Не выпущено» нет или пуста —
 // выпускается она (дата — сегодняшняя)
 const own = parsed.entries.find((e) => e.version === current);
 const first = !tagExists(current) && !!own && isEmpty(unreleased);
 const version = first ? current : nextVersion(current, unreleased);
-if (!version) fail(`выпускать нечего: раздел «${UNRELEASED}» в CHANGELOG.md пуст`);
+if (!version) fail(`выпускать нечего: в CHANGELOG.md нет записи «${UNRELEASED}» или она пуста`);
 if (!first && compareVersions(version, current) <= 0) fail(`новая версия ${version} не новее ${current}`);
 if (!first && tagExists(version)) fail(`тег v${version} уже есть`);
 if (!first && parsed.entries.some((e) => e.version === version)) fail(`в CHANGELOG.md уже есть запись ${version}`);

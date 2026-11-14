@@ -692,7 +692,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       // меткой под точной строкой его план убирает (выше); sync проекта без отметки «забыт» его точную строку
       // оставляет (файл miksy другой машины в общей облачной папке: снять строку — открыть его git; круг 6x);
       // остальные (с меткой под строкой каталога, без метки) и при clean git увидит, когда строка не нужна файлам
-      // miksy (README: убрать вручную)
+      // miksy (docs/uninstall.md: убрать вручную)
       const rendered = new Map(result.files.filter((f) => f.base === "project" && f.mode === "own").map((f) => [f.path, f]));
       // Отслеживается git — не скрываем (сбой git — считаем отслеживаемым: не прятать то, о чём ничего не известно)
       const untracked = (r: string) => {

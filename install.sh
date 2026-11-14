@@ -97,7 +97,7 @@ if ! command -v bun >/dev/null 2>&1; then
   say "Нужен Bun ($MIN_BUN или новее) — его нет. Официальный установщик:"
   say "  curl -fsSL https://bun.sh/install | bash"
   if ! yes_no "Установить Bun сейчас?"; then
-    say "Без Bun miksy не работает. Поставьте его (README, раздел «Установка») и запустите установку снова."
+    say "Без Bun miksy не работает. Поставьте его (docs/install.md, раздел «Установка вручную», шаг 1) и запустите установку снова."
     exit 1
   fi
   curl -fsSL https://bun.sh/install | bash || { say "Установщик Bun завершился с ошибкой."; exit 1; }

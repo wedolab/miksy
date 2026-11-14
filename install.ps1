@@ -29,7 +29,7 @@ function Invoke-MiksyInstall([string[]]$SetupArgs) {
     Write-Host "Нужен Bun ($minBun или новее) — его нет. Официальный установщик:"
     Write-Host '  powershell -c "irm bun.sh/install.ps1 | iex"'
     if (-not (& $yes 'Установить Bun сейчас?')) {
-      Write-Host 'Без Bun miksy не работает. Поставьте его (README, раздел «Установка») и запустите установку снова.'
+      Write-Host 'Без Bun miksy не работает. Поставьте его (docs/install.md, раздел «Установка вручную», шаг 1) и запустите установку снова.'
       return 1
     }
     & powershell -NoProfile -ExecutionPolicy Bypass -Command 'irm bun.sh/install.ps1 | iex' | Out-Host

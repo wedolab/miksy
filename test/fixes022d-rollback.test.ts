@@ -6,6 +6,7 @@
 // вернулись ссылками, содержимое dotfiles то же. Варианты: ссылка только в копии; local/backups → цель с наследованием и
 // без; local/secrets → открытая и закрытая без наследования цель; сама local — ссылка. Всё — во временных каталогах
 import { expect, test } from "bun:test";
+import { readDocs } from "./docs";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,8 +22,8 @@ const acl = (p: string) => Bun.spawnSync([sys("icacls.exe"), nat(p)], { stdout: 
 const sid = () => new TextDecoder("latin1").decode(Bun.spawnSync([sys("whoami.exe"), "/user", "/fo", "csv", "/nh"], { stdout: "pipe" }).stdout).trim().match(/,"(S-[0-9-]+)"$/)![1];
 
 // Блоки PowerShell раздела README «Windows: откат … когда в local/ есть ссылки», по порядку: пути, шаг 1, 2, 3, 5
-const README = readFileSync(join(import.meta.dir, "..", "README.md"), "utf8");
-const section = README.slice(README.indexOf("**Windows: откат с 0.2.2 на 0.2.1, 0.2.0 или 0.1.x, когда в `local/` есть ссылки.**"), README.indexOf("На macOS и Linux прежние версии в ссылки не заходят"));
+const README = readDocs();
+const section = README.slice(README.indexOf("### Windows: откат на 0.2.1, когда в local/ есть ссылки"), README.indexOf("На macOS и Linux прежние версии в ссылки не заходят"));
 const blocks = [...section.matchAll(/```\n([\s\S]*?)```/g)].map((m) => m[1].split("\n").map((l) => l.trim()).filter(Boolean).join("\n"));
 // Скрипт с BOM (PowerShell 5.1 читает файл без BOM в кодировке ANSI); вывод шагов — между метками
 function ps(dir: string, config: string, parts: number[], tail = ""): { code: number; out: string[][] } {

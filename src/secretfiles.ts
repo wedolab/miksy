@@ -247,10 +247,10 @@ function linkRefusal(p: string): string | null {
     const deep = /\/backups\/originals\/[^/]/i.test(slash(p));
     let target: string;
     try { target = realpathSync(p); }
-    catch { return `${slash(p)}: битая ссылка внутри local/ — ${NOT_HERE}. ${deep ? "Замените" : "Исправьте ссылку или замените"} её обычной папкой ${slash(p)} (оригиналы ваших файлов, если были, остались в её прежней цели — скопируйте их сюда; шаги — README, сообщение «… ссылка на …: … miksy не пишет туда бэкапы»)`; }
+    catch { return `${slash(p)}: битая ссылка внутри local/ — ${NOT_HERE}. ${deep ? "Замените" : "Исправьте ссылку или замените"} её обычной папкой ${slash(p)} (оригиналы ваших файлов, если были, остались в её прежней цели — скопируйте их сюда; шаги — docs/troubleshooting.md, сообщение «… ссылка на …: … miksy не пишет туда бэкапы»)`; }
     let why: string | null;
     try { why = aclProblem(target); } catch (e) { why = `права не прочитать (${(e as Error).message})`; }
-    const replace = `${isDirAt(target) ? "обычной папкой" : "обычным файлом"} ${slash(p)} с содержимым цели (там оригиналы ваших файлов, по ним clean их возвращает; шаги — README, сообщение «… ссылка на …: … miksy не пишет туда бэкапы»)`;
+    const replace = `${isDirAt(target) ? "обычной папкой" : "обычным файлом"} ${slash(p)} с содержимым цели (там оригиналы ваших файлов, по ним clean их возвращает; шаги — docs/troubleshooting.md, сообщение «… ссылка на …: … miksy не пишет туда бэкапы»)`;
     // Внутри originals — отказ и при закрытой цели: сквозь ссылку там не пишется (рецензия A круга 8d, №2)
     if (deep) return `${slash(p)} — ссылка на ${slash(target)}${why ? `: ${why}` : ""}. Внутри папки оригиналов miksy не пишет сквозь ссылку, даже если её цель закрыта, — ${NOT_HERE}. Замените эту ссылку ${replace}`;
     if (!why) return null;

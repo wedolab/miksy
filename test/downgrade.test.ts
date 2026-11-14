@@ -1,4 +1,6 @@
-// Откат с 0.2.0 на 0.1.x по рецепту README («Откатиться на прежнюю версию») — настоящим движком v0.1.1: тег
+// Круг 10a (справка): рецепт отката на 0.1.x из документации удалён (решение владельца) — проверки текста README
+// сняты, совместимость с настоящим движком v0.1.1 проверяется по-прежнему.
+// Откат с 0.2.0 на 0.1.x по прежнему рецепту README («Откатиться на прежнюю версию») — настоящим движком v0.1.1: тег
 // v0.1.1 репо движка разворачивается во временный каталог (временный индекс git, индекс и ветки репо не
 // меняются). Тега нет (CI и стенды клонируют без тегов) — пропуск
 import { expect, test } from "bun:test";
@@ -246,8 +248,6 @@ test.skipIf(!hasTag)("рецепт, шаг 0 для корня, убранног
   f.run(["sync", "--all", "--yes"]);
   expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
   const back = f.run(["sync", "--all", "--yes"]);
-  // README говорит о вопросе в любом случае; вопрос (A2 отложен) — с ответами в окне Claude отдельной строкой
-  expect(read(`${ENGINE}/README.md`).replace(/\s+/g, " ").includes("может один раз спросить о доверии")).toBe(true);
   if (asked(back)) {
     expect(back.out.includes("ответы в окне Claude")).toBe(true);
     expect(f.run(["trust", site, "--confirm"]).code).toBe(0);
@@ -258,10 +258,6 @@ test.skipIf(!hasTag)("рецепт, шаг 0 для корня, убранног
 }, 300000);
 
 test.skipIf(!hasTag)("цель без git со своим хуком в settings.local.json и .mcp.json, «да» новой версией: 0.1.1 снимает доверие и спрашивает (только .mcp.json); без ответа возврат — без вопроса, «да» в 0.1.1 — вопрос о хуке; Codex — правку не замечает (README)", () => {
-  // README — без переносов строк (редактура выпуска 0.2.1: «цель без git» — «папка без git»)
-  const r = read(`${ENGINE}/README.md`).replace(/\s+/g, " ");
-  expect(r).toContain("кроме папок без git: там 0.1.x не читает `.claude/settings.local.json` и `.codex/config.toml`");
-  expect(r).toContain("Правку `.codex/config.toml` в папке без git 0.1.x не заметит");
   const asked = (x: { out: string }) => x.out.includes("Нужно решение");
   for (const oldYes of [false, true]) {
     const engine = oldEngine();
@@ -300,7 +296,6 @@ test.skipIf(!hasTag)("цель без git со своим хуком в settings
 }, 300000);
 
 test.skipIf(!hasTag)("цель без git, хук коллеги в settings.local.json (решение не принято / «нет»): 0.1.1 ставит доверие Claude без вопроса — README предупреждает (рецензия 6z, п. 2)", () => {
-  expect(read(`${ENGINE}/README.md`).replace(/\s+/g, " ")).toContain("0.1.x не увидит и поставит доверие Claude без вопроса");
   for (const deny of [false, true]) {
     const engine = oldEngine();
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });

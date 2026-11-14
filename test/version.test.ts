@@ -73,7 +73,7 @@ describe("совместимость: учёт записан более нов�
     expect(newerLedger(m.engine)).toBeNull();
     writeFileSync(path, JSON.stringify({ ...m, engine: "99.0.0" }));
     const doc = f.run(["doctor"]);
-    expect(doc.out).toMatch(/Справочно:[\s\S]*Версия: учёт miksy \(local\/state\/manifest\.json\) записан более новой версией движка — 99\.0\.0, а этот движок — [\d.]+\. Обновились на другой копии движка — обновите и эту: miksy update\. Откатились нарочно — сделайте шаги из README, «Откатиться на прежнюю версию»/);
+    expect(doc.out).toMatch(/Справочно:[\s\S]*Версия: учёт miksy \(local\/state\/manifest\.json\) записан более новой версией движка — 99\.0\.0, а этот движок — [\d.]+\. Обновились на другой копии движка — обновите и эту: miksy update\. Откатились нарочно — сделайте шаги из docs\/update\.md, «Откатиться на прежнюю версию»/);
     // Сборка main той же версии (0.2.0-3-g…) — не новее
     expect(newerLedger(`${VERSION}-3-gabc1234`)).toBeNull();
     expect(newerLedger(`${VERSION} (коммит abc1234, есть правки)`)).toBeNull();

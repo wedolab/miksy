@@ -9,6 +9,7 @@ import { ENGINE, mountParent } from "../src/load";
 import { selectProject } from "../src/resolve";
 import type { MiksyMap } from "../src/types";
 import { cliFixture, put } from "./helpers";
+import { readDocs } from "./docs";
 import { git, inProcess, read, yamlRoots } from "./rootshelp";
 
 describe("A4 — «~» в путях команд", () => {
@@ -69,7 +70,7 @@ describe("A5 — регистр ветки и привязки map.yaml", () => 
   });
 
   test("пример README (общий слой для Acme в двух корнях) задевает и саму папку Acme, и всё внутри — по одному разу", () => {
-    const readme = readFileSync(join(ENGINE, "README.md"), "utf8");
+    const readme = readDocs();
     const block = /# map\.yaml — слой layers\/acme\/[^\n]*\n([\s\S]*?)```/.exec(readme);
     expect(block).not.toBeNull();
     const matches = [...block![1].matchAll(/match: "([^"]+)", use: acme/g)].map((m) => m[1]);

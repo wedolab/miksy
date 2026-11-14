@@ -3,6 +3,7 @@
 // в sh — '\''. Строки «не возвращён: …»: на месте файла папка — убрать её и запустить ту же команду ещё раз; повторять
 // безопасно (файлы — тем же содержимым, ссылки, которые уже на месте, — пропуск). Временные каталоги
 import { expect, test } from "bun:test";
+import { readDocs } from "./docs";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import { ENGINE } from "../src/load";
 import { copyAgentSettings } from "../src/setup";
 
 const win = process.platform === "win32";
-const readme = readFileSync(join(ENGINE, "README.md"), "utf8");
+const readme = readDocs();
 // Команды README: первая строка «& { try { $c = …» (PowerShell) и «(cd -- '…' && find …» (sh)
 const PS = readme.split("\n").find((l) => l.startsWith("& { try { $c = (Get-Item -LiteralPath '"))!;
 const SH = readme.split("\n").find((l) => l.startsWith("(cd -- '"))!;

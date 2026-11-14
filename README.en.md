@@ -6,7 +6,7 @@ One source of rules, skills and MCP servers for several AI coding agents:
 **Claude Code, Codex, opencode, Antigravity**.
 
 > **The interface is in Russian for now.** The setup wizard, command output and the full
-> documentation ([README.md](README.md)) are Russian-only. This page is a short overview. An English
+> documentation ([README.md](README.md) and [docs/](docs/)) are Russian-only. This page is a short overview. An English
 > interface is planned if there is interest — tell us in an [issue](https://github.com/wedolab/miksy/issues).
 
 Instead of configuring every agent by hand in every project, you describe everything once — in
@@ -101,7 +101,10 @@ reads Russian fine and can explain the steps to you in English.
 
 ## More
 
-- Full documentation (Russian): [README.md](README.md), design: [DESIGN.md](DESIGN.md)
+- Full documentation (Russian): [README.md](README.md) and the [docs/](docs/) folder — detailed installation
+  ([install](docs/install.md)), several project folders ([roots](docs/roots.md)), trust ([trust](docs/trust.md)),
+  update and rollback ([update](docs/update.md)), troubleshooting ([troubleshooting](docs/troubleshooting.md)),
+  uninstall ([uninstall](docs/uninstall.md)), how layers work ([layers](docs/layers.md)); design: [DESIGN.md](DESIGN.md)
 - Changes by version: [CHANGELOG.md](CHANGELOG.md)
 - Security issues: report privately via **Security → Report a vulnerability** ([SECURITY.md](SECURITY.md))
 - License: [MIT](LICENSE)

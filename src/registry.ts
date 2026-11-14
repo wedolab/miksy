@@ -182,7 +182,7 @@ export function branchNote(r: Root, roots: Root[]): string | null {
     : `своих слоёв у ${ancestors.join(", ")} пока нет, но всё, что там появится, получат и его проекты`;
   const top = segs[0];
   return `корень ${r.path}: ветка layers/tree/${r.tree} лежит внутри места ${ancestors[ancestors.length - 1]}${dirs.length ? ` (там же: ${dirs.join("; ")})` : ""} — ${inherit}. ` +
-    `Не нужно — вынесите ветку из ${top} (например, tree: ${top}-${segs[segs.length - 1]}), а общее задайте явно слоем в map.yaml (README, «Несколько корней workspace»)`;
+    `Не нужно — вынесите ветку из ${top} (например, tree: ${top}-${segs[segs.length - 1]}), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
 }
 export const branchNotes = (machine: Machine) => {
   const roots = machineRoots(machine);

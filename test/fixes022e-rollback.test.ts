@@ -2,13 +2,14 @@
 // с ссылками на файлы и с ошибками человека. Блоки README — дословно, в одном окне PowerShell (один скрипт). Настоящие
 // v0.2.1 и v0.2.0 в песочнице. Только временные каталоги (тесты взяты у рецензента проверки 8d, out/check022d)
 import { expect, test } from "bun:test";
+import { readDocs } from "./docs";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 import { badPaths, cli, closeTarget, type Close, nat, ps, psFile, put, read, sddl, sys32, tmp, win } from "./fixes022e-helpers";
 
-const README = readFileSync(join(import.meta.dir, "..", "README.md"), "utf8");
-const section = README.slice(README.indexOf("**Windows: откат с 0.2.2 на 0.2.1, 0.2.0 или 0.1.x, когда в `local/` есть ссылки.**"), README.indexOf("На macOS и Linux прежние версии в ссылки не заходят"));
+const README = readDocs();
+const section = README.slice(README.indexOf("### Windows: откат на 0.2.1, когда в local/ есть ссылки"), README.indexOf("На macOS и Linux прежние версии в ссылки не заходят"));
 const blocks = [...section.matchAll(/```\n([\s\S]*?)```/g)].map((m) => m[1].split("\n").map((l) => l.trim()).filter(Boolean).join("\n"));
 // Блоки: 0 — пути, 1 — шаг 1, 2 — шаг 2, 3 — шаг 3, 4 — шаг 5
 function steps(dir: string, config: string, order: number[]) {

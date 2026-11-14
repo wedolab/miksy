@@ -372,7 +372,7 @@ for (const [label, roots] of [
     expect(s.code).toBe(0);
     const tree = roots(ws, drive)[0].tree;
     const line = s.out.split("\n").find((l) => l.includes("перешла к новому основному"))!;
-    expect(line).toContain(`ветка layers/tree/${tree} перешла к новому основному ${fresh}; прежний основной ${ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его — README, «Несколько корней workspace»`);
+    expect(line).toContain(`ветка layers/tree/${tree} перешла к новому основному ${fresh}; прежний основной ${ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его — docs/roots.md, «Сменить основной корень»`);
     expect(line).not.toMatch(/переименуйте|miksy root add/);
   }, 240000);
 
@@ -403,7 +403,7 @@ test("C6: новый основной внутри прежнего с ветк�
   expect(s.code).toBe(0);
   const line = s.out.split("\n").find((l) => l.includes("перешла к новому основному"))!;
   expect(line).toContain(`(кроме проектов внутри нового основного: они остаются в workspace`);
-  expect(line).toContain("Вернуть его — README, «Несколько корней workspace»");
+  expect(line).toContain("Вернуть его — docs/roots.md, «Сменить основной корень»");
   expect(line).not.toMatch(/переименуйте|miksy root add/);
 }, 240000);
 

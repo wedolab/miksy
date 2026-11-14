@@ -2,11 +2,12 @@
 // zsh, если есть): копии нет — не печатает ничего, код 0; копия есть — её полный путь без кавычек; и когда local/backups —
 // ссылка на папку на другом томе (рецензия B круга 8d, №2)
 import { expect, test } from "bun:test";
+import { readDocs } from "./docs";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const README = readFileSync(join(import.meta.dir, "..", "README.md"), "utf8");
+const README = readDocs();
 const line = README.split("\n").find((l) => l.includes("# macOS, Linux: копии, полный путь"))!.replace(/\s+#.*$/, "").trim();
 
 for (const shell of ["bash", "zsh"])

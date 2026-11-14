@@ -2,6 +2,7 @@
 // выполняется в песочнице текущей ОС: sh на macOS и Linux, PowerShell на Windows; временный домашний каталог. Копию
 // делает тот же copyAgentSettings, что и мастер: ссылки (dotfiles) в ней — ссылками (рецензия A 0.2.2, п. 2, 3)
 import { expect, test } from "bun:test";
+import { readDocs } from "./docs";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,7 @@ const WIN_EXAMPLE = "C:/Users/you/Projects/miksy-config/local/backups/before-mik
 const POSIX_EXAMPLE = "/Users/you/Projects/miksy-config/local/backups/before-miksy-2026-11-10T09-00-00";
 
 test("README и мастер дают одну и ту же команду (пример пути)", () => {
-  const readme = readFileSync(join(ENGINE, "README.md"), "utf8");
+  const readme = readDocs();
   expect(readme).toContain(restoreCommand(WIN_EXAMPLE, "windows"));
   expect(readme).toContain(restoreCommand(POSIX_EXAMPLE, "macos"));
   expect(restoreCommand(POSIX_EXAMPLE, "linux")).toBe(restoreCommand(POSIX_EXAMPLE, "macos"));

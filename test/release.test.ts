@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { nextVersion, parseChangelog, releaseText, unreleasedTemplate } from "../src/changelog";
+import { nextVersion, parseChangelog, releaseText } from "../src/changelog";
 import { canonical } from "../src/paths";
 import { put } from "./helpers";
 
@@ -16,7 +16,8 @@ const git = (dir: string, ...a: string[]) => {
 };
 // Дата выпуска — местная дата процесса: у скрипта и теста один пояс (UTC)
 const TODAY = new Date().toISOString().slice(0, 10);
-const LOG = `# Изменения miksy\n\nВступление.\n\n${unreleasedTemplate()}\n## 0.1.0 — 2026-11-01\n\n### Новое\n\n- первый выпуск\n`;
+// Пустой заготовки «Не выпущено» нет: запись появляется с первой строкой (круг 10a)
+const LOG = `# Изменения miksy\n\nВступление.\n\n## 0.1.0 — 2026-11-01\n\n### Новое\n\n- первый выпуск\n`;
 
 function repo() {
   const dir = canonical(mkdtempSync(join(tmpdir(), "release-")));
@@ -50,10 +51,12 @@ function repo() {
     });
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
+  // Как по RELEASING.md: нет «Не выпущено» — создать над последней версией; раздел — в её начало
   const addLine = (section: string, line: string) => {
-    const text = readFileSync(`${dev}/CHANGELOG.md`, "utf8");
-    const at = text.indexOf(`### ${section}\n`, text.indexOf("## Не выпущено"));
-    writeFileSync(`${dev}/CHANGELOG.md`, text.slice(0, at) + `### ${section}\n\n${line}\n` + text.slice(at + `### ${section}\n`.length));
+    let text = readFileSync(`${dev}/CHANGELOG.md`, "utf8");
+    if (!text.includes("## Не выпущено\n")) { const at = text.indexOf("\n## ") + 1; text = `${text.slice(0, at)}## Не выпущено\n\n${text.slice(at)}`; }
+    const at = text.indexOf("## Не выпущено\n") + "## Не выпущено\n\n".length;
+    writeFileSync(`${dev}/CHANGELOG.md`, `${text.slice(0, at)}### ${section}\n\n${line}\n\n${text.slice(at)}`);
     git(dev, "commit", "-q", "-am", `add ${section}`);
   };
   const version = () => JSON.parse(readFileSync(`${dev}/package.json`, "utf8")).version;
@@ -99,13 +102,16 @@ describe("bun run release", () => {
     expect(git(r.dev, "log", "-1", "--format=%s").out).toBe("Release 0.1.1");
     const text = readFileSync(`${r.dev}/CHANGELOG.md`, "utf8");
     const entries = parseChangelog(text).entries;
-    expect(entries.map((e) => e.version)).toEqual([null, "0.1.1", "0.1.0"]);
-    expect(entries[0].sections).toEqual({ "Новое": [], "Исправлено": [], "Ломает": [], "После обновления": [] });
-    expect(entries[1]).toMatchObject({ date: TODAY, sections: { "Исправлено": ["- поправлено X"] } });
+    // Новой пустой «Не выпущено» нет — сверху выпущенная версия
+    expect(entries.map((e) => e.version)).toEqual(["0.1.1", "0.1.0"]);
+    expect(entries[0]).toMatchObject({ date: TODAY, sections: { "Исправлено": ["- поправлено X"] } });
     // Аннотация тега — текст записи (для gh release create --notes-from-tag), «###» не вырезаны
     expect(git(r.dev, "tag", "-l", "--format=%(contents)", "v0.1.1").out).toBe("### Исправлено\n\n- поправлено X");
     expect(fix.out).toContain('gh release create v0.1.1 --title "miksy 0.1.1" --notes-from-tag');
-    expect(text).toStartWith("# Изменения miksy\n\nВступление.\n\n## Не выпущено\n");
+    expect(text).toStartWith(`# Изменения miksy\n\nВступление.\n\n## 0.1.1 — ${TODAY}\n`);
+    // Выпущено, новых строк нет — выпускать нечего
+    const none = r.run("--yes");
+    expect({ code: none.code, nothing: none.out.includes("выпускать нечего") }).toEqual({ code: 1, nothing: true });
     expect(text).not.toMatch(/## 0\.1\.1[\s\S]*### Новое[\s\S]*## 0\.1\.0/); // пустые разделы в выпуск не попадают
 
     r.addLine("Новое", "- команда Y");
@@ -173,10 +179,10 @@ describe("CHANGELOG: номер и запись выпуска", () => {
   test("разбор: непонятный заголовок или раздел — ошибка с номером строки; выпуск сохраняет остальной текст", () => {
     expect(() => parseChangelog("# x\n\n## Новая версия\n")).toThrow("строка 3");
     expect(() => parseChangelog("## Не выпущено\n\n### Прочее\n")).toThrow("раздел «Прочее»");
-    const text = `${LOG.replace("### Исправлено\n", "### Исправлено\n\n- y\n")}`;
+    // Пустые разделы «Новое», «Ломает» в выпуск не попадают; новой пустой «Не выпущено» нет
+    const text = LOG.replace("## 0.1.0", "## Не выпущено\n\n### Новое\n\n### Исправлено\n\n- y\n\n### Ломает\n\n## 0.1.0");
     const out = releaseText(text, "0.1.1", "2026-12-01");
-    expect(out).toContain("## 0.1.1 — 2026-12-01\n\n### Исправлено\n\n- y\n\n## 0.1.0 — 2026-11-01\n\n### Новое\n\n- первый выпуск\n");
-    expect(out.indexOf("## Не выпущено")).toBeLessThan(out.indexOf("## 0.1.1"));
-    expect(parseChangelog(out).entries.map((x) => x.version)).toEqual([null, "0.1.1", "0.1.0"]);
+    expect(out).toBe("# Изменения miksy\n\nВступление.\n\n## 0.1.1 — 2026-12-01\n\n### Исправлено\n\n- y\n\n## 0.1.0 — 2026-11-01\n\n### Новое\n\n- первый выпуск\n");
+    expect(parseChangelog(out).entries.map((x) => x.version)).toEqual(["0.1.1", "0.1.0"]);
   });
 });

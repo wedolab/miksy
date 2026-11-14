@@ -1,6 +1,6 @@
 // CHANGELOG.md движка: разбор записей по версиям — для miksy update (что изменилось между версиями) и
 // команды выпуска scripts/release.ts (номер следующей версии, запись «Не выпущено» → «X.Y.Z — дата").
-// Формат (DESIGN §12): «## Не выпущено» сверху, затем «## X.Y.Z — ГГГГ-ММ-ДД» от новых к старым; внутри
+// Формат (DESIGN §12): «## Не выпущено» сверху — только когда есть невыпущенные изменения, затем «## X.Y.Z — ГГГГ-ММ-ДД» от новых к старым; внутри
 // записи — разделы «### Новое», «### Исправлено», «### Ломает», «### После обновления»
 // Без зависимостей от остального движка: модуль использует и scripts/release.ts
 
@@ -101,11 +101,9 @@ export function entryText(e: Entry, opts: { title?: boolean } = {}): string {
   return out.join("\n").trimEnd();
 }
 
-// Пустая запись «Не выпущено» — шаблон: разделы без строк
-export const unreleasedTemplate = () => [`## ${UNRELEASED}`, "", ...SECTIONS.flatMap((s) => [`### ${s}`, ""])].join("\n");
-
-// Выпуск: «Не выпущено» → «X.Y.Z — дата» (только непустые разделы), сверху — новая пустая «Не выпущено».
-// Текст вокруг записей (вступление, остальные записи) не меняется
+// Выпуск: «Не выпущено» → «X.Y.Z — дата» (только непустые разделы). Новой пустой «Не выпущено» нет: она появится с
+// первой строкой о следующем изменении (круг 10a, справка). Текст вокруг записей (вступление, остальные записи)
+// не меняется
 export function releaseText(text: string, version: string, date: string): string {
   const { entries } = parseChangelog(text);
   const un = entries.find((e) => e.version === null);
@@ -116,5 +114,5 @@ export function releaseText(text: string, version: string, date: string): string
   if (end < 0) end = lines.length;
   const released = entryText({ ...un, version, date });
   const tail = lines.slice(end);
-  return [...lines.slice(0, start), unreleasedTemplate(), released, ...(tail.length ? ["", ...tail] : [""])].join("\n");
+  return [...lines.slice(0, start), released,...(tail.length ? ["", ...tail] : [""])].join("\n");
 }

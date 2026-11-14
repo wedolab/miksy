@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { ENGINE } from "../src/load";
 import { parseToml } from "../src/toml";
 import { cliFixture, put } from "./helpers";
+import { readDocs } from "./docs";
 import { inProcess, read } from "./rootshelp";
 
 const asked = (r: { out: string }) => r.out.includes("Нужно решение");
@@ -17,7 +18,7 @@ const asked = (r: { out: string }) => r.out.includes("Нужно решение"
 const codexTrusted = (home: string, dir: string) => Object.entries(parseToml(read(`${home}/.codex/config.toml`) || "").projects ?? {})
   .some(([k, v]) => k.replaceAll("\\", "/").toLowerCase() === dir.toLowerCase() && (v as { trust_level?: string }).trust_level === "trusted");
 const decisions = (config: string) => JSON.parse(read(`${config}/local/trust.json`) || "{\"decisions\":{}}").decisions as Record<string, any>;
-const readme = () => readFileSync(join(ENGINE, "README.md"), "utf8");
+const readme = () => readDocs();
 const changelog = () => readFileSync(join(ENGINE, "CHANGELOG.md"), "utf8");
 // Группа без git (target: true) Grp в основном корне; Codex получает её MCP
 const codexGroup = (f: { config: string; ws: string }) => {
