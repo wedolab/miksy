@@ -6,7 +6,8 @@ import { expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { copyAgentSettings, restoreCommand } from "../src/setup";
+import { copyAgentSettings } from "../src/setup";
+import { applyRestore, planRestore } from "../src/restore";
 
 const win = process.platform === "win32";
 const tmp = (p: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p))).replaceAll("\\", "/");
@@ -39,9 +40,9 @@ test.skipIf(!win)("A9: копия «до miksy» — junction, битый juncti
     gone: false,
   });
   expect(readlinkSync(`${copy}/.claude/gone`).replace(/^\\\\\?\\/, "").replaceAll("\\", "/").replace(/\/$/, "").toLowerCase()).toBe(`${dot}/gone`.toLowerCase());
-  // Возврат командой из «Как удалить»: убрать нынешние ссылки, вернуть из копии
+  // Возврат (miksy restore, круг 10c): убрать нынешние ссылки, вернуть из копии
   for (const n of names) { const p = `${home}/.claude/${n}`; if (lstatSync(p).isSymbolicLink()) { try { rmSync(p); } catch { Bun.spawnSync(["cmd", "/c", "rmdir", p.replaceAll("/", "\\")]); } } }
-  const back = Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", restoreCommand(copy, "windows")], { env: { ...process.env, USERPROFILE: home, HOME: home }, stdout: "pipe", stderr: "pipe" });
+  const back = { exitCode: applyRestore(planRestore(copy, home), home, () => {}).failed.length ? 1 : 0 };
   const restored = kinds(names.map((n) => `${home}/.claude/${n}`));
   expect({ code: back.exitCode, restored, gone: existsSync(`${dot}/gone`) }).toEqual({
     code: 0,

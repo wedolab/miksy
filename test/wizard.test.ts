@@ -9,7 +9,7 @@ import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
 import { ENGINE, configRoot } from "../src/load";
 import { canonical, inside } from "../src/paths";
-import { layoutWarning, restoreCommand, setup, type System } from "../src/setup";
+import { layoutWarning, setup, type System } from "../src/setup";
 import { put } from "./helpers";
 import { missingDrive } from "./nodrive";
 
@@ -141,8 +141,9 @@ describe("мастер setup", () => {
     const backups = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-miksy-"));
     expect(backups.length).toBe(1);
     expect(JSON.parse(readFileSync(`${f.config}/local/backups/${backups[0]}/.claude.json`, "utf8")).mcpServers.mine).toBeTruthy();
-    // Команда возврата копии — та же, что restoreCommand (README сверяется отдельно, fixes022-restore); на Windows — с пометкой PowerShell
-    expect(t).toContain(`вернуть (${win ? "PowerShell; " : ""}после miksy clean): ${restoreCommand(`${f.config}/local/backups/${backups[0]}`.replaceAll("\\", "/"), win ? "windows" : process.platform === "darwin" ? "macos" : "linux")}`);
+    // Как вернуть копию — команда miksy restore (круг 10c), длинной команды оболочки нет
+    expect(t).toContain("вернуть (после miksy clean --all и --global): miksy restore");
+    expect(t).not.toContain("-LiteralPath");
     // 4. npx для context7: показана команда установки, без «да» не выполнена
     expect(t).toMatch(/Node\.js \(npx\): нужна серверам context7/);
     expect(f.calls.exec).toEqual([]);

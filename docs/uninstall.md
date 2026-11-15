@@ -9,7 +9,7 @@
 
 **До шага 1 знайте, что пропадёт у агентов:** вместе с записанным miksy `clean` уберёт и то, что вы сами перенесли в
 конфигурацию, — MCP-серверы, которые перенёс мастер или `miksy adopt`, ваши правила и skills, перенесённые в слои.
-Оригинала у них нет. Вернуть — шагом 3 (копия «до miksy») или из слоёв вручную (шаг 2). Шаг 3 нужен и тогда, когда
+Оригинала у них нет. Вернуть — шагом 3 (`miksy restore`: копия «до miksy») или из слоёв вручную (шаг 2). Шаг 3 нужен и тогда, когда
 после шага 1 что-то работает не так, как до miksy.
 
 ## 1. Уберите всё, что записал miksy
@@ -53,67 +53,59 @@ miksy clean --global            # домашние настройки агент
 
 ## 3. Вернуть копию «до miksy»
 
-Только если нужно (см. начало) и **до** удаления `local/`: копия лежит в нём. Копия повторяет домашний каталог:
-`…/before-miksy-<метка>/.codex/config.toml` — это `~/.codex/config.toml`. Копия **затрёт** изменения, сделанные после
-установки в тех же файлах:
+Только если нужно (см. начало), **после шага 1** (вернувшееся раньше `clean` уберёт как своё) и **до** удаления
+`local/`: копия лежит в нём (`<конфигурация>/local/backups/before-miksy-<метка>/`, `<метка>` — дата и время
+установки). Закройте агентов и редакторы, затем:
 
-- `~/.claude.json` из копии **не возвращайте**: в нём Claude хранит вход, настройки и список проектов — команды ниже
-  его пропускают. MCP-серверы Claude перенесите руками: закройте Claude и скопируйте нужные записи `"mcpServers"` из
-  `…/before-miksy-<метка>/.claude.json` в то же место нынешнего `~/.claude.json` (общие — верхний уровень, серверы
-  проекта — `"projects"` → `"<путь проекта>"`). Проверка — `claude mcp list` (в папке проекта — и его серверы);
-- ваши правки после установки в `~/.codex/config.toml` и других файлах сохраните заранее или верните только нужные
-  файлы.
+```
+miksy restore --dry-run     # что вернётся и что затрёт
+miksy restore               # вернуть (спросит «Вернуть?»)
+```
 
-Копия — в `<конфигурация>/local/backups/before-miksy-<метка>/` (`<конфигурация>` — папка конфигурации, например
-`$HOME\Projects\miksy-config`; `<метка>` — дата и время установки). Найти её и посмотреть, что в ней:
+Команда берёт самую раннюю копию (другую — `miksy restore <метка>`) и возвращает в домашний каталог всё из папок
+настроек агентов в ней: через ваши ссылки (dotfiles) тоже, ссылки из копии — ссылками (на Windows ссылки на папку —
+junction). Файлы, которые вы меняли после установки, копия **затрёт** — список «Затрёт» показывает их до вопроса, а
+нынешние версии miksy сохранит точной копией в `local/backups/before-restore-<метка>/` (путь — в конце вывода;
+вернуть эти файлы — `miksy restore "<этот путь>"`; серверы, дописанные в `~/.claude.json`, при этом останутся). Ваши
+ссылки, которые заменила ссылка из копии, в бэкап не сохраняются: куда они вели, команда пишет в плане и в итоге — то,
+на что они вели, не трогается.
+
+`~/.claude.json` целиком не возвращается: в нём Claude хранит вход, настройки и список проектов. Из копии в него
+дописываются только MCP-серверы Claude, которых сейчас нет (общие и серверы проектов); сервер с тем же именем, но другим
+определением, остаётся вашим — команда его назовёт. Проверка — `claude mcp list` (в папке проекта — и его серверы).
+Серверы проектов Claude команда перенесёт только после `miksy clean --all` (до него там ещё серверы miksy). Так же не
+возвращаются файлы входа и рабочее состояние агентов (история, сессии), если они попали в копию (`~/.codex/auth.json`,
+`~/.claude/projects` и т. п.; мастер их не копирует), и всё, что лежит вне папок настроек агентов: команда их назовёт.
+
+miksy ещё записан в домашние настройки агентов — команда ничего не вернёт и напишет, какие `miksy clean` выполнить.
+Копии нет (на вопрос 3 мастера ответили «нет», ставили `setup --yes` без `--backup` или miksy записывал настройки
+до мастера) — скажет об этом; вернуть прежнее можно только архивом (ниже), если вы его делали.
+
+Строки «не возвращён: ~/<файл> — <причина>» (код выхода 1) — остальное вернулось; причина говорит, что сделать:
+- на этом месте в домашнем каталоге папка — посмотрите, что в ней; не нужна — удалите или переименуйте её;
+- файл занят — закройте агентов и редакторы;
+- файл «только для чтения» — снимите пометку командой из строки;
+- Windows не дала создать ссылку на файл или папку — включите режим разработчика (Параметры → Система → Для
+  разработчиков) или запустите `miksy restore` в PowerShell от имени администратора;
+- «на месте пусто: новая ссылка … осталась рядом как ~/<файл>.miksy-new» (редко: её держал антивирус) — переименуйте её
+  командой из строки или запустите `miksy restore` ещё раз.
+
+Затем запустите `miksy restore` ещё раз — повторять безопасно: то, что уже на месте, не трогается.
+
+Коды выхода: 0 — всё на месте (предупреждения, например «файл копии .claude.json повреждён», кода не меняют); 1 — что-то
+не вернулось, отказ (miksy ещё записан) или копии нет; ответ «нет» на вопрос — код 1, ничего не записано; без терминала и без `--yes` — код 2, ничего не записано. `--dry-run` возвращает тот же код, что дал бы запуск.
+
+**Один файл вручную** (например, если miksy уже удалён) — найдите копию и скопируйте нужный файл; путь внутри копии
+повторяет домашний каталог (`…/before-miksy-<метка>/.codex/config.toml` — это `~/.codex/config.toml`):
 
 ```
 (Get-ChildItem $HOME\Projects\miksy-config\local\backups -Filter before-miksy-*).FullName              # Windows: копии, полный путь
-Get-ChildItem -Recurse -Force "$HOME\Projects\miksy-config\local\backups\before-miksy-<метка>"         # что в копии
 find -H ~/Projects/miksy-config/local/backups -maxdepth 1 -name 'before-miksy-*'                   # macOS, Linux: копии, полный путь
-find ~/Projects/miksy-config/local/backups/before-miksy-<метка> ! -type d                           # что в копии
-```
-
-Ничего не нашлось — копии нет (на вопрос 3 мастера ответили «нет» или ставили `setup --yes` без `--backup`): вернуть
-прежнее можно только архивом из «[Установки вручную](install.md#установка-вручную)», если вы его делали (ниже).
-Копий несколько — берите самую раннюю.
-
-**Один файл** (например, конфиг Codex) — тоже после шага 1:
-
-```
 Copy-Item "$HOME\Projects\miksy-config\local\backups\before-miksy-<метка>\.codex\config.toml" "$HOME\.codex\config.toml"   # Windows
 cp ~/Projects/miksy-config/local/backups/before-miksy-<метка>/.codex/config.toml ~/.codex/config.toml                          # macOS, Linux
 ```
 
-**Всё, кроме `~/.claude.json`,** — **после шага 1**: вернувшееся раньше `clean` уберёт, как своё. Команду с вашим путём
-печатал мастер (вопрос 3, «вернуть …»). Вывод не сохранился — возьмите команду ниже и замените первый путь в одинарных
-кавычках (в команде для Windows — после `-LiteralPath`, для macOS и Linux — после `cd --`) на полный путь своей копии
-(его показывает команда «копии, полный путь» выше; без `$HOME` и `~` — в одинарных кавычках они не раскрываются).
-Кавычка в самом пути: в PowerShell удвойте её (`'` → `''`, так же `’`, `‘`, `‚`, `‛`), в macOS и Linux замените `'` на
-`'\''`. Первая команда — для Windows (PowerShell), вторая — для macOS и Linux:
-
-```
-& { try { $c = (Get-Item -LiteralPath 'C:\Users\you\Projects\miksy-config\local\backups\before-miksy-2026-11-10T09-00-00' -Force -ErrorAction Stop).FullName.TrimEnd([char]92) } catch { Write-Host "не возвращён ни один файл: $_"; $global:LASTEXITCODE = 1; return }; $st = @{ e = 0 }; $f = { param($d) try { $items = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction Stop) } catch { Write-Host "не возвращён: $d — $_"; $st.e = 1; return }; foreach ($i in $items) { $rel = $i.FullName.Substring($c.Length + 1); $t = Join-Path $env:USERPROFILE $rel; $link = $i.LinkType -in 'Junction', 'SymbolicLink'; if ($i.PSIsContainer -and -not $link) { & $f $i.FullName; continue }; if ($rel -eq '.claude.json') { continue }; try { $o = Get-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue; $olink = $o -and $o.LinkType -in 'Junction', 'SymbolicLink'; if ($o -and $o.PSIsContainer -and -not $olink) { throw 'папка' }; [void][IO.Directory]::CreateDirectory((Split-Path $t)); if ($link) { $to = @($i.Target)[0]; if ($olink -and @($o.Target)[0] -eq $to) { continue }; $n = $(if ($o) { "$t.miksy-new" } else { $t }); $rl = { param($p) $x = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; if ($x -and $x.LinkType -in 'Junction', 'SymbolicLink') { if ($x.PSIsContainer) { [IO.Directory]::Delete($p) } else { [IO.File]::Delete($p) } } }; & $rl "$t.miksy-new"; $env:MIKSY_L = $n; $env:MIKSY_T = $(if ($i.PSIsContainer) { [IO.Path]::GetFullPath([IO.Path]::Combine((Split-Path $t), $to)) } else { $to }); & cmd /d /c $(if ($i.PSIsContainer) { 'mklink /J "%MIKSY_L%" "%MIKSY_T%"' } else { 'mklink "%MIKSY_L%" "%MIKSY_T%"' }) | Out-Null; $ok = -not $LASTEXITCODE; Remove-Item Env:MIKSY_L, Env:MIKSY_T; if (-not $ok) { if ($o) { & $rl $n }; throw 'mklink' }; if ($o) { try { if ($o.PSIsContainer) { [IO.Directory]::Delete($t) } else { [IO.File]::Delete($t) }; if ($i.PSIsContainer) { [IO.Directory]::Move($n, $t) } else { [IO.File]::Move($n, $t) } } catch { if (Test-Path -LiteralPath $t) { & $rl $n }; throw } } } else { $b = [IO.File]::ReadAllBytes($i.FullName); $w = [IO.File]::Open($t, 'OpenOrCreate', 'Write'); try { $w.SetLength(0); $w.Write($b, 0, $b.Length) } finally { $w.Close() } } } catch { Write-Host "не возвращён: $rel"; $st.e = 1 } } }; & $f $c; $global:LASTEXITCODE = $st.e }
-```
-
-```
-(cd -- '/Users/you/Projects/miksy-config/local/backups/before-miksy-2026-11-10T09-00-00' && find . ! -type d ! -path ./.claude.json -exec sh -c 'r=0; for f; do t="$HOME/${f#./}"; if [ -L "$f" ]; then if [ -d "$t" ] && [ ! -L "$t" ]; then false; else mkdir -p "${t%/*}" && ln -sfn "$(readlink "$f")" "$t"; fi; else if [ -d "$t" ]; then false; else mkdir -p "${t%/*}" && cp "$f" "$t"; fi; fi || { echo "не возвращён: ${f#./}" >&2; r=1; }; done; exit $r' _ {} +)
-```
-
-Обе возвращают в домашний каталог всё из копии, кроме `.claude.json`, — через ваши ссылки (dotfiles) тоже, а ссылки
-из копии — ссылками (на Windows ссылки на папку — junction).
-
-Команда ничего не напечатала — всё вернулось (код выхода 0; в PowerShell — `$LASTEXITCODE`). Иначе она перечисляет
-файлы строками «не возвращён: …». Причины и что сделать:
-- на этом месте в домашнем каталоге папка — посмотрите, что в ней; не нужна — удалите или переименуйте её;
-- на Windows — ссылка на файл, которую Windows не дала создать: включите режим разработчика (Параметры → Система →
-  Для разработчиков) или откройте PowerShell от имени администратора;
-- файл занят (открыт агент или редактор) — закройте агентов и редакторы;
-- файл «только для чтения» — снимите пометку: `attrib -r "$HOME\<файл>"` (Windows), `chmod u+w ~/'<файл>'` (macOS, Linux);
-  `<файл>` — путь из строки «не возвращён» (он от домашнего каталога);
-- «не возвращён ни один файл: …» — неверен путь копии: проверьте его первой командой выше.
-
-Затем запустите ту же команду ещё раз — повторять её безопасно.
+(`$HOME\Projects\miksy-config` — ваша папка конфигурации.) `~/.claude.json` так не копируйте — см. выше.
 
 **Архив** из «[Установки вручную](install.md#установка-вручную)» — так же без `.claude.json`:
 `tar xzf ~/agents-before-miksy.tgz -C ~ --exclude=.claude.json` (Windows:

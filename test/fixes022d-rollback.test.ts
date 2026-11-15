@@ -11,7 +11,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { closeCommand, privateLocal } from "../src/secretfiles";
-import { restoreCommand } from "../src/setup";
+import { applyRestore, planRestore } from "../src/restore";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 
 const win = process.platform === "win32";
@@ -111,9 +111,9 @@ for (const [tag, variant] of cases)
     const again = [now(["setup", "--yes"]), now(["sync", "--global"])];
     const doc = now(["doctor"]);
     const copyBack = existsSync(`${backups}/${copy}`) && lstatSync(`${backups}/${copy}/.agents/skills`).isSymbolicLink();
-    // Полный круг: команда возврата копии из «Как удалить» (её печатает мастер) — ссылки вернулись ссылками
+    // Полный круг: возврат копии (miksy restore, круг 10c) — ссылки вернулись ссылками
     renameSync(`${home}/.agents/skills`, `${home}/.agents/skills-miksy`);
-    const restore = Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", restoreCommand(`${backups}/${copy}`, "windows")], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const restore = { exitCode: applyRestore(planRestore(`${backups}/${copy}`, home), home, () => {}).failed.length ? 1 : 0 };
     expect({
       before: { code: before.code, closed: before.out[1].length, moved: before.out[2].length, links: before.out[3] },
       back: back.map((r) => r.code), notClosed: back.filter((r) => /не закрыт|icacls/.test(r.out)).map((r) => r.out.slice(0, 300)),

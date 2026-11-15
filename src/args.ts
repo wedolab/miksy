@@ -71,6 +71,8 @@ export const COMMANDS: Record<string, Spec> = {
       if ("finish" in f && ("check" in f || "main" in f || "yes" in f)) throw new UsageError("--finish — внутренний шаг miksy update, без других флагов");
     },
   },
+  // restore [<метка или путь копии>]: вернуть копию «до miksy»
+  restore: { bool: ["dry-run", "yes"], positional: [0, 1] },
   version: { positional: [0, 0] },
 };
 

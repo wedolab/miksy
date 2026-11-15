@@ -390,6 +390,11 @@ function copyLink(src: string, dst: string, all: { src: string }[]): boolean {
   if (!/^[\\/]{2}/.test(abs)) { try { symlinkSync(abs, dst, "junction"); return true; } catch { /* ниже — символическая */ } }
   try { symlinkSync(target, dst, "dir"); return true; } catch { return false; }
 }
+// Ссылка на папку (true) или файл (false); битая — через brokenKind; null — узнать нельзя (miksy restore, круг 10c)
+export function linkIsDir(src: string, all: { src: string }[]): boolean | null {
+  try { return statSync(src).isDirectory(); } catch { return brokenKind(src, all); }
+}
+export const resetLinkKinds = () => { kinds = null; };
 // Битые ссылки копии: папка или файл (PowerShell: PSIsContainer есть и у битой ссылки); null — узнать нельзя
 function brokenKind(src: string, all: { src: string }[]): boolean | null {
   if (!kinds) {
@@ -406,51 +411,6 @@ function brokenKind(src: string, all: { src: string }[]): boolean | null {
   const k = kinds.get(src.replaceAll("/", "\\").toLowerCase());
   return k === undefined ? null : k;
 }
-
-// Как вернуть копию настроек на место (пути в копии — от HOME). Кроме ~/.claude.json: в нём Claude хранит вход и список
-// проектов — копия затёрла бы их (docs/uninstall.md, шаг 3; проверка 7c, Н 1). Выпуск 0.2.2, A1:
-// - macOS, Linux: по файлам и ссылкам копии (find, без псевдонимов ls): запись идёт сквозь ссылки пользователя
-//   (dotfiles: ~/.claude → ~/dotfiles/claude), права ~ не меняются; ссылки из копии возвращаются ссылками; на месте
-//   файла настоящая папка — «не возвращён»; не вернулся хоть один — код не 0 (find … {} + передаёт код sh);
-// - Windows (PowerShell) — то же правило, без robocopy: он не создаёт ссылку на папку без прав администратора (ERROR
-//   1314, на её месте — пустая папка, а код «успех») и считает несовпадением ссылку, которая уже на месте (рецензия A
-//   0.2.2, п. 2, 3). Файлы — записью в открытый файл: сквозь ссылки пользователя, скрытые файлы тоже; ссылка из копии на
-//   папку — junction (прав не нужно), на файл — символическая ссылка; та же ссылка уже на месте — пропуск. Ссылки
-//   создаёт mklink (cmd): New-Item в PowerShell 5.1 требует прав администратора и для режима разработчика и разбирает
-//   -Target как шаблон ([ ]); относительная цель — от места ссылки, как у ln -s; прежнее на месте ссылки убирается
-//   только после того, как новая создана (рядом, затем переименование) — повторная проверка 0.2.2, п. 1, 2, 4; остаток
-//   <имя>.miksy-new (ссылка) убирается до и после неудачи. Пути — mklink через переменные окружения в кавычках: cmd сам
-//   разбирает ^ & , ; = %…% в аргументах; /d — без автозапуска cmd (повторная проверка 2, п. 1, 2). Не
-//   вернулся хоть один (или копии нет, папку копии не прочитать) — «не возвращён: …» и $LASTEXITCODE 1, иначе 0 (exit
-//   не нужен: окно PowerShell остаётся открытым);
-// - путь копии — в одинарных кавычках оболочки: $, `, ", пробел остаются буквально; PowerShell считает кавычками и
-//   ‘ ’ ‚ ‛ — их тоже удваиваем (рецензия A 0.2.2, п. 4); косые в конце пути копии отрезаются (TrimEnd([char]92)):
-//   иначе Substring($c.Length + 1) терял первый знак каждого пути (проверка 8a, A №2, B №1)
-const RESTORE_SH = "r=0; for f; do t=\"$HOME/${f#./}\"; if [ -L \"$f\" ]; then if [ -d \"$t\" ] && [ ! -L \"$t\" ]; then false; else mkdir -p \"${t%/*}\" && ln -sfn \"$(readlink \"$f\")\" \"$t\"; fi; else if [ -d \"$t\" ]; then false; else mkdir -p \"${t%/*}\" && cp \"$f\" \"$t\"; fi; fi || { echo \"не возвращён: ${f#./}\" >&2; r=1; }; done; exit $r";
-const shQuote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-const psQuote = (s: string) => `'${s.replace(/['‘’‚‛]/g, "$&$&")}'`;
-const restorePs = (dir: string) => [
-  `& { try { $c = (Get-Item -LiteralPath ${psQuote(dir.replaceAll("/", "\\"))} -Force -ErrorAction Stop).FullName.TrimEnd([char]92) } catch { Write-Host "не возвращён ни один файл: $_"; $global:LASTEXITCODE = 1; return };`,
-  ` $st = @{ e = 0 }; $f = { param($d) try { $items = @(Get-ChildItem -LiteralPath $d -Force -ErrorAction Stop) } catch { Write-Host "не возвращён: $d — $_"; $st.e = 1; return }; foreach ($i in $items) {`,
-  ` $rel = $i.FullName.Substring($c.Length + 1); $t = Join-Path $env:USERPROFILE $rel; $link = $i.LinkType -in 'Junction', 'SymbolicLink';`,
-  ` if ($i.PSIsContainer -and -not $link) { & $f $i.FullName; continue }; if ($rel -eq '.claude.json') { continue };`,
-  ` try { $o = Get-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue; $olink = $o -and $o.LinkType -in 'Junction', 'SymbolicLink';`,
-  ` if ($o -and $o.PSIsContainer -and -not $olink) { throw 'папка' }; [void][IO.Directory]::CreateDirectory((Split-Path $t));`,
-  ` if ($link) { $to = @($i.Target)[0]; if ($olink -and @($o.Target)[0] -eq $to) { continue }; $n = $(if ($o) { "$t.miksy-new" } else { $t });`,
-  ` $rl = { param($p) $x = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; if ($x -and $x.LinkType -in 'Junction', 'SymbolicLink') { if ($x.PSIsContainer) { [IO.Directory]::Delete($p) } else { [IO.File]::Delete($p) } } };`,
-  ` & $rl "$t.miksy-new"; $env:MIKSY_L = $n; $env:MIKSY_T = $(if ($i.PSIsContainer) { [IO.Path]::GetFullPath([IO.Path]::Combine((Split-Path $t), $to)) } else { $to });`,
-  ` & cmd /d /c $(if ($i.PSIsContainer) { 'mklink /J "%MIKSY_L%" "%MIKSY_T%"' } else { 'mklink "%MIKSY_L%" "%MIKSY_T%"' }) | Out-Null; $ok = -not $LASTEXITCODE; Remove-Item Env:MIKSY_L, Env:MIKSY_T;`,
-  ` if (-not $ok) { if ($o) { & $rl $n }; throw 'mklink' };`,
-  ` if ($o) { try { if ($o.PSIsContainer) { [IO.Directory]::Delete($t) } else { [IO.File]::Delete($t) }; if ($i.PSIsContainer) { [IO.Directory]::Move($n, $t) } else { [IO.File]::Move($n, $t) } }`,
-  ` catch { if (Test-Path -LiteralPath $t) { & $rl $n }; throw } } }`,
-  ` else { $b = [IO.File]::ReadAllBytes($i.FullName); $w = [IO.File]::Open($t, 'OpenOrCreate', 'Write'); try { $w.SetLength(0); $w.Write($b, 0, $b.Length) } finally { $w.Close() } } }`,
-  ` catch { Write-Host "не возвращён: $rel"; $st.e = 1 } } }; & $f $c; $global:LASTEXITCODE = $st.e }`,
-].join("");
-export const restoreCommand = (dir: string, os: Os) => os === "windows"
-  ? restorePs(dir)
-  : `(cd -- ${shQuote(dir)} && find . ! -type d ! -path ./.claude.json -exec sh -c '${RESTORE_SH}' _ {} +)`;
-// Где и чем выполнять команду возврата (вывод мастера)
-export const restoreShell = (os: Os) => (os === "windows" ? "PowerShell; " : "");
 
 // Действия с системой, которые мастер делает только после «да»: тесты подменяют их
 export interface System {
@@ -1043,7 +1003,8 @@ export function setup(o: SetupOptions): number {
     step(3, "Копия текущих настроек агентов", "страховка до первой записи miksy: вернёте всё как было даже без miksy.");
     const root = join(local, "backups");
     const done = existsSync(root) ? readdirSync(root).filter((d) => d.startsWith("before-miksy-")).sort() : [];
-    if (done.length) return log(`✓ уже есть: ${slash(join(root, done[done.length - 1]))}\n  вернуть (${restoreShell(os)}после miksy clean): ${restoreCommand(slash(join(root, done[done.length - 1])), os)}`);
+    if (done.length) return log(`✓ уже есть: ${slash(join(root, done[0]))}
+  вернуть (после miksy clean --all и --global): miksy restore`);
     if (synced(config)) return log("• miksy уже записывал настройки на этой машине — копия «до miksy» не получится; бэкапы его запусков — local/backups/.");
     const ids = machine?.agents ?? agents;
     const rels = [...new Set(ids.flatMap((id) => ADAPTERS[id]?.homeConfig ?? []))].filter((r) => { try { lstatSync(join(home, r)); return true; } catch { return false; } });
@@ -1060,7 +1021,7 @@ export function setup(o: SetupOptions): number {
     ensurePrivateLocal(local);
     log(`✓ копия: ${slash(dest)} (файлов: ${r.files})`);
     if (r.links.length) log(`  ссылки не скопированы (ОС не дала создать): ${r.links.join(", ")}`);
-    log(`  вернуть (${restoreShell(os)}после miksy clean): ${restoreCommand(slash(dest), os)}`);
+    log("  вернуть (после miksy clean --all и --global): miksy restore");
   }
 
   // after — после adopt: только команды серверов, которых шаг 4 ещё не видел (перенесённые в слои);

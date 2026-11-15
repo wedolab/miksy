@@ -99,6 +99,7 @@ reads Russian fine and can explain the steps to you in English.
 | `miksy trust [<path>]` | decide whether to trust a project whose hooks or MCP servers were not set up by miksy (`sync` asks itself) |
 | `miksy update` | update miksy to the latest release (`--check` only checks) |
 | `miksy clean --all`, `miksy clean --global` | remove everything miksy wrote (to uninstall it) |
+| `miksy restore` | after `clean`: bring back the agents' settings from the "before miksy" copy the installer made |
 
 ## More
 

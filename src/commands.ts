@@ -17,6 +17,7 @@ import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
 import { checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { finishUpdate, update } from "./update";
+import { runRestore } from "./restore";
 import { engineVersion, newerLedger } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
 import { ADAPTERS, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
@@ -61,10 +62,18 @@ export const USAGE = `miksy — раскладывает ваши правила
     --force                    заменить и файлы, правленные вручную или чужие (с копией)
     --agent <имя>              один агент: ${Object.keys(ADAPTERS).join(", ")}
                                (без флага — агенты из local/machine.yaml)
+
+Удаление
   miksy clean <путь> | --global | --all
                                убрать всё, что записал miksy, — вернуть как было до него.
                                Папки нет (диск не подключён) — уберёт, до чего дотянется;
-                               данных больше нет — --forget: забыть записанное туда
+                               данных больше нет — --forget: забыть записанное туда;
+                               --dry-run, --force, --agent — как у sync
+  miksy restore [<метка> | <путь>]
+                               после clean --all и --global: вернуть настройки агентов из копии
+                               «до miksy» (мастер, вопрос 3); покажет, что вернётся и что
+                               затрёт, и спросит. --dry-run — только показать, --yes — без
+                               вопроса
 
 Проекты и папки
   miksy projects               какие папки получают настройки
@@ -777,7 +786,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
   let code = 0;
   // Запись в local/backups отказана (ссылка с открытой или несуществующей целью) — пишущие команды останавливаются в
   // начале, до вопросов и записи; их --dry-run — та же строка и код 1 (выпуск 0.2.2, круг 8c, C10; рецензия A, п. 7)
-  if (["sync", "clean", "trust", "target", "adopt"].includes(cmd) || (cmd === "root" && ["add", "remove"].includes(positional[0]))) {
+  if (["sync", "clean", "trust", "target", "adopt", "restore"].includes(cmd) || (cmd === "root" && ["add", "remove"].includes(positional[0]))) {
     const refuse = backupsRefusal();
     if (refuse) {
       if ("dry-run" in flags) { console.log(`Ошибка (запуск откажет): ${refuse}`); return 1; }
@@ -1501,6 +1510,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
     case "setup":
       // --yes или без терминала — только безопасная часть, без вопросов
       code = setup({ ask: "yes" in flags ? null : ask, force: "force" in flags, backup: "backup" in flags, run: runCommand });
+      break;
+
+    case "restore":
+      code = runRestore(positional[0], flags, ask);
       break;
 
     case "version":
