@@ -9,7 +9,7 @@
   "bin": { "miksy": "src/cli.ts" },
   "scripts": {
     "miksy": "bun src/cli.ts",
-    "test": "bun test",
+    "test": "bun test --parallel",
     "release": "bun scripts/release.ts"
   }
 }

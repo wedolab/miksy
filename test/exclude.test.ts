@@ -98,5 +98,5 @@ describe("exclude", () => {
     expect(after).not.toContain("/B.md");
     // файлы основного по-прежнему скрыты от git
     expect(git(main, "status", "--porcelain").stdout.toString()).not.toContain("A.md");
-  });
+  }, 30000);
 });

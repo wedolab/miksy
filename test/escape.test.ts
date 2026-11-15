@@ -69,8 +69,11 @@ describe("helper: строка-команда для shell агента", () => 
     b.materialize();
     // Как в launch.test.ts: страница консоли до и после вызова helper-а (путь с кириллицей — chcp 65001 внутри)
     const driver = `${b.root}/driver.cmd`;
-    writeFileSync(driver, `@echo off\r\nchcp\r\ncall ${cmd}\r\nchcp\r\n`, "utf8");
-    const r = Bun.spawnSync(["cmd.exe", "/d", "/c", driver], { stdout: "pipe", stderr: "pipe" });
+    // Строка-команда helper-а — через переменную окружения: строка драйвера ASCII и читается одинаково при любой странице
+    writeFileSync(driver, `@echo off\r\nchcp\r\ncall %MIKSY_HELPER%\r\nchcp\r\n`, "utf8");
+    // Своя (скрытая) консоль: страницу общей консоли меняют соседние файлы под --parallel (круг 10d, рецензия С1);
+    // начальная страница в ней — OEM системы (866, 437), не 65001 общей консоли
+    const r = Bun.spawnSync(["cmd.exe", "/d", "/c", driver], { stdout: "pipe", stderr: "pipe", windowsHide: true, env: { ...process.env, MIKSY_HELPER: cmd } });
     const out = r.stdout.toString();
     expect(out).not.toContain("PROBE-CP\r\n");
     const lines = out.split(/\r?\n/).filter(Boolean);

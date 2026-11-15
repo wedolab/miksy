@@ -25,7 +25,7 @@ jobs:
       matrix:
         os: ${{ fromJSON(github.event.repository.private && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
-    # Тесты на Windows — 15–17 минут на стенде, машины GitHub медленнее (выпуск 0.2.3)
+    # Тесты на Windows — 15–17 минут на стенде последовательно (выпуск 0.2.3), с --parallel — около 3; машины GitHub медленнее
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -36,4 +36,5 @@ jobs:
       - run: |
           git config --global user.name ci
           git config --global user.email ci@example.invalid
-      - run: bun test
+      # Файлы — в процессах по числу ядер (круг 10d: Windows 15 мин → 3)
+      - run: bun test --parallel

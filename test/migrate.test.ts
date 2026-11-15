@@ -55,7 +55,7 @@ test("С5(в): разные хеши одного пути — «хеш неиз
   sb.files[`${f.ws}/Org/b/CLAUDE.local.md`] = sha("current");
   put(path, JSON.stringify({ version: 1, targets: { [`claude|${a}`]: sa, [`claude|${f.ws}/Org/b`]: sb } }));
   expect(loadManifest(path).targets[`claude|${canonical(a)}`].files[canonical(`${a}/CLAUDE.local.md`)]).toBe(sha("current"));
-});
+}, 30000);
 
 test("С5(б): alias, который теперь ведёт в другое репо, не защищает исходный файл", () => {
   const f = cliFixture();

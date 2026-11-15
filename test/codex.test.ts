@@ -112,7 +112,7 @@ describe("codex", () => {
     expect(plan(wanted, target, machine, state, false)).toEqual([]);
     const { state: cleaned } = apply(plan({ files: [], warnings: [] }, target, machine, state, false), state);
     expect(cleaned).toEqual(emptyState());
-  });
+  }, 30000);
 
   test("tracked skill защищён от sync --force и clean", () => {
     const { cfg, machine, project } = fixture();

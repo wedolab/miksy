@@ -118,7 +118,7 @@ describe("CLI: разбор флагов", () => {
     expect(f.run(["clean", "a", "b", "--dry-run"]).code).toBe(2);
     expect(f.run(["explain", "a", "b"]).code).toBe(2);
     expect(f.run(["sync", "--global", "--dry-run", "--dry-run"]).code).toBe(2);
-  });
+  }, 30000);
 
   test("--out — для всех агентов машины", () => {
     const f = cliFixture({ agents: ["claude", "codex"] });

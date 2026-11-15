@@ -167,8 +167,12 @@ describe("helper заголовков", () => {
     const path = b.launcher.helper({ name: "h", url: "u", headers: { A: secretRef("TOK") } }).replace(/^"|"$/g, "");
     b.materialize();
     const driver = `${b.root}/driver.cmd`;
-    writeFileSync(driver, `@echo off\r\nchcp\r\ncall "${path.replaceAll("/", "\\")}"\r\nchcp\r\n`, "utf8");
-    const r = Bun.spawnSync(["cmd.exe", "/d", "/c", driver], { stdout: "pipe", stderr: "pipe" });
+    // Путь helper-а — через переменную окружения: строка драйвера ASCII и читается одинаково при любой странице консоли
+    writeFileSync(driver, `@echo off\r\nchcp\r\ncall "%MIKSY_HELPER%"\r\nchcp\r\n`, "utf8");
+    // Своя (скрытая) консоль: страницу общей консоли меняют соседние файлы под --parallel (круг 10d, рецензия С1);
+    // начальная страница в ней — OEM системы (866, 437), не 65001 общей консоли
+    const env = { ...process.env, MIKSY_HELPER: path.replaceAll("/", "\\") };
+    const r = Bun.spawnSync(["cmd.exe", "/d", "/c", driver], { stdout: "pipe", stderr: "pipe", windowsHide: true, env });
     const lines = r.stdout.toString().split(/\r?\n/).filter((l) => /\d/.test(l));
     expect(lines.length).toBe(3);
     expect(JSON.parse(lines[1]).A).toBe(SECRETS.TOK);

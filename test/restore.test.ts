@@ -97,7 +97,7 @@ test("копия мастера 0.2.3 возвращается целиком; -
   expect(again.out).toContain("Всё из копии уже на месте. Ничего не записано.");
   expect(again.out).toContain("Уже на месте: gh, pg (проект D:/w/app), old (проект D:/w/gone)");
   expect(JSON.parse(read(`${f.home}/.claude.json`)!)).toEqual(live);
-});
+}, 30000);
 
 test("сервер Claude с тем же именем, но другой — не тронут и назван", () => {
   const f = fixture();
@@ -177,7 +177,7 @@ test("цели проектов Claude в учёте — серверы прое
   const r = f.run(["restore", "--yes"]);
   expect(r.code).toBe(0);
   expect(JSON.parse(read(`${f.home}/.claude.json`)!).projects[proj].mcpServers).toEqual({ pg: { command: "pg-before" } });
-});
+}, 30000);
 
 test.skipIf(!win)("Windows: ключ проекта в .claude.json — без учёта регистра и вида косых, второй записи нет", () => {
   const f = cliFixture();
@@ -249,7 +249,7 @@ test("учёт: домашние цели — отказ с командами c
   expect(r.out).toContain("В проектах ещё записано то, что добавил miksy. Если удаляете его совсем — сначала miksy clean --all.");
   expect(r.code).toBe(0);
   expect(read(`${f.home}/.codex/config.toml`)).toBe("model = \"before\"\n");
-});
+}, 30000);
 
 test("копии нет; неверная метка; неверный путь — сообщение, код 1", () => {
   const f = cliFixture();
@@ -280,7 +280,7 @@ test("несколько копий: без аргумента — самая р
     expect(r.code).toBe(0);
     expect(read(`${f.home}/.codex/config.toml`)).toBe("later\n");
   }
-});
+}, 30000);
 
 test("посторонние пути в копии — пропущены и названы; соседние файлы каталогов агентов — возвращаются", () => {
   const f = cliFixture();

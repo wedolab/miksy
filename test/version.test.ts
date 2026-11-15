@@ -34,7 +34,7 @@ describe("версия движка", () => {
     expect(describeEngine(e)).toBe(`0.3.0-2-g${git(e, "rev-parse", "--short", "HEAD")}`);
     writeFileSync(`${e}/a`, "changed");
     expect(describeEngine(e)).toMatch(/^0\.3\.0-2-g[0-9a-f]+-dirty$/);
-  });
+  }, 30000);
 
   test("движок внутри чужого git-репо (workspace) — только номер", () => {
     const { dir, e } = engine();
@@ -53,7 +53,7 @@ describe("версия движка", () => {
     expect(f.run(["version", "x"]).code).toBe(2);
     expect(f.run(["help"]).out.split("\n")[0]).toStartWith(`miksy ${VERSION}`);
     expect(f.run(["doctor"]).out.split("\n")[0]).toStartWith(`miksy doctor — версия ${VERSION}`);
-  });
+  }, 30000);
 
   test("сравнение номеров", () => {
     expect(compareVersions("0.10.0", "0.9.9")).toBeGreaterThan(0);
@@ -88,7 +88,7 @@ describe("совместимость: учёт записан более нов�
     // Поле неверного типа — как нет поля, учёт не «повреждён»
     writeFileSync(path, JSON.stringify({ ...m, engine: 5 }));
     expect(f.run(["doctor"]).out).not.toContain("учёт повреждён");
-  });
+  }, 30000);
 });
 
 describe("совместимость: неизвестные ключи map.yaml и layer.yaml", () => {
@@ -107,5 +107,5 @@ describe("совместимость: неизвестные ключи map.yaml
     const clean = cliFixture();
     expect(unknownKeys(clean.config)).toEqual([]);
     expect(clean.run(["doctor"]).out).not.toContain("Неизвестные ключи");
-  });
+  }, 30000);
 });

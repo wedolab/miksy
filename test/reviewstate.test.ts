@@ -30,7 +30,7 @@ for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false
   expect(existsSync(wrapper!)).toBe(true);
   if (!last) { expect(text).toContain("new"); expect(text).not.toContain('"old"'); }
   expect(plan(second.result, target, machine, next, false, id)).toEqual([]);
-});
+}, 30000);
 
 test("Н2: перенос ручной правки в слой обновляет учёт без перезаписи", () => {
   const f = cliFixture();

@@ -2,7 +2,7 @@
 // который удаляется после всех тестов. Ни один тест не должен видеть настоящие ~ и miksy-config.
 import { homeDir, canonical, inside } from "../src/paths";
 import { afterAll } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { ENGINE, configRoot } from "../src/load";
@@ -12,6 +12,17 @@ import { configureFsGuard, fsViolations } from "./fsguard";
 // Настоящее окружение — до подмены: guard не даёт запуску CLI в тесте писать туда (test/guard.ts)
 const real = realEnvironment({ ...process.env }, ENGINE, userInfo().homedir);
 const systemTmp = tmpdir();
+
+// Песочницы прерванных прогонов (процесс убит — afterAll не дошёл): miksy-test-* старше суток — только в системном
+// временном каталоге и только с этим префиксом; свежие (идущий прогон, его параллельные процессы) не трогаются; ошибки
+// удаления — молча (круг 10d)
+try {
+  for (const n of readdirSync(systemTmp)) {
+    if (!n.startsWith("miksy-test-")) continue;
+    const p = join(systemTmp, n);
+    try { const st = lstatSync(p); if (st.isDirectory() && Date.now() - st.mtimeMs > 86400000) rmSync(p, { recursive: true, force: true }); } catch { /* молча */ }
+  }
+} catch { /* молча */ }
 
 const sandbox = mkdtempSync(join(tmpdir(), "miksy-test-"));
 const home = join(sandbox, "home");

@@ -126,7 +126,7 @@ describe("setup: команда miksy запоминает Bun", () => {
     // Запуск команды, как из оболочки пользователя
     const call = (...args: string[]) => {
       if (!win) chmodSync(shim, 0o755);
-      const r = Bun.spawnSync(win ? ["cmd.exe", "/d", "/c", shim, ...args] : [shim, ...args], { cwd: f.dir, env, stdout: "pipe", stderr: "pipe" });
+      const r = Bun.spawnSync(win ? ["cmd.exe", "/d", "/c", shim, ...args] : [shim, ...args], { cwd: f.dir, env, stdout: "pipe", stderr: "pipe", windowsHide: true }); // своя консоль: chcp команды не трогает общую (10d, С1)
       return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
     };
     return { ...f, setup, shim, call };
@@ -143,7 +143,7 @@ describe("setup: команда miksy запоминает Bun", () => {
     expect(ok.out).toContain("miksy sync");
     expect(ok.err).toBe("");
     expect(f.call("sync", "--нет-такого").code).toBe(2);
-  });
+  }, 30000);
 
   test("Bun пропал — bun из PATH с предупреждением", () => {
     const f = fixture();
@@ -173,7 +173,7 @@ describe("setup: команда miksy запоминает Bun", () => {
     writeFileSync(f.shim, edited);
     expect(f.setup().stdout.toString()).toContain("не от miksy");
     expect(readFileSync(f.shim, "utf8")).toBe(edited);
-  });
+  }, 30000);
 
   test.if(win)("Windows: Bun в каталоге с кириллицей — команда находит его, код выхода сохраняется", () => {
     const f = fixture();

@@ -137,7 +137,7 @@ describe("B.5 — документация по правде", () => {
     expect(sub).toContain("git init");
     expect(sub).toContain("trust: { claude: false }");
     expect(c.slice(0, c.indexOf("## 0.1.1"))).not.toMatch(/подкаталог[^\n]*требуют вашего решения/);
-  });
+  }, 30000);
 
   test("справочник команд README: root add … [--yes] — каталог, который сам проект, объясняет и спрашивает, без терминала — только с --yes", () => {
     const r = readme();
