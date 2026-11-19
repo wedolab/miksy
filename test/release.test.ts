@@ -1,5 +1,8 @@
 // Команда выпуска bun run release (scripts/release.ts) на песочнице: репо владельца с bare-репо как
-// удалённым; номер — по записи «Не выпущено» в CHANGELOG.md. gh в PATH нет — GitHub Release не создаётся
+// удалённым; номер — по записи «Не выпущено» в CHANGELOG.md. gh в PATH нет — GitHub Release не создаётся.
+// origin записан адресом GitHub (по нему release узнаёт владельца и репо), git ведёт его в bare-репо (insteadOf);
+// ответ GitHub о проверке — из файла MIKSY_RELEASE_CI_FAKE (круг 10g: сети в тестах нет). run пушит текущую ветку
+// перед запуском — как владелец, который запушил коммит и дождался проверки; runHere — без пуша
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +20,9 @@ const git = (dir: string, ...a: string[]) => {
 // Дата выпуска — местная дата процесса: у скрипта и теста один пояс (UTC)
 const TODAY = new Date().toISOString().slice(0, 10);
 // Пустой заготовки «Не выпущено» нет: запись появляется с первой строкой (круг 10a)
+const GH = "https://github.com/t/miksy.git";
+const job = (name: string, status: string, conclusion: string | null) => ({ name, status, conclusion, html_url: `https://github.com/t/miksy/actions/runs/1/job/${name.length}` });
+const GREEN = { runs: [job("test (ubuntu-latest)", "completed", "success"), job("test (macos-latest)", "completed", "success"), job("test (windows-latest)", "completed", "success")] };
 const LOG = `# Изменения miksy\n\nВступление.\n\n## 0.1.0 — 2026-11-01\n\n### Новое\n\n- первый выпуск\n`;
 
 function repo() {
@@ -31,7 +37,11 @@ function repo() {
   git(dev, "commit", "-q", "-m", "engine");
   const bare = `${dir}/miksy.git`;
   Bun.spawnSync(["git", "init", "-q", "--bare", bare]);
-  git(dev, "remote", "add", "origin", bare);
+  git(dev, "remote", "add", "origin", GH);
+  git(dev, "config", `url.${bare}.insteadOf`, GH);
+  const ci = `${dir}/ci.json`;
+  const answer = (a: unknown) => writeFileSync(ci, JSON.stringify(a));
+  answer(GREEN);
   // PATH без каталогов с gh: пуш в bare идёт, GitHub Release — подсказкой. Только каталог git нельзя:
   // git из mingw64\bin (так его находит Git Bash) без остального PATH Git for Windows падает при push.
   // На Linux gh и git лежат вместе (/usr/bin) — git тогда через ссылку из отдельного каталога
@@ -44,13 +54,14 @@ function repo() {
     dirs.unshift(`${dir}/bin`);
   }
   const path = dirs.join(delimiter);
-  const run = (...args: string[]) => {
+  const runHere = (...args: string[]) => {
     const r = Bun.spawnSync([process.execPath, SCRIPT, ...args], {
       cwd: dev, stdin: "ignore", stdout: "pipe", stderr: "pipe",
-      env: { ...process.env, ...ID, TZ: "UTC", [key]: path },
+      env: { ...process.env, ...ID, TZ: "UTC", [key]: path, MIKSY_RELEASE_CI_FAKE: ci },
     });
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
+  const run = (...args: string[]) => { git(dev, "push", "-q", "origin", "HEAD"); return runHere(...args); };
   // Как по RELEASING.md: нет «Не выпущено» — создать над последней версией; раздел — в её начало
   const addLine = (section: string, line: string) => {
     let text = readFileSync(`${dev}/CHANGELOG.md`, "utf8");
@@ -60,7 +71,7 @@ function repo() {
     git(dev, "commit", "-q", "-am", `add ${section}`);
   };
   const version = () => JSON.parse(readFileSync(`${dev}/package.json`, "utf8")).version;
-  return { dir, dev, bare, run, addLine, version };
+  return { dir, dev, bare, run, runHere, answer, addLine, version };
 }
 
 describe("bun run release", () => {
@@ -163,6 +174,104 @@ describe("bun run release", () => {
     expect(out.out).toContain("git push --atomic origin stable v0.1.1");
     expect(out.out).toContain("git merge stable");
   }, 60000);
+});
+
+// Круг 10g: выпуск — только при зелёной проверке GitHub последнего коммита; ответ GitHub подменён файлом
+describe("bun run release: проверка GitHub", () => {
+  const refused = (r: ReturnType<typeof repo>, ...args: string[]) => {
+    const head = git(r.dev, "rev-parse", "HEAD").out;
+    const out = r.run("--yes", ...args);
+    // Отказ до записей: ни тега, ни коммита выпуска, version прежний
+    expect({ code: out.code, tag: git(r.dev, "tag").out, head: git(r.dev, "rev-parse", "HEAD").out }).toEqual({ code: 1, tag: "", head });
+    return out.out;
+  };
+
+  test("зелёная — выпуск идёт, в выводе ссылка на проверку коммита", () => {
+    const r = repo();
+    const sha = git(r.dev, "rev-parse", "HEAD").out;
+    const out = r.run("--yes");
+    expect(out.code).toBe(0);
+    expect(out.out).toContain("Проверка: проверка GitHub зелёная (test (ubuntu-latest), test (macos-latest), test (windows-latest))");
+    expect(out.out).toContain(`https://github.com/t/miksy/commit/${sha}/checks`);
+    // Подменённый ответ GitHub не выдаётся за настоящий: строка о подмене — и при выпуске, и при отказе
+    expect(out.out).toContain("Внимание: ответ GitHub подменён (MIKSY_RELEASE_CI_FAKE) — только для тестов.");
+    r.addLine("Исправлено", "- x");
+    r.answer({ runs: [] });
+    expect(r.run("--yes").out).toContain("ответ GitHub подменён (MIKSY_RELEASE_CI_FAKE)");
+  }, 60000);
+
+  test("идёт, упала, отменена, запусков нет, сеть недоступна — отказ с причиной; --dry-run — строка «Выпуск сейчас откажет»", () => {
+    const r = repo();
+    r.answer({ runs: [job("test (ubuntu-latest)", "completed", "success"), job("test (macos-latest)", "in_progress", null), job("test (macos-latest)", "queued", null)] });
+    expect(refused(r)).toContain("проверка GitHub ещё идёт (test (macos-latest)) — повторите позже: https://github.com/t/miksy/commit/");
+    const dry = r.run("--dry-run");
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain("Выпуск сейчас откажет: проверка GitHub ещё идёт");
+    expect(dry.out).toContain("--dry-run: ничего не изменено");
+
+    r.answer({ runs: [job("test (ubuntu-latest)", "completed", "success"), job("test (macos-latest)", "completed", "failure"), job("test (windows-latest)", "completed", "cancelled"), job("lint", "completed", "skipped")] });
+    const failed = refused(r);
+    expect(failed).toContain("проверка GitHub не прошла: test (macos-latest) — failure; test (windows-latest) — cancelled");
+    expect(failed).not.toContain("lint");
+
+    r.answer({ runs: [] });
+    expect(refused(r)).toContain("у коммита нет запусков проверки GitHub");
+    r.answer({ error: "GitHub недоступен (сеть) — проверьте сеть и повторите" });
+    expect(refused(r)).toContain("статус проверки GitHub не узнать: GitHub недоступен");
+  }, 60000);
+
+  test("коммит не в origin/main — отказ «сначала запушьте»; origin не GitHub — отказ; --skip-ci — выпуск со строкой о пропуске", () => {
+    const r = repo();
+    // Ветки main в origin ещё нет — тоже «сначала запушьте», а не сбой сети
+    expect(r.runHere("--yes").out).toContain("ещё не в origin/main — сначала запушьте");
+    git(r.dev, "push", "-q", "origin", "main");
+    git(r.dev, "commit", "-q", "--allow-empty", "-m", "local");
+    const head = git(r.dev, "rev-parse", "--short", "HEAD").out;
+    const local = r.runHere("--yes");
+    expect(local.code).toBe(1);
+    expect(local.out).toContain(`коммит ${head} ещё не в origin/main — сначала запушьте его (git push origin main)`);
+    expect(git(r.dev, "tag").out).toBe("");
+    expect(r.runHere("--dry-run").out).toContain("Выпуск сейчас откажет: коммит");
+
+    r.answer({ runs: [job("test (ubuntu-latest)", "completed", "failure")] });
+    const skipped = r.runHere("--yes", "--skip-ci");
+    expect(skipped.code).toBe(0);
+    expect(skipped.out).toContain("Внимание: проверка GitHub пропущена (--skip-ci).");
+    expect(git(r.dev, "tag").out).toBe("v0.1.0");
+
+    git(r.dev, "remote", "set-url", "origin", r.bare);
+    r.addLine("Исправлено", "- x");
+    const other = r.run("--yes");
+    expect(other.code).toBe(1);
+    expect(other.out).toContain("origin — не GitHub");
+  }, 60000);
+});
+
+describe("проверка GitHub: адрес, запрос, вердикт (scripts/ci.ts)", () => {
+  test("владелец и репо из адреса origin", async () => {
+    const { githubSlug } = await import("../scripts/ci");
+    for (const u of ["https://github.com/wedolab/miksy.git", "https://github.com/wedolab/miksy", "git@github.com:wedolab/miksy.git", "ssh://git@github.com/wedolab/miksy.git", "https://github.com/wedolab/miksy/"])
+      expect(githubSlug(u)).toEqual({ owner: "wedolab", repo: "miksy" });
+    expect(githubSlug("https://gitlab.com/wedolab/miksy.git")).toBeNull();
+    expect(githubSlug("/tmp/miksy.git")).toBeNull();
+  });
+
+  test("запрос: gh (вошёл) — без сети; gh нет или не вошёл — публичный API; лимит, 404, сеть — понятная причина", async () => {
+    const { checkRuns } = await import("../scripts/ci");
+    const slug = { owner: "o", repo: "r" };
+    const body = { total_count: 1, check_runs: [{ name: "test", status: "completed", conclusion: "success" }] };
+    const calls: string[] = [];
+    const http = (status: number, json: unknown) => async (url: string) => { calls.push(url); return { status, json }; };
+    const viaGh = await checkRuns(slug, "abc", { gh: () => ({ code: 0, out: JSON.stringify(body) }), http: http(500, null) });
+    expect({ viaGh, calls }).toEqual({ viaGh: { runs: body.check_runs }, calls: [] });
+    expect(await checkRuns(slug, "abc", { gh: () => null, http: http(200, body) })).toEqual({ runs: body.check_runs });
+    expect(calls).toEqual(["https://api.github.com/repos/o/r/commits/abc/check-runs?per_page=100"]);
+    expect(await checkRuns(slug, "abc", { gh: () => ({ code: 4, out: "" }), http: http(200, body) })).toEqual({ runs: body.check_runs });
+    const err = async (deps: Parameters<typeof checkRuns>[2]) => { const r = await checkRuns(slug, "abc", deps); return "error" in r ? r.error : ""; };
+    expect(await err({ gh: () => null, http: http(403, {}) })).toContain("лимит запросов без входа");
+    expect(await err({ gh: () => null, http: http(404, {}) })).toContain("репо закрытый?");
+    expect(await err({ gh: () => null, http: async () => { throw new Error("connect ECONNREFUSED"); } })).toContain("GitHub недоступен (connect ECONNREFUSED)");
+  });
 });
 
 describe("CHANGELOG: номер и запись выпуска", () => {

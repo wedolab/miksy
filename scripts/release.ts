@@ -1,17 +1,20 @@
-// Выпуск версии miksy (для владельца): bun run release [--dry-run] [--yes] [--push]. Порядок — RELEASING.md.
+// Выпуск версии miksy (для владельца): bun run release [--dry-run] [--yes] [--push] [--skip-ci]. Порядок — RELEASING.md.
 // Работает в git-репо текущего каталога (bun run — корень движка). По записи «Не выпущено» в CHANGELOG.md
 // сам определяет номер (SemVer, DESIGN §12), показывает номер и текст, после «да»: version в package.json,
 // «Не выпущено» → «X.Y.Z — дата» (новой пустой нет), коммит «Release X.Y.Z», тег vX.Y.Z, ветка
-// stable — на него. Пуш и GitHub Release — отдельным «да» или --push. --dry-run — только показать
+// stable — на него. Пуш и GitHub Release — отдельным «да» или --push. --dry-run — только показать.
+// До записей — проверка GitHub (круг 10g): коммит уже в origin, все задания GitHub Actions для него зелёные; иначе
+// отказ (в --dry-run — строка «Выпуск сейчас откажет»). --skip-ci — обход для владельца (агентам — только с его «да»)
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { actionsUrl, checkRuns, githubSlug, type Runs, verdict, type Verdict } from "./ci";
 import { compareVersions, type Entry, entryText, isEmpty, nextVersion, parseChangelog, releaseText, SEMVER, UNRELEASED } from "../src/changelog";
 
 const STABLE = "stable", MAIN = "main", REMOTE = "origin";
 const args = process.argv.slice(2);
-const KNOWN = ["--dry-run", "--yes", "--push"];
+const KNOWN = ["--dry-run", "--yes", "--push", "--skip-ci"];
 for (const a of args) if (!KNOWN.includes(a)) fail(`неизвестный аргумент «${a}»; допустимы: ${KNOWN.join(", ")}`, 2);
-const dryRun = args.includes("--dry-run"), yes = args.includes("--yes"), push = args.includes("--push");
+const dryRun = args.includes("--dry-run"), yes = args.includes("--yes"), push = args.includes("--push"), skipCi = args.includes("--skip-ci");
 const tty = !!process.stdin.isTTY;
 
 function fail(msg: string, code = 1): never {
@@ -47,6 +50,30 @@ if (branch !== MAIN && branch !== STABLE) fail(`выпуск — с ветки $
 const dirty = git("status", "--porcelain", "--untracked-files=no").out;
 if (dirty && !dryRun) fail(`есть незакоммиченные изменения — закоммитьте или уберите их до выпуска:\n${dirty}`);
 
+// Проверка GitHub для HEAD: коммит в origin/<ветка> (иначе проверять нечего), все задания завершены успешно.
+// Адрес origin — как записан (без insteadOf): по нему владелец и репо. MIKSY_RELEASE_CI_FAKE — файл с ответом
+// GitHub ({ runs } или { error }) вместо сети, только для тестов (test/release.test.ts)
+async function githubCheck(): Promise<Verdict> {
+  const url = git("config", "--get", `remote.${REMOTE}.url`).out;
+  const slug = githubSlug(url);
+  if (!slug) return { ok: false, text: `${REMOTE} — не GitHub (${url || "адреса нет"}): статус проверки не узнать` };
+  const sha = must("rev-parse", "HEAD");
+  const fetched = git("fetch", "-q", REMOTE, branch);
+  const notPushed = { ok: false, text: `коммит ${sha.slice(0, 7)} ещё не в ${REMOTE}/${branch} — сначала запушьте его (git push ${REMOTE} ${branch}) и дождитесь зелёной проверки GitHub` };
+  // Ветки в origin ещё нет — тоже «не запушено», а не сбой сети
+  if (fetched.code !== 0 && /couldn't find remote ref/i.test(fetched.err)) return notPushed;
+  if (fetched.code !== 0) return { ok: false, text: `git fetch ${REMOTE} ${branch} не удался (${fetched.err.split("\n").pop() || `код ${fetched.code}`}) — проверьте сеть и доступ к репо` };
+  if (git("merge-base", "--is-ancestor", "HEAD", `refs/remotes/${REMOTE}/${branch}`).code !== 0) return notPushed;
+  const fake = process.env.MIKSY_RELEASE_CI_FAKE;
+  // Подмена всегда видна: иначе подставленный «success» выглядел бы как настоящая проверка
+  if (fake) console.log("Внимание: ответ GitHub подменён (MIKSY_RELEASE_CI_FAKE) — только для тестов.");
+  const runs: Runs = fake ? JSON.parse(readFileSync(fake, "utf8")) : await checkRuns(slug, sha);
+  return verdict(runs, actionsUrl(slug, sha));
+}
+const ci = skipCi ? null : await githubCheck();
+if (ci && !ci.ok && !dryRun) fail(`выпуск только с зелёной проверкой GitHub последнего коммита — ${ci.text}`);
+console.log(!ci ? "Внимание: проверка GitHub пропущена (--skip-ci)." : ci.ok ? `Проверка: ${ci.text}` : `Выпуск сейчас откажет: ${ci.text}`);
+
 const logText = readFileSync(logPath, "utf8");
 let parsed;
 try { parsed = parseChangelog(logText); } catch (e) { fail((e as Error).message); }
@@ -72,7 +99,8 @@ if (stableSha && branch === MAIN && git("merge-base", "--is-ancestor", stableSha
   fail(`ветка ${STABLE} не входит в историю ${MAIN} (было срочное исправление?) — сначала слейте её: git merge ${STABLE}`);
 
 const entry = first ? { ...own!, date: today } : { ...unreleased, version, date: today };
-console.log(`Выпуск miksy ${version}${first ? " (первый: версия из package.json, запись в CHANGELOG уже есть)" : ` (сейчас ${current})`}; ветка ${branch}\n`);
+console.log(`
+Выпуск miksy ${version}${first ? " (первый: версия из package.json, запись в CHANGELOG уже есть)" : ` (сейчас ${current})`}; ветка ${branch}\n`);
 console.log(entryText(entry));
 console.log(`\nБудет: ${first ? "" : `version ${version} в package.json, `}запись CHANGELOG «${version} — ${today}», коммит «Release ${version}», тег v${version}, ветка ${STABLE} → v${version}.`);
 if (dryRun) {
