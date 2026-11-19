@@ -1,5 +1,5 @@
 // Общее для тестов CLI: конфигурация, домашний каталог и workspace во временном каталоге
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -66,11 +66,23 @@ export const agentHomeFiles = (home: string) => AGENT_HOME.flatMap((d) => {
 
 // На CI (GitHub задаёт CI=true) — вывод команды miksy с кодом ≠ 0 в лог теста: редкие «3 вместо 0» и «1 вместо 0» на
 // macOS GitHub не воспроизводятся на стенде (круги 10d-4, 10d-5). Локально — тишина. Тесты, где ненулевой код ожидаем,
-// тоже печатают — это шум; вывод одной команды — не больше 6000 символов
+// тоже печатают — это шум; вывод одной команды — не больше 6000 символов. Пишем прямо в дескриптор 2, без
+// process.stderr: в Bun 1.3.14 под --parallel на Linux первое обращение к нему падает «EEXIST … epoll_ctl»
+// (круг 10d-7, 46 падений на CI 0.3.1). Диагностика не роняет тест ни при каком сбое записи
 export function ciDump(args: string[], cwd: string, code: number | null, out: string, err: string) {
   if (!process.env.CI || code === 0) return;
   const cut = (s: string) => (s.length > 6000 ? `${s.slice(0, 6000)}\n… (ещё ${s.length - 6000} символов)` : s);
-  process.stderr.write(`\n[miksy code ${code}] miksy ${args.join(" ")} (cwd ${cwd})\n--- stdout\n${cut(out)}\n--- stderr\n${cut(err)}\n--- end\n`);
+  const text = `\n[miksy code ${code}] miksy ${args.join(" ")} (cwd ${cwd})\n--- stdout\n${cut(out)}\n--- stderr\n${cut(err)}\n--- end\n`;
+  try {
+    const buf = Buffer.from(text);
+    for (let at = 0, idle = 0; at < buf.length && idle < 100;) {
+      const n = writeSync(2, buf, at);
+      at += n;
+      idle = n > 0 ? 0 : idle + 1;
+    }
+  } catch {
+    try { console.error(text); } catch { /* диагностика — не повод ронять тест */ }
+  }
 }
 
 // git init для заготовки теста: сбой — сразу ошибка с причиной, а не проект без .git и загадочный код 3 позже
