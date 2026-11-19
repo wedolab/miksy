@@ -35,10 +35,7 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
       stderr: "pipe",
     });
     const res = { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
-    // На CI (GitHub задаёт CI=true) — вывод команды с кодом 3 (конфликт или ошибка цели) в лог: редкие «3 вместо 0» на
-    // macOS не воспроизводятся на стенде (круг 10d-4); локально — тишина. Тесты, где 3 ожидаем, тоже печатают — это шум
-    if (process.env.CI && res.code === 3)
-      process.stderr.write(`\n[miksy code 3] miksy ${args.join(" ")} (cwd ${o.cwd ?? dir})\n--- stdout\n${res.out}\n--- stderr\n${res.err}\n--- end\n`);
+    ciDump(args, o.cwd ?? dir, res.code, res.out, res.err);
     return res;
   };
   return { dir, config, home, ws, run };
@@ -66,6 +63,15 @@ export const agentHomeFiles = (home: string) => AGENT_HOME.flatMap((d) => {
   const p = `${home}/${d}`;
   return !existsSync(p) ? [] : statSync(p).isDirectory() ? textFiles(p) : [p];
 });
+
+// На CI (GitHub задаёт CI=true) — вывод команды miksy с кодом ≠ 0 в лог теста: редкие «3 вместо 0» и «1 вместо 0» на
+// macOS GitHub не воспроизводятся на стенде (круги 10d-4, 10d-5). Локально — тишина. Тесты, где ненулевой код ожидаем,
+// тоже печатают — это шум; вывод одной команды — не больше 6000 символов
+export function ciDump(args: string[], cwd: string, code: number | null, out: string, err: string) {
+  if (!process.env.CI || code === 0) return;
+  const cut = (s: string) => (s.length > 6000 ? `${s.slice(0, 6000)}\n… (ещё ${s.length - 6000} символов)` : s);
+  process.stderr.write(`\n[miksy code ${code}] miksy ${args.join(" ")} (cwd ${cwd})\n--- stdout\n${cut(out)}\n--- stderr\n${cut(err)}\n--- end\n`);
+}
 
 // git init для заготовки теста: сбой — сразу ошибка с причиной, а не проект без .git и загадочный код 3 позже
 // (круг 10d-4: редкие «3 вместо 0» на macOS GitHub)

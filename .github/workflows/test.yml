@@ -36,5 +36,13 @@ jobs:
       - run: |
           git config --global user.name ci
           git config --global user.email ci@example.invalid
+      # Диагностика (круг 10d-5): какой git у тестов на macOS — редкие сбои операций git только там. /usr/bin/git —
+      # оболочка xcrun; тесты подменяют TMPDIR
+      - name: git на macOS (диагностика)
+        if: runner.os == 'macOS'
+        run: |
+          which -a git; git --version; xcrun --find git || true
+          echo "TMPDIR=$TMPDIR"; sw_vers || true; sysctl -n hw.ncpu kern.maxprocperuid kern.maxfilesperproc || true; ulimit -a
+          d=$(mktemp -d); time TMPDIR=$d git --version; ls -a "$d"
       # Файлы — в процессах по числу ядер (круг 10d: Windows 15 мин → 3)
       - run: bun test --parallel

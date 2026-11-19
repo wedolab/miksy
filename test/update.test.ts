@@ -10,13 +10,19 @@ import { runCommand } from "../src/commands";
 import { ENGINE } from "../src/load";
 import { canonical } from "../src/paths";
 import { changesText, finishUpdate, update } from "../src/update";
-import { cliFixture, put } from "./helpers";
+import { ciDump, cliFixture, put } from "./helpers";
 
 const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 const git = (dir: string, ...a: string[]) => {
   const r = Bun.spawnSync(["git", "-C", dir, ...a], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...ID } });
   if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr.toString()}`);
   return r.stdout.toString().trim();
+};
+
+// git без -C (clone): сбой — сразу ошибка с причиной, а не клон без src/cli.ts и «код 1» позже (круг 10d-5)
+const gitTop = (...a: string[]) => {
+  const r = Bun.spawnSync(["git", ...a], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...ID } });
+  if (r.exitCode !== 0) throw new Error(`git ${a.join(" ")}: код ${r.exitCode}, ${r.stderr.toString()}`);
 };
 
 const entry = (v: string, s: Record<string, string[]>) =>
@@ -41,11 +47,11 @@ function repos(o: { stable?: boolean; userBranch?: string } = {}) {
     git(dev, "branch", "stable");
   }
   const bare = `${dir}/miksy.git`;
-  Bun.spawnSync(["git", "clone", "-q", "--bare", dev, bare]);
+  gitTop("clone", "-q", "--bare", dev, bare);
   git(dev, "remote", "add", "origin", bare);
   const user = `${dir}/user`;
   const branch = o.userBranch ?? (o.stable === false ? "main" : "stable");
-  Bun.spawnSync(["git", "clone", "-q", "-b", branch, bare, user]);
+  gitTop("clone", "-q", "-b", branch, bare, user);
   // Выпуск в dev: версия, запись CHANGELOG, код (patch — правка файла движка), тег, stable → отправка
   const release = (v: string, s: Record<string, string[]>, patch?: (dev: string) => void) => {
     const log = readFileSync(`${dev}/CHANGELOG.md`, "utf8").replace(/(## Не выпущено\n\n### Новое\n\n)/, `$1${entry(v, s)}\n`);
@@ -71,6 +77,7 @@ function repos(o: { stable?: boolean; userBranch?: string } = {}) {
       cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "pipe",
       env: { ...process.env, ...ID, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home },
     });
+    ciDump(args, dir, r.exitCode, r.stdout.toString(), r.stderr.toString());
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
   const head = () => git(user, "rev-parse", "HEAD");
