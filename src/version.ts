@@ -58,6 +58,15 @@ export function describeEngine(engine = ENGINE): string {
   return text;
 }
 
+// Минимальная версия Bun — как engines в package.json (тест сверяет). В Bun до 1.4.3 spawnSync изредка теряет вывод
+// или выход git (oven-sh/bun#44581, круг 10f); miksy на старом Bun работает, doctor только предупреждает
+export const MIN_BUN = "1.4.3";
+export function oldBun(version: string = Bun.version): string | null {
+  const base = baseVersion(version);
+  if (!base || compareVersions(base, MIN_BUN) >= 0) return null;
+  return `Bun ${version} устарел: в версиях до ${MIN_BUN} бывают редкие сбои запуска git. Обновите: bun upgrade`;
+}
+
 // Учёт записан более новой версией движка: на другой копии движка уже обновились или этот откатили. Только
 // сообщение, запись не блокируется: рецепт отката (docs/update.md, «Откатиться на прежнюю версию») — setup и sync прежней
 // версией, а учёт совместим вперёд — чужое не перезаписывается, лишнее поле прежняя версия отбрасывает. Отметку

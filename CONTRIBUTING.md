@@ -6,7 +6,7 @@
 
 ## Движок для разработки
 
-Нужны git и [Bun](https://bun.sh) 1.3.14 или новее. Зависимостей нет — `bun install` не нужен.
+Нужны git и [Bun](https://bun.sh) 1.4.3 или новее. Зависимостей нет — `bun install` не нужен.
 
 ```
 git clone https://github.com/wedolab/miksy.git

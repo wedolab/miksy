@@ -56,13 +56,13 @@ bun --version
 
 - git нет — скажи пользователю, как поставить (macOS: `xcode-select --install` или `brew install git`;
   Windows: `winget install Git.Git`), и жди.
-- Bun нет или версия ниже 1.3.14 — покажи команду и выполни после «да»:
+- Bun нет или версия ниже 1.4.3 — покажи команду и выполни после «да»:
   - macOS, Linux: `curl -fsSL https://bun.sh/install | bash`, затем в этом же процессе
     `export PATH="$HOME/.bun/bin:$PATH"`;
   - Windows (PowerShell): `powershell -c "irm bun.sh/install.ps1 | iex"`, затем
     `$env:Path = "$HOME\.bun\bin;$env:Path"`.
 
-Сделано: `bun --version` — 1.3.14 или новее.
+Сделано: `bun --version` — 1.4.3 или новее.
 
 ## 3. Скачай движок (и конфигурацию)
 

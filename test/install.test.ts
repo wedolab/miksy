@@ -49,7 +49,7 @@ cat <<'EOF'
 mkdir -p "$HOME/.bun/bin"
 cat > "$HOME/.bun/bin/bun" <<'EOB'
 #!/bin/sh
-if [ "$1" = "--version" ]; then echo 1.3.14; exit 0; fi
+if [ "$1" = "--version" ]; then echo 1.4.3; exit 0; fi
 echo "$(pwd) $*" > "$HOME/bun-args"
 EOB
 chmod +x "$HOME/.bun/bin/bun"
@@ -83,7 +83,7 @@ EOF
     const again = run(f, `${dest}/install.sh`, "");
     expect(again.code).toBe(0);
     expect(again.out).not.toContain("Куда скачать");
-    expect(again.out).toContain("✓ git, Bun 1.3.14");
+    expect(again.out).toContain("✓ git, Bun 1.4.3");
   }, 120000);
 
   // Терминал — через script (псевдотерминал): bash 4+ читает ответ с построчным редактированием, путь по
@@ -93,7 +93,7 @@ EOF
   const bash4 = !!bash && Number(Bun.spawnSync([bash, "-c", "echo ${BASH_VERSINFO[0]}"]).stdout.toString().trim()) >= 4;
   test.if(!!pty && bash4)("bash с терминалом: «Куда скачать» — путь по умолчанию в строке, его можно править (read -e -i)", () => {
     const f = sandbox();
-    put(`${f.bin}/bun`, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.3.14; exit 0; fi\necho "$(pwd) $*" > "$HOME/bun-args"\n`);
+    put(`${f.bin}/bun`, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.4.3; exit 0; fi\necho "$(pwd) $*" > "$HOME/bun-args"\n`);
     chmodSync(`${f.bin}/bun`, 0o755);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const argv = process.platform === "darwin"
@@ -109,7 +109,7 @@ EOF
   test("две установки Bun (PATH и ~/.bun/bin) — какая используется, совет оставить одну; ничего не удаляется", () => {
     const f = sandbox();
     fakes(f.bin);
-    const fake = "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.3.14; exit 0; fi\necho \"$(pwd) $*\" > \"$HOME/bun-args\"\n";
+    const fake = "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 1.4.3; exit 0; fi\necho \"$(pwd) $*\" > \"$HOME/bun-args\"\n";
     put(`${f.bin}/bun`, fake);
     chmodSync(`${f.bin}/bun`, 0o755);
     put(`${f.home}/.bun/bin/bun`, fake);
@@ -163,13 +163,25 @@ EOF
     expect(bad.out).toContain("gh auth login");
     expect(bad.out).toContain("MIKSY_REPO=git@github.com:");
   }, 60000);
+
+  // Круг 10f: минимум Bun 1.4.3 — на 1.4.2 установщик отказывает и подсказывает bun upgrade, движок не качает
+  test("Bun 1.4.2 — отказ с подсказкой bun upgrade, движок не скачан", () => {
+    const f = sandbox();
+    put(`${f.bin}/bun`, `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.4.2; exit 0; fi\necho "$(pwd) $*" > "$HOME/bun-args"\n`);
+    chmodSync(`${f.bin}/bun`, 0o755);
+    copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
+    const r = run(f, `${f.dl}/install.sh`, "\n");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
+    expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
+  }, 60000);
 });
 
 // Запуск PowerShell на раннерах GitHub Windows — до ~50 с на тест: лимит с запасом
 describe.skipIf(!win)("install.ps1", () => {
   const fakes = (f: ReturnType<typeof sandbox>) => {
     // Официальный установщик: powershell -c "irm bun.sh/install.ps1 | iex" → кладёт bun.cmd
-    put(`${f.dir}/fakebun.cmd`, `@echo off\r\nif "%~1"=="--version" (echo 1.3.14& exit /b 0)\r\necho %CD% %*> "%USERPROFILE%\\bun-args"\r\n`);
+    put(`${f.dir}/fakebun.cmd`, `@echo off\r\nif "%~1"=="--version" (echo 1.4.3& exit /b 0)\r\necho %CD% %*> "%USERPROFILE%\\bun-args"\r\n`);
     put(`${f.bin}/powershell.cmd`, `@echo off\r\necho %*>> "%USERPROFILE%\\ps-args"\r\nmkdir "%USERPROFILE%\\.bun\\bin" 2>nul\r\ncopy /y "${f.dir.replaceAll("/", "\\")}\\fakebun.cmd" "%USERPROFILE%\\.bun\\bin\\bun.cmd" >nul\r\n`);
   };
   const run = (f: ReturnType<typeof sandbox>, script: string, stdin: string, repo = f.bare) => {
@@ -197,7 +209,7 @@ describe.skipIf(!win)("install.ps1", () => {
     const again = run(f, `${dest}/install.ps1`, "");
     expect(again.code === 0 ? "" : `код ${again.code}; вывод install.ps1:
 ${again.out}`).toBe("");
-    expect(again.out).toContain("1.3.14");
+    expect(again.out).toContain("1.4.3");
     expect(existsSync(`${f.home}/ps-args`) && readFileSync(`${f.home}/ps-args`, "utf8").split("\n").filter(Boolean).length).toBe(1);
   }, 180000);
 
@@ -251,5 +263,16 @@ ${again.out}`).toBe("");
     const bad = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n", `${f.dir}/nope.git`);
     expect(bad.code).toBe(1);
     expect(bad.out).toContain("gh auth login");
+  }, 180000);
+
+  // Круг 10f: минимум Bun 1.4.3 — на 1.4.2 установщик отказывает и подсказывает bun upgrade, движок не качает
+  test("Bun 1.4.2 — отказ с подсказкой bun upgrade, движок не скачан", () => {
+    const f = sandbox();
+    put(`${f.bin}/bun.cmd`, `@echo off\r\nif "%~1"=="--version" (echo 1.4.2& exit /b 0)\r\necho %CD% %*> "%USERPROFILE%\\bun-args"\r\n`);
+    copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
+    const r = run(f, `${f.dl}/install.ps1`, "\r\n");
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
+    expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
   }, 180000);
 });

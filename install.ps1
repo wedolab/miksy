@@ -6,7 +6,7 @@
 
 function Invoke-MiksyInstall([string[]]$SetupArgs) {
   $repo = if ($env:MIKSY_REPO) { $env:MIKSY_REPO } else { 'https://github.com/wedolab/miksy.git' }
-  $minBun = [version]'1.3.14'
+  $minBun = [version]'1.4.3'
   $yes = { param($q) $a = Read-Host "$q [y/N]"; return ($a -match '^\s*[yYдД]') }
 
   Write-Host 'Установка miksy'

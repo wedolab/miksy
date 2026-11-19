@@ -7,7 +7,7 @@
 set -u
 
 REPO="${MIKSY_REPO:-https://github.com/wedolab/miksy.git}"
-MIN_BUN="1.3.14"
+MIN_BUN="1.4.3"
 
 # Откуда читать ответы: скрипт из файла — из stdin; скрипт из конвейера (curl | bash) — stdin занят
 # самим скриптом, вопросы — через /dev/tty

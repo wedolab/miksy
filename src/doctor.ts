@@ -5,7 +5,7 @@ import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
 import { caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
-import { engineVersion, newerLedger } from "./version";
+import { engineVersion, newerLedger, oldBun } from "./version";
 import { emptyState, ManifestError, type Manifest, otherOwners, splitState, strandedPaths } from "./manifest";
 import type { Move } from "./relocate";
 import { fold, pathKey, quoteArg, slash } from "./paths";
@@ -33,7 +33,8 @@ const MANUAL = /изменён вручную|управляемый блок и
 // Skill — каталог со SKILL.md; служебные каталоги агента без него (контейнеры синхронизации) не считаются
 const GLOBAL_SKILL_DIRS = [".claude/skills", ".agents/skills", ".config/opencode/skills", ".gemini/config/skills"];
 
-export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
+// bunVersion — версия Bun для предупреждения о старом Bun (тест подменяет)
+export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, bunVersion: string = Bun.version): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
   const secrets = loadSecrets();
   const skippedDirs: string[] = [];
   const projects = allProjects(machine, undefined, (w) => skippedDirs.push(w));
@@ -321,6 +322,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean):
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
     + emptySecrets.length + missingExe.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
+  // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)
+  const bun = oldBun(bunVersion);
+  if (bun) out.push("", `Предупреждение: ${bun}.`);
 
   // Справочно: не требует действий
   const info: string[] = [];

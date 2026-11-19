@@ -42,7 +42,7 @@
 `agy acp`: расширение «Google Antigravity» из каталога Zed настроек miksy не видит — [docs/antigravity.md](docs/antigravity.md).
 Другие редакторы читают те же файлы, но не проверялись.
 
-**ОС** — Windows, macOS и Linux (Ubuntu 24.04). **Нужны** git и [Bun](https://bun.sh) 1.3.14 или новее — программа,
+**ОС** — Windows, macOS и Linux (Ubuntu 24.04). **Нужны** git и [Bun](https://bun.sh) 1.4.3 или новее — программа,
 которая запускает miksy (Bun установщик предложит поставить сам).
 
 ---

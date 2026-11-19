@@ -53,7 +53,7 @@ has to replace a file, it keeps the original and restores it when you remove mik
   Antigravity also in its IDE; in Zed — through your own `agy acp` agent server (`agy` 1.5.0 or newer), not through the
   "Google Antigravity" extension from Zed's catalog.
 - **OS:** Windows, macOS and Linux (Ubuntu 24.04) are tested on real machines and in CI.
-- **git** and **[Bun](https://bun.sh)** 1.3.14 or newer (the installer offers to install Bun).
+- **git** and **[Bun](https://bun.sh)** 1.4.3 or newer (the installer offers to install Bun).
 
 ## Installation
 
