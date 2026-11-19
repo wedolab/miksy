@@ -113,11 +113,11 @@ describe("A2 — «нет» доверию Claude отзывает одобре�
   const setup = () => {
     const f = cliFixture({ projects: ["Org/p1"] });
     const p = `${f.ws}/Org/p1`;
-    put(`${p}/.mcp.json`, JSON.stringify({ mcpServers: { team: { command: "echo", args: ["t"] } } }));
+    put(`${p}/.mcp.json`, JSON.stringify({ mcpServers: { "team-mcp-9f3b": { command: "echo", args: ["t"] } } }));
     gitc(p, "add", ".mcp.json");
     gitc(p, "commit", "-qm", "team");
     expect(inProcess(f, ["sync", p], f.dir, ["y"]).questions.length).toBe(1);
-    expect(read(`${p}/.claude/settings.local.json`)).toContain("team");
+    expect(read(`${p}/.claude/settings.local.json`)).toContain("team-mcp-9f3b");
     return { f, p };
   };
   // Пользователь сам принял доверие в окне Claude
@@ -131,14 +131,14 @@ describe("A2 — «нет» доверию Claude отзывает одобре�
   test("после --deny пользователь сам доверился в Claude — sync серверы не одобряет; miksy trust <проект> спрашивает о них заново, «да» — одобряет", () => {
     const { f, p } = setup();
     expectCode(f.run(["trust", p, "--deny"]), 0);
-    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team");
+    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team-mcp-9f3b");
     acceptInClaude(f.home, p);
     const s = f.run(["sync", p]);
-    expect({ approved: read(`${p}/.claude/settings.local.json`).includes("team"), ask: asked(s) }).toEqual({ approved: false, ask: false });
+    expect({ approved: read(`${p}/.claude/settings.local.json`).includes("team-mcp-9f3b"), ask: asked(s) }).toEqual({ approved: false, ask: false });
     const t = inProcess(f, ["trust", p], f.dir, ["y"]);
     expect(t.questions.some((q) => q.includes("Одобрить серверы .mcp.json"))).toBe(true);
     f.run(["sync", p]);
-    expect(read(`${p}/.claude/settings.local.json`)).toContain("team");
+    expect(read(`${p}/.claude/settings.local.json`)).toContain("team-mcp-9f3b");
   }, 120000);
 
   test("«нет» в вопросе sync (терминал) — так же", () => {
@@ -148,10 +148,10 @@ describe("A2 — «нет» доверию Claude отзывает одобре�
     gitc(p, "add", ".claude/settings.json");
     gitc(p, "commit", "-qm", "hook");
     expect(inProcess(f, ["sync", p], f.dir, ["n"]).questions.length).toBe(1);
-    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team");
+    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team-mcp-9f3b");
     acceptInClaude(f.home, p);
     f.run(["sync", p]);
-    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team");
+    expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team-mcp-9f3b");
   }, 120000);
 });
 

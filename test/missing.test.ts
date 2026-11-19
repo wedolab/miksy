@@ -51,7 +51,7 @@ describe("недостающий секрет", () => {
     const r = f.run(["sync", `${f.ws}/Org/p1`]);
     expectCode(r, 0);
     expect(r.out).toContain("agents.claude.raw не поддерживается");
-    expect(existsSync(`${f.home}/.claude.json`) ? readFileSync(`${f.home}/.claude.json`, "utf8") : "").not.toContain("k1");
+    expect(existsSync(`${f.home}/.claude.json`) ? readFileSync(`${f.home}/.claude.json`, "utf8") : "").not.toContain("r-key-секрет-9f3b");
   }, 30000);
 });
 
