@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { cliFixture } from "./helpers";
+import { aclTest } from "./elevated";
 import { copyAgentSettings } from "../src/setup";
 import { AGENT_DIRS } from "../src/restore";
 
@@ -188,7 +189,7 @@ test.skipIf(!win)("Windows: ключ проекта в .claude.json — без �
   expect(JSON.parse(read(`${f.home}/.claude.json`)!).projects).toEqual({ "c:\\users\\x\\app": { allowedTools: [], mcpServers: { pg: { command: "pg" } } } });
 });
 
-test("папку внутри копии не прочитать — названа, остальное вернулось, код 1", () => {
+aclTest(false, "папку внутри копии не прочитать — названа, остальное вернулось, код 1", () => {
   const f = fixture();
   put(`${f.home}/.codex/config.toml`, "after\n");
   // Копия вне local/ (путём): запрет чтения внутри local/backups остановил бы любую команду miksy проверкой прав local/

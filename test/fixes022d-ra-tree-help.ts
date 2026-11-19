@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
 import { CLI } from "./helpers";
+import { aclTest } from "./elevated";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 
 const win = process.platform === "win32";
@@ -37,7 +38,8 @@ const problems = (d: string) => walk(d).flatMap((p) => {
 export function raTree(part: "inherit" | "noinherit") {
 for (const how of [part])
   for (const weird of [false, true])
-    test.skipIf(!win || !OLD)(`v0.2.1 → 0.2.2: local/backups → цель ${how}, путь ${weird ? "с ' ’ $ [ ]" : "простой"}: команды из отказа дословно`, () => {
+    // Цель без наследования — под администратором пропуск (test/elevated.ts): папки v0.2.1 не остаются без доступа
+    aclTest(!win || !OLD, `v0.2.1 → 0.2.2: local/backups → цель ${how}, путь ${weird ? "с ' ’ $ [ ]" : "простой"}: команды из отказа дословно`, () => {
       const root = tmp("r8da-tree-");
       const base = weird ? `${root}/My 'cfg’ $x [1]` : root;
       const home = `${root}/home`, config = `${base}/config`, ws = `${root}/ws`, vault = `${root}/vault`;
@@ -85,7 +87,7 @@ for (const how of [part])
       Bun.spawnSync([sysx("icacls.exe"), nat(root), "/grant", `*${sid()}:(OI)(CI)F`, "/t", "/c", "/q"], { stdout: "pipe", stderr: "pipe" });
       expect({ steps: r.steps.length <= 1, last: last.code === 0 || last.code === 3, more: more.filter((o) => /Ошибка|ОШИБКА|частично/.test(o.out)).map((o) => o.args), vault: r.vault, doctorAfter: r.doctorAfter, beforeSays: doc.code !== 0 || afterOld.length === 0 })
         .toEqual({ steps: true, last: true, more: [], vault: [], doctorAfter: [], beforeSays: true });
-    }, 600000);
+    }, 600000, how === "noinherit");
 
 // Свои папки originals уже открыты (права по умолчанию: вы, SYSTEM, Администраторы), путь конфигурации и цели с ' ’ $ [ ]
 // пробелом: команда «Закройте папку бэкапов и всё в ней» дословно — затем всё проходит

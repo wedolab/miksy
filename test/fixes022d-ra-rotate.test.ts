@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, writeFi
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CLI } from "./helpers";
+import { aclTest } from "./elevated";
 
 const win = process.platform === "win32";
 const sysx = (exe: string) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", exe);
@@ -18,7 +19,7 @@ const icacls = (...a: string[]) => Bun.spawnSync([sysx("icacls.exe"), ...a], { s
 // Встроенный Администратор (…-500, GitHub Windows): его папки получают явные записи SYSTEM и «Администраторы» — после
 // /reset папка не остаётся без доступа, сценария нет (выпуск 0.2.3, часть 0)
 const builtinAdmin = () => /-500$/.test(sid());
-test.skipIf(!win || builtinAdmin())("старая папка запуска без доступа за ссылкой: rotate", () => {
+aclTest(!win || builtinAdmin(), "старая папка запуска без доступа за ссылкой: rotate", () => {
   const root = tmp("r8da-rot-");
   const home = `${root}/home`, config = `${root}/config`, vault = `${root}/vault`;
   put(`${config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");

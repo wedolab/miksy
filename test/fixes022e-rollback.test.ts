@@ -6,6 +6,7 @@ import { readDocs } from "./docs";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
+import { aclTest } from "./elevated";
 import { badPaths, cli, closeTarget, type Close, nat, ps, psFile, put, read, sddl, sys32, tmp, win } from "./fixes022e-helpers";
 
 const README = readDocs();
@@ -81,7 +82,7 @@ for (const tag of ["v0.2.1", "v0.2.0"])
 
 // F4: пропущен шаг 1 (цели закрыты «только вам» без наследования) → v0.2.1 ломает свои папки → по шагу 4: назад на
 // 0.2.2, шаг 5, miksy doctor — команда из строки дословно, затем шаги 1–3 — всё закрыто и читается, секрет читается
-test.skipIf(!win || !hasTag("v0.2.1"))("F4: пропустил шаг 1 — шаг 4 ведёт к выходу: 0.2.2, doctor, команда из строки", () => {
+aclTest(!win || !hasTag("v0.2.1"), "F4: пропустил шаг 1 — шаг 4 ведёт к выходу: 0.2.2, doctor, команда из строки", () => {
   const w = world({ backups: "только вам", secrets: "только вам" });
   steps(w.root, w.config, [0, 2, 3]);
   const old = cli(w.env, w.root, oldEngine("v0.2.1"));
