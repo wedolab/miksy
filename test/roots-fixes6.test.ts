@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 
 const genv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: "1" });
@@ -49,14 +49,14 @@ describe("B.1 — проект вне workspace: подсказка доводи
     const s1 = f.run(["sync"], { cwd: repo });
     const s0 = f.run(["sync"], { cwd: `${repo}/src` });
     const cmd = (r: { out: string; err: string }) => (r.out + r.err).match(/miksy root add "([^"]+)"/)?.[1];
-    expect({ code: s1.code, cmd: cmd(s1), dot: (s1.out + s1.err).includes("root add ."), sub: cmd(s0), subRepo: (s0.out + s0.err).includes(`git-репо ${repo}`) })
+    expect({ code: s1.code, cmd: cmd(s1), dot: (s1.out + s1.err).includes("root add ."), sub: cmd(s0), subRepo: (s0.out + s0.err).includes(`git-репо ${repo}`) }, said(s1))
       .toEqual({ code: 2, cmd: dirname(repo), dot: false, sub: dirname(repo), subRepo: true });
     // По подсказке: root add <папка> — в терминале Enter (ветка по умолчанию), sync сейчас — «нет»
     const a = inProcess(f, ["root", "add", cmd(s1)!], repo, ["", false]);
-    expect({ code: a.code, err: a.err, q: a.questions.length }).toEqual({ code: 0, err: "", q: 2 });
+    expect({ code: a.code, err: a.err, q: a.questions.length }, said(a)).toEqual({ code: 0, err: "", q: 2 });
     const s2 = f.run(["sync"], { cwd: repo });
     const s3 = f.run(["sync"], { cwd: `${repo}/src` });
-    expect({ code: s2.code, sub: s3.code, written: read(`${repo}/CLAUDE.local.md`).includes("miksy") }).toEqual({ code: 0, sub: 0, written: true });
+    expect({ code: s2.code, sub: s3.code, written: read(`${repo}/CLAUDE.local.md`).includes("miksy") }, said(s2, s3)).toEqual({ code: 0, sub: 0, written: true });
   }, 120000);
 
   test("sync вне workspace не в git-репо: папка с проектами — прежняя подсказка miksy root add .; без проектов — git init и корнем папку, где она лежит (рецензия 6y, п. 2)", () => {
@@ -64,16 +64,16 @@ describe("B.1 — проект вне workspace: подсказка доводи
     const dir = `${f.dir}/elsewhere/projects`;
     git(`${dir}/one`);
     const s = f.run(["sync"], { cwd: dir });
-    expect({ code: s.code, dot: (s.out + s.err).includes("сделать этот каталог корнем workspace — miksy root add .") }).toEqual({ code: 2, dot: true });
+    expect({ code: s.code, dot: (s.out + s.err).includes("сделать этот каталог корнем workspace — miksy root add .") }, said(s)).toEqual({ code: 2, dot: true });
     const notes = `${f.dir}/elsewhere/notes`;
     put(`${notes}/todo.md`, "x\n");
     const n = f.run(["sync"], { cwd: notes });
     const text = n.out + n.err;
-    expect({ code: n.code, init: text.includes("git init"), parent: text.includes(`miksy root add "${dirname(notes)}"`), plain: text.includes("сделать этот каталог корнем workspace") }).toEqual({ code: 2, init: true, parent: true, plain: false });
+    expect({ code: n.code, init: text.includes("git init"), parent: text.includes(`miksy root add "${dirname(notes)}"`), plain: text.includes("сделать этот каталог корнем workspace") }, said(n)).toEqual({ code: 2, init: true, parent: true, plain: false });
     // По подсказке: git init, root add папки, где он лежит, — sync пишет настройки
     git(notes);
-    expect(f.run(["root", "add", dirname(notes), "--tree", "Else"]).code).toBe(0);
-    expect(f.run(["sync"], { cwd: notes }).code).toBe(0);
+    expectCode(f.run(["root", "add", dirname(notes), "--tree", "Else"]), 0);
+    expectCode(f.run(["sync"], { cwd: notes }), 0);
     expect(read(`${notes}/CLAUDE.local.md`)).toContain("miksy");
   }, 120000);
 
@@ -84,63 +84,63 @@ describe("B.1 — проект вне workspace: подсказка доводи
     const yaml = () => read(`${f.config}/local/machine.yaml`);
     const before = yaml();
     const r = f.run(["root", "add", repo, "--tree", "New"]);
-    expect({ code: r.code, why: (r.out + r.err).includes("папкой с проектами, а не проектом"), cmd: (r.out + r.err).includes(`miksy root add "${dirname(repo)}"`), yes: (r.out + r.err).includes(`miksy root add "${repo}" --tree New --yes`), dots: (r.out + r.err).includes(".."), yaml: yaml() })
+    expect({ code: r.code, why: (r.out + r.err).includes("папкой с проектами, а не проектом"), cmd: (r.out + r.err).includes(`miksy root add "${dirname(repo)}"`), yes: (r.out + r.err).includes(`miksy root add "${repo}" --tree New --yes`), dots: (r.out + r.err).includes(".."), yaml: yaml() }, said(r))
       .toEqual({ code: 2, why: true, cmd: true, yes: true, dots: false, yaml: before });
     // Без --tree совет — с местом для ветки (иначе подсказанная команда дословно упала бы на «укажите ветку»)
     const nt = f.run(["root", "add", repo]);
     expect((nt.out + nt.err).includes(`miksy root add "${repo}" --tree <ветка> --yes`)).toBe(true);
     const q = inProcess(f, ["root", "add", repo, "--tree", "New"], f.dir, [false]);
-    expect({ code: q.code, q: q.questions.length, none: q.out.includes("Корень не добавлен"), yaml: yaml() }).toEqual({ code: 0, q: 1, none: true, yaml: before });
+    expect({ code: q.code, q: q.questions.length, none: q.out.includes("Корень не добавлен"), yaml: yaml() }, said(q)).toEqual({ code: 0, q: 1, none: true, yaml: before });
     const dry = f.run(["root", "add", repo, "--tree", "New", "--dry-run"]);
-    expect({ code: dry.code, warn: dry.out.includes("папкой с проектами"), yaml: yaml() }).toEqual({ code: 0, warn: true, yaml: before });
+    expect({ code: dry.code, warn: dry.out.includes("папкой с проектами"), yaml: yaml() }, said(dry)).toEqual({ code: 0, warn: true, yaml: before });
     const y = f.run(["root", "add", repo, "--tree", "New", "--yes"]);
-    expect({ code: y.code, warn: y.out.includes("предупреждение:"), added: yaml().includes("new-repo") }).toEqual({ code: 0, warn: true, added: true });
+    expect({ code: y.code, warn: y.out.includes("предупреждение:"), added: yaml().includes("new-repo") }, said(y)).toEqual({ code: 0, warn: true, added: true });
     // Папка с проектами, которая сама git-репо (внутри — свои репо), — без вопроса
     const box = `${f.dir}/box`;
     git(box);
     git(`${box}/inner`);
     const b = f.run(["root", "add", box, "--tree", "Box"]);
-    expect({ code: b.code, warn: b.out.includes("папкой с проектами, а не проектом") }).toEqual({ code: 0, warn: false });
+    expect({ code: b.code, warn: b.out.includes("папкой с проектами, а не проектом") }, said(b)).toEqual({ code: 0, warn: false });
     // --yes — только для root add
-    expect(f.run(["root", "remove", box, "--yes"]).code).toBe(2);
+    expectCode(f.run(["root", "remove", box, "--yes"]), 2);
   }, 120000);
 
   test("root add проекта основного корня: без терминала не добавлен (проект обновляется дальше); с --yes — sync --all и doctor говорят о записанном, совет работает", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const a = f.run(["root", "add", p1, "--tree", "P1"]);
-    expect({ code: a.code, kind: (a.out + a.err).includes("проект корня"), advice: (a.out + a.err).includes(`miksy sync "${p1}"`) }).toEqual({ code: 2, kind: true, advice: true });
+    expect({ code: a.code, kind: (a.out + a.err).includes("проект корня"), advice: (a.out + a.err).includes(`miksy sync "${p1}"`) }, said(a)).toEqual({ code: 2, kind: true, advice: true });
     put(`${f.config}/layers/tree/instructions/00.md`, "# workspace v2\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(read(`${p1}/CLAUDE.local.md`)).toContain("# workspace v2");
     // Всё-таки корень (--yes): записанное в p1 раньше не висит молча
-    expect(f.run(["root", "add", p1, "--tree", "P1", "--yes"]).code).toBe(0);
+    expectCode(f.run(["root", "add", p1, "--tree", "P1", "--yes"]), 0);
     put(`${f.config}/layers/tree/instructions/00.md`, "# workspace v3\n");
     const s = f.run(["sync", "--all", "--yes"]);
     const d = f.run(["doctor"]);
     const problems = d.out.split("Справочно")[0];
-    expect({ sync: s.out.includes(`${p1} — теперь корень workspace`), doctor: d.code, says: problems.includes("Проект стал корнем workspace") && problems.includes(p1), advice: problems.includes(`miksy clean "${p1}"`) && problems.includes(`miksy root remove "${p1}"`) })
+    expect({ sync: s.out.includes(`${p1} — теперь корень workspace`), doctor: d.code, says: problems.includes("Проект стал корнем workspace") && problems.includes(p1), advice: problems.includes(`miksy clean "${p1}"`) && problems.includes(`miksy root remove "${p1}"`) }, said(d))
       .toEqual({ sync: true, doctor: 1, says: true, advice: true });
     // Совет «добавлен по ошибке»: root remove — записанное в p1 не убирается и не забывается, sync --all обновляет
     const rm = f.run(["root", "remove", p1]);
-    expect({ code: rm.code, listed: rm.out.includes("miksy записывал в его проекты") }).toEqual({ code: 0, listed: false });
+    expect({ code: rm.code, listed: rm.out.includes("miksy записывал в его проекты") }, said(rm)).toEqual({ code: 0, listed: false });
     expect(read(`${p1}/CLAUDE.local.md`)).toContain("# workspace v2");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(read(`${p1}/CLAUDE.local.md`)).toContain("# workspace v3");
     const d2 = f.run(["doctor"]);
-    expect({ code: d2.code, rooted: d2.out.includes("Проект стал корнем") }).toEqual({ code: 0, rooted: false });
+    expect({ code: d2.code, rooted: d2.out.includes("Проект стал корнем") }, said(d2)).toEqual({ code: 0, rooted: false });
   }, 180000);
 
   test("root add проекта --yes, совет «так и задумано»: clean убирает записанное, doctor спокоен", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["root", "add", p1, "--tree", "P1", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["root", "add", p1, "--tree", "P1", "--yes"]), 0);
     const c = f.run(["clean", p1]);
-    expect({ code: c.code, left: read(`${p1}/CLAUDE.local.md`).includes("miksy") }).toEqual({ code: 0, left: false });
+    expect({ code: c.code, left: read(`${p1}/CLAUDE.local.md`).includes("miksy") }, said(c)).toEqual({ code: 0, left: false });
     const d = f.run(["doctor"]);
     expect(d.out.includes("Проект стал корнем")).toBe(false);
   }, 120000);
@@ -154,7 +154,7 @@ describe("B.3 — доверие Claude: .claude/settings.local.json в цели
     const s = f.run(["sync", "--all", "--yes"]);
     expect({ ask: asked(s), hook: s.out.includes("colleague.sh"), trusted: trusted(f.home, grp) }).toEqual({ ask: true, hook: true, trusted: false });
     // «да» — доверие ставится, дальше без вопроса; хук поменялся — снова решение
-    expect(f.run(["trust", grp, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", grp, "--confirm"]), 0);
     const runs = [1, 2].map(() => f.run(["sync", "--all", "--yes"]));
     expect({ runs: runs.map(swing), trusted: trusted(f.home, grp) }).toEqual({ runs: [STEADY, STEADY], trusted: true });
     put(`${grp}/.claude/settings.local.json`, JSON.stringify(hook("other.sh"), null, 2));
@@ -167,7 +167,7 @@ describe("B.3 — доверие Claude: .claude/settings.local.json в цели
     const grp = sharedGroup(f);
     put(`${grp}/sub/.claude/settings.local.json`, JSON.stringify(hook("colleague.sh"), null, 2));
     allowInClaude(`${grp}/mine`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const d = f.run(["doctor"]);
     expect({ trusted: trusted(f.home, grp), doctor: d.out.includes("colleague.sh"), own: d.out.includes("Bash(ls:*)") }).toEqual({ trusted: true, doctor: true, own: false });
   }, 120000);
@@ -175,7 +175,7 @@ describe("B.3 — доверие Claude: .claude/settings.local.json в цели
   test("группа без git: доверие ставил miksy, пользователь отвечал Claude «больше не спрашивать» — без вопроса и без качелей", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const grp = sharedGroup(f);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(trusted(f.home, grp)).toBe(true);
     allowInClaude(grp);
     const runs = [1, 2, 3].map(() => f.run(["sync", "--all", "--yes"]));
@@ -187,7 +187,7 @@ describe("B.3 — доверие Claude: .claude/settings.local.json в цели
     const grp = sharedGroup(f);
     put(`${grp}/.mcp.json`, JSON.stringify({ mcpServers: { team: { command: "team-server" } } }));
     expect(asked(f.run(["sync", "--all", "--yes"]))).toBe(true);
-    expect(f.run(["trust", grp, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", grp, "--confirm"]), 0);
     expect(local(grp).enabledMcpjsonServers).toEqual(["team"]);
     allowInClaude(grp);
     const runs = [1, 2, 3].map(() => f.run(["sync", "--all", "--yes"]));
@@ -208,7 +208,7 @@ describe("B.3 — граница доверия: тесты рецензента
   test("«нет» в вопросе sync (терминал) → trust <проект> «да» (терминал) → sync: без качелей; ответы Claude после «нет» не мешают", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     allowInClaude(app);
     team(app);
     const q = inProcess(f, ["sync", app], f.dir, ["n"]);
@@ -235,7 +235,7 @@ describe("B.3 — граница доверия: тесты рецензента
     put(`${f.config}/layers/tree/Org/layer.yaml`, "trust: { claude: true }\n");
     put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`) + "trust: { claude: false }\n");
     const m = f.run(["sync", app]);
-    expect({ trusted: trusted(f.home, app), approvals: local(app).enabledMcpjsonServers ?? null, ask: asked(m), code: c.code }).toEqual({ trusted: false, approvals: null, ask: false, code: 0 });
+    expect({ trusted: trusted(f.home, app), approvals: local(app).enabledMcpjsonServers ?? null, ask: asked(m), code: c.code }, said(c)).toEqual({ trusted: false, approvals: null, ask: false, code: 0 });
   }, 120000);
 
   test("перенос каталога проекта: «да» пользователя, ответы Claude, командный .mcp.json — после переезда без вопроса и без снятия", () => {
@@ -244,7 +244,7 @@ describe("B.3 — граница доверия: тесты рецензента
     team(app);
     allowInClaude(app);
     expect(asked(f.run(["sync", "--all", "--yes"]))).toBe(true);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     expect(swing(f.run(["sync", "--all", "--yes"]))).toEqual(STEADY);
     renameSync(app, moved);
     allowInClaude(moved, "Bash(cat:*)");
@@ -259,8 +259,8 @@ describe("B.3 — граница доверия: тесты рецензента
     team(app);
     allowInClaude(app);
     f.run(["sync", app]);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
+    expectCode(f.run(["clean", app]), 0);
     const s = f.run(["sync", app]);
     expect({ ...swing(s), trusted: trusted(f.home, app) }).toEqual({ ...STEADY, trusted: true });
   }, 120000);
@@ -278,14 +278,14 @@ describe("B.4 — ложный «переезд» на забытый проек
     const { f, drive, a, b } = twoProjects();
     put(`${a}/CLAUDE.local.md`, "# мои заметки проекта A\n");
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(drive);
-    expect(f.run(["clean", b, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", b, "--forget"]), 0);
     plugBack(drive);
     rmSync(a, { recursive: true, force: true });
     const s = f.run(["sync", "--all", "--yes"]);
     const c = f.run(["clean", b]);
-    expect({ moved: /переехал|перенесён/.test(s.out), bGotA: read(`${b}/CLAUDE.local.md`).includes("проекта A"), clean: c.code }).toEqual({ moved: false, bGotA: false, clean: 0 });
+    expect({ moved: /переехал|перенесён/.test(s.out), bGotA: read(`${b}/CLAUDE.local.md`).includes("проекта A"), clean: c.code }, said(c)).toEqual({ moved: false, bGotA: false, clean: 0 });
     // Учёт a — «ссылается на несуществующий каталог», как было бы и без b
     expect(f.run(["doctor"]).out).toContain("Учёт ссылается на несуществующие каталоги");
   }, 180000);
@@ -298,7 +298,7 @@ describe("B.4 — ложный «переезд» на забытый проек
     f.run(["sync", "--all", "--yes"]);
     f.run(["sync", a, "--force"]);
     unplug(drive);
-    expect(f.run(["clean", b, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", b, "--forget"]), 0);
     plugBack(drive);
     rmSync(a, { recursive: true, force: true });
     const s = f.run(["sync", "--all", "--yes"]);
@@ -309,7 +309,7 @@ describe("B.4 — ложный «переезд» на забытый проек
   test("переезд без отметки «забыт» — как раньше: папку переименовали, учёт переезжает", () => {
     const { f, drive, a } = twoProjects();
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     renameSync(a, `${drive}/Acme/a2`);
     const s = f.run(["sync", "--all", "--yes"]);
     expect(s.out).toContain("Учёт miksy перенесён вслед за каталогами");
@@ -323,7 +323,7 @@ describe("B.6 — miksy trust после «забыть»: свои файлы m
     git(app);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: archive, tree: "Archive" }])}agents: [codex]\n`);
     put(`${f.config}/layers/tree/Archive/mcp/tool.yaml`, "name: tool\ncommand: tool\nargs: []\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(archive);
     f.run(["clean", app, "--forget"]);
     plugBack(archive);
@@ -341,11 +341,11 @@ describe("B.7 — doctor: ветка слоёв, похожая на папку 
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
     git(`${f.ws}/Clients-old/x`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const d = f.run(["doctor"]);
     const info = d.out.split("Справочно")[1] ?? "";
-    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку"), both: info.includes("ветка корня другой машины") && info.includes("если опечатка") && info.includes("layers/tree/Clients ↔ в workspace есть Clients-old") })
+    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку"), both: info.includes("ветка корня другой машины") && info.includes("если опечатка") && info.includes("layers/tree/Clients ↔ в workspace есть Clients-old") }, said(d))
       .toEqual({ code: 0, typo: false, both: true });
   }, 120000);
 
@@ -355,18 +355,18 @@ describe("B.7 — doctor: ветка слоёв, похожая на папку 
     put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
     put(`${f.config}/layers/tree/Main/Org/instructions/10.md`, "# org\n");
     mkdirSync(`${f.ws}/Clients-old`, { recursive: true });
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["doctor"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["doctor"]), 0);
   }, 120000);
 
   test("настоящая опечатка внутри папки (Org/sitte ↔ Org/site) — по-прежнему проблема", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/site"] });
     put(`${f.config}/layers/tree/Org/sitte/instructions/10.md`, "# typo\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const d = f.run(["doctor"]);
-    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку") && d.out.includes("layers/tree/Org/sitte") }).toEqual({ code: 1, typo: true });
+    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку") && d.out.includes("layers/tree/Org/sitte") }, said(d)).toEqual({ code: 1, typo: true });
   }, 120000);
 });
 
@@ -391,17 +391,17 @@ describe("рецензия круга 6y", () => {
   test("п. 1: группа target: true без git, добавленная корнем --yes, — текст root add верный, sync --all убирает записанное без «теперь корень», doctor без ложного «каталога нет»", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const grp = sharedGroup(f);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(read(`${grp}/CLAUDE.local.md`)).toContain("# shared");
     const a = f.run(["root", "add", grp, "--tree", "SharedRoot", "--yes"]);
-    expect({ code: a.code, mark: a.out.includes("пометка target: true (layers/tree/Shared/layer.yaml) перестанет действовать"), stays: a.out.includes("останется и перестанет обновляться") })
+    expect({ code: a.code, mark: a.out.includes("пометка target: true (layers/tree/Shared/layer.yaml) перестанет действовать"), stays: a.out.includes("останется и перестанет обновляться") }, said(a))
       .toEqual({ code: 0, mark: true, stays: false });
     const s = f.run(["sync", "--all", "--yes"]);
-    expect({ code: s.code, rooted: s.out.includes("теперь корень workspace"), absent: s.out.includes("каталога нет в workspace"), gone: read(`${grp}/CLAUDE.local.md`).includes("# shared") })
+    expect({ code: s.code, rooted: s.out.includes("теперь корень workspace"), absent: s.out.includes("каталога нет в workspace"), gone: read(`${grp}/CLAUDE.local.md`).includes("# shared") }, said(s))
       .toEqual({ code: 0, rooted: false, absent: false, gone: false });
     const d = f.run(["doctor"]);
-    expect({ code: d.code, absent: d.out.includes("каталогов которых на этой машине нет"), info: d.out.includes("Цели target: true, чей каталог стал корнем workspace"), rooted: d.out.includes("Проект стал корнем") })
+    expect({ code: d.code, absent: d.out.includes("каталогов которых на этой машине нет"), info: d.out.includes("Цели target: true, чей каталог стал корнем workspace"), rooted: d.out.includes("Проект стал корнем") }, said(d))
       .toEqual({ code: 0, absent: false, info: true, rooted: false });
   }, 120000);
 
@@ -409,13 +409,13 @@ describe("рецензия круга 6y", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const grp = sharedGroup(f);
     allowInClaude(`${grp}/mine`);
-    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
-    { const r = f.run(["sync", "--global"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
+    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }, said(r)).toEqual({ code: 0, out: "" }); }
+    { const r = f.run(["sync", "--global"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }, said(r)).toEqual({ code: 0, out: "" }); }
     expect(f.run(["doctor"]).out.includes("Исполняемые настройки в подкаталогах групп без git")).toBe(false);
     put(`${grp}/sub/.claude/settings.local.json`, JSON.stringify(hook("colleague.sh"), null, 2));
     expect(f.run(["doctor"]).out.includes("colleague.sh")).toBe(true);
     put(`${f.config}/layers/tree/Shared/layer.yaml`, "target: true\ntrust: { claude: false }\n");
-    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
+    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }, said(r)).toEqual({ code: 0, out: "" }); }
     const d = f.run(["doctor"]);
     expect(d.out.includes("Исполняемые настройки в подкаталогах групп без git")).toBe(false);
   }, 120000);

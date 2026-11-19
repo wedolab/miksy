@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
-import { CLI } from "./helpers";
+import { CLI, expectCode, said } from "./helpers";
 import { foreignForBuiltinAdmin, openToOthers, USERS } from "./openacl";
 
 const win = process.platform === "win32";
@@ -70,7 +70,7 @@ describe("E1: цель ссылки закрыта с наследованием
         doctor: doc.out.split("\n").filter((l) => /local\/backups|не пишет туда бэкапы/.test(l)),
         wrote: walk(w.vault).some((p) => /originals\/.*SKILL\.md$/.test(p)) && walk(w.vault).some((p) => /CLAUDE\.md$/.test(p)),
         open: openPaths(w.vault),
-      }).toEqual({ codes: [0, 0, 0, 0, 0], complaints: [], doctor: [], wrote: true, open: [] });
+      }, said(runs)).toEqual({ codes: [0, 0, 0, 0, 0], complaints: [], doctor: [], wrote: true, open: [] });
     }, 300000);
 
   for (const how of ["с наследованием", "без наследования"] as Close[])
@@ -87,7 +87,7 @@ describe("E1: цель ссылки закрыта с наследованием
         codes: [s1.code, s2.code].map((c) => (c === 3 ? 0 : c)), complaints: [s1, s2].flatMap((r) => r.out.split("\n").filter(bad)),
         value, closed: aclProblem(`${w.vault}/A_TOKEN`),
         doctor: doc.out.split("\n").filter((l) => /A_TOKEN|local\/secrets/.test(l)),
-      }).toEqual({ codes: [0, 0], complaints: [], value: "zzzz9999\n", closed: null, doctor: [] });
+      }, said(s1, s2)).toEqual({ codes: [0, 0], complaints: [], value: "zzzz9999\n", closed: null, doctor: [] });
     }, 300000);
 
   // Свои папки оригиналов, уже открытые (созданы прежней версией без закрытия): отказ даёт одну команду на всё поддерево —
@@ -102,11 +102,11 @@ describe("E1: цель ссылки закрыта с наследованием
     expect(foreignForBuiltinAdmin(`${w.vault}/originals`).length).toBeGreaterThan(0);
     expect(openPaths(`${w.vault}/originals`).length).toBeGreaterThan(0);
     const first = w.run(["sync", "--global", "--force"]);
-    expect(first.code).toBe(1);
+    expectCode(first, 1);
     const cmd = first.out.match(/Закройте папку бэкапов и всё в ней \(PowerShell\): (.+)$/m)![1].trim();
-    expect(ps(cmd).exitCode).toBe(0);
+    expectCode(ps(cmd), 0);
     const again = w.run(["sync", "--global", "--force"]);
-    expect({ code: again.code, complaints: again.out.split("\n").filter(bad), open: openPaths(w.vault) }).toEqual({ code: 0, complaints: [], open: [] });
+    expect({ code: again.code, complaints: again.out.split("\n").filter(bad), open: openPaths(w.vault) }, said(again)).toEqual({ code: 0, complaints: [], open: [] });
   }, 300000);
 });
 
@@ -133,5 +133,5 @@ test.skipIf(!win)("A №6: ссылка — старая папка запуск
     code: s.code, refused: /не пишет туда бэкапы/.test(s.out),
     runLink: lstatSync(`${config}/local/backups/2025-12-31T00-00-00-000Z`).isSymbolicLink(), keep: existsSync(`${ext}/run/keep.md`),
     copyLink: existsSync(`${ext}/copy/.claude/settings.json`), rotated: left < 25,
-  }).toEqual({ code: 0, refused: false, runLink: true, keep: true, copyLink: true, rotated: true });
+  }, said(s)).toEqual({ code: 0, refused: false, runLink: true, keep: true, copyLink: true, rotated: true });
 }, 300000);

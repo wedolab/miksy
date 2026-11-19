@@ -12,7 +12,7 @@ import { runCommand } from "../src/commands";
 import { ENGINE, configRoot } from "../src/load";
 import { canonical, inside } from "../src/paths";
 import { setup, type System } from "../src/setup";
-import { put } from "./helpers";
+import { put, expectCode } from "./helpers";
 
 type Step = { q: RegExp; a: string | (() => string) };
 
@@ -116,7 +116,7 @@ describe("A6 — мастер: подкаталог git-репо", () => {
     const code = f.wizard([...start,
       { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: src }, { q: /Всё равно сделать .*корнем workspace/, a: "" }, { q: /Есть ещё папки/, a: "" },
       ...finish]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toContain(`${src} — папка внутри git-репо ${f.dir}/other/repo`);
     expect(t).toContain(`miksy root add "${f.dir}/other"`);
@@ -143,7 +143,7 @@ describe("A11 — setup --force: основным стал бывший допо
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     const cmd = t.match(/Вернуть его: 1\) .*; 2\) (miksy root add "[^"]+" --tree (\S+)) \(docs\/roots\.md/);
     expect(cmd?.[1]).toBe(`miksy root add "${f.ws}" --tree ${cmd?.[2]}`);
@@ -171,7 +171,7 @@ describe("рецензия 0.2.1 A, п. 5 — подсказка setup --force �
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     expect(f.text()).toContain(`2) miksy root add "${old}" --tree "My Projects" (docs/roots.md`);
   }, 120000);
 });

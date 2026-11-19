@@ -6,7 +6,7 @@
 //     R1 — в fixes021c-rule-r1{a,b,c}.test.ts (по группам путей, круг 10d); общее — fixes021c-rule-help.ts
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { commit, hasTag, local, oldEngine, oldRunner, patchLocal, userTrusts } from "./fixes021b-helpers";
 import { DIALOG, off, ok, on, setup } from "./fixes021c-rule-help";
@@ -64,7 +64,7 @@ test("R3: «забыть» с агентом вне agents → команды и
   git(site);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [x]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(drive, `${drive}-off`);
   const g = f.run(["clean", site, "--forget"]);

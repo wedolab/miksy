@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7b — рецензия A (out/review021c/miksy/test/zz-rev021c-{trust,ledger}.test.ts): п. 1–3 и 5
 import { expect, test } from "bun:test";
 import { mkdirSync, renameSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, said } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { allow, trusted } from "./fixes021b-helpers";
 
@@ -82,7 +82,7 @@ test("рецензия 7b A: учёт с trustedBefore-списком (форм�
   const d = f.run(["doctor"]);
   const s = f.run(["sync", app]);
   console.log(d.out.slice(0, 600), "\n----\n", s.out.slice(0, 400), s.err.slice(0, 400));
-  expect({ doctor: /учёт повреждён/.test(d.out + d.err), sync: s.code }).toEqual({ doctor: false, sync: 0 });
+  expect({ doctor: /учёт повреждён/.test(d.out + d.err), sync: s.code }, said(s)).toEqual({ doctor: false, sync: 0 });
 }, 120000);
 
 test("rev021c п. 5: clean недоступной папки с --agent — советы «повторите» и «--forget» с тем же --agent", () => {

@@ -4,7 +4,7 @@
 // пропавшем диске — по-прежнему отказ. Тесты взяты у рецензента проверки 8b (out/check022b)
 import { expect, test } from "bun:test";
 import { existsSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { missingDrive } from "./nodrive";
 import { escapes } from "../src/paths";
@@ -17,7 +17,7 @@ function world() {
   git(site);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Clients/mcp/srv.yaml`, "name: srv\ncommand: echo\nargs: [hi]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   // Как если бы sync шёл, пока диск был подключён: путь корня — на букве диска, которой сейчас нет
   const root = missingDrive("Clients");
   const forms = (p: string) => [p, p.replaceAll("/", "\\"), p.replaceAll("/", "\\\\"), p.toLowerCase().replaceAll("/", "\\"), p.toLowerCase().replaceAll("/", "\\\\")];
@@ -34,14 +34,14 @@ test.skipIf(!win)("A1: нет диска + MCP-сервер Claude — root remo
   const r = inProcess(f, ["root", "remove", root, "--forget"], f.dir, null);
   const ids = Object.keys(ledger(f.config).targets).filter((k) => k.includes(root));
   const doc = inProcess(f, ["doctor"], f.dir, null);
-  expect({ code: r.code, conflict: /КОНФЛИКТ/.test(r.out), ledger: ids, servers: servers(f.home, site), doctor: doc.out.split("\n").filter((l) => l.includes(root)) })
+  expect({ code: r.code, conflict: /КОНФЛИКТ/.test(r.out), ledger: ids, servers: servers(f.home, site), doctor: doc.out.split("\n").filter((l) => l.includes(root)) }, said(r))
     .toEqual({ code: 0, conflict: false, ledger: [], servers: [], doctor: [] });
 }, 240000);
 
 test.skipIf(!win)("A1: нет диска + MCP-сервер Claude — clean убирает сервер проекта из ~/.claude.json", () => {
   const { f, site } = world();
   const c = inProcess(f, ["clean", site], f.dir, null);
-  expect({ code: c.code, conflict: /КОНФЛИКТ/.test(c.out), servers: servers(f.home, site) }).toEqual({ code: 0, conflict: false, servers: [] });
+  expect({ code: c.code, conflict: /КОНФЛИКТ/.test(c.out), servers: servers(f.home, site) }, said(c)).toEqual({ code: 0, conflict: false, servers: [] });
 }, 240000);
 
 // Обратный случай: путь записи вне всех корней, которые раскрываются, — отказ; не раскрылся ни один — причина, как раньше

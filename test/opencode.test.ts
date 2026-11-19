@@ -7,6 +7,7 @@ import { currentGlobal, currentProject, readJsonc } from "../adapters/opencode/c
 import type { Machine, Resolved } from "../src/types";
 import { plan } from "../src/apply";
 import { emptyState } from "../src/manifest";
+import { expectCode } from "./helpers";
 
 const temp = mkdtempSync(join(tmpdir(), "opencode-test-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
@@ -139,9 +140,9 @@ describe("opencode", () => {
 
   test("отслеживаемый opencode.json проекта — конфликт, ключи не сливаются", () => {
     const { cfg, machine, project } = fixture();
-    expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "init", "--quiet", project]), 0);
     writeFileSync(join(project, "opencode.json"), JSON.stringify({ mcp: { team: { type: "remote", url: "https://t.com" } } }));
-    expect(Bun.spawnSync(["git", "-C", project, "add", "--", "opencode.json"]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "-C", project, "add", "--", "opencode.json"]), 0);
     const target = { scope: "project" as const, dir: project, rel: "project" };
     const actions = plan(opencode.render(cfg, target, machine), target, machine, emptyState(), true);
     expect(actions.some((a) => a.kind === "conflict" && a.abs.endsWith("opencode.json"))).toBe(true);

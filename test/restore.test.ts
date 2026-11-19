@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode, said } from "./helpers";
 import { aclTest } from "./elevated";
 import { copyAgentSettings } from "../src/setup";
 import { AGENT_DIRS } from "../src/restore";
@@ -60,7 +60,7 @@ test("копия мастера 0.2.3 возвращается целиком; -
   changeHome(f.home);
   const liveBefore = read(`${f.home}/.claude.json`);
   const dry = f.run(["restore", "--dry-run"]);
-  expect(dry.code).toBe(0);
+  expectCode(dry, 0);
   expect(dry.out).toContain("Вернётся (нет на месте, 2):");
   expect(dry.out).toContain("  ~/.claude/skills/a/SKILL.md");
   expect(dry.out).toContain("  ~/.gemini/GEMINI.md");
@@ -72,7 +72,7 @@ test("копия мастера 0.2.3 возвращается целиком; -
   expect(read(`${f.home}/.claude.json`)).toBe(liveBefore);
 
   const r = f.run(["restore", "--yes"]);
-  expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+  expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
   expect(r.out).toContain("✓ вернулось: 3 файла");
   expect(r.out).toContain("✓ MCP-серверы Claude дописаны в ~/.claude.json: gh, pg (проект D:/w/app), old (проект D:/w/gone)");
   expect(r.out).not.toContain("SECRET-VALUE-1");
@@ -94,7 +94,7 @@ test("копия мастера 0.2.3 возвращается целиком; -
 
   // Повторный запуск: всё на месте, ничего не дублируется
   const again = f.run(["restore", "--yes"]);
-  expect(again.code).toBe(0);
+  expectCode(again, 0);
   expect(again.out).toContain("Всё из копии уже на месте. Ничего не записано.");
   expect(again.out).toContain("Уже на месте: gh, pg (проект D:/w/app), old (проект D:/w/gone)");
   expect(JSON.parse(read(`${f.home}/.claude.json`)!)).toEqual(live);
@@ -104,7 +104,7 @@ test("сервер Claude с тем же именем, но другой — н�
   const f = fixture();
   put(`${f.home}/.claude.json`, claudeJson({ mcpServers: { gh: { command: "другой" } }, projects: { "D:/w/app": { mcpServers: { pg: { command: "pg" } } } } }));
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).toContain("Не трогаю — на месте сервер с тем же именем, но другой (1): gh");
   expect(r.out).toContain("Уже на месте: pg (проект D:/w/app)");
   const live = JSON.parse(read(`${f.home}/.claude.json`)!);
@@ -117,24 +117,24 @@ test("нынешнего ~/.claude.json нет — серверы не пере�
   rmSync(`${f.home}/.claude.json`);
   put(`${f.home}/.codex/config.toml`, "after\n");
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(1);
+  expectCode(r, 1);
   expect(r.out).toContain("MCP-серверы Claude не перенесу: ~/.claude.json нет: запустите Claude один раз");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("before .codex/config.toml\n");
   expect(existsSync(`${f.home}/.claude.json`)).toBe(false);
   // Повтор: работы нет, но не всё на месте — «всё на месте» не говорит, код 1 (и у --dry-run тот же)
   for (const args of [["restore", "--yes"], ["restore", "--dry-run"]]) {
     const again = f.run(args);
-    expect({ code: again.code, all: again.out.includes("уже на месте.") }).toEqual({ code: 1, all: false });
+    expect({ code: again.code, all: again.out.includes("уже на месте.") }, said(again)).toEqual({ code: 1, all: false });
   }
 });
 
 test("возврат из прежней before-restore сразу после первого запуска: бэкап — в новую папку, копия цела", () => {
   const f = fixture();
   put(`${f.home}/.codex/config.toml`, "mine\n");
-  expect(f.run(["restore", "--yes"]).code).toBe(0);
+  expectCode(f.run(["restore", "--yes"]), 0);
   const first = readdirSync(`${f.config}/local/backups`).find((d) => d.startsWith("before-restore-"))!;
   const r = f.run(["restore", `${f.config}/local/backups/${first}`, "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(read(`${f.home}/.codex/config.toml`)).toBe("mine\n");
   expect(read(`${f.config}/local/backups/${first}/.codex/config.toml`)).toBe("mine\n");
   const all = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-restore-"));
@@ -146,7 +146,7 @@ test("--dry-run: код как у запуска — папка на месте 
   rmSync(`${f.home}/.codex/AGENTS.md`);
   mkdirSync(`${f.home}/.codex/AGENTS.md`);
   put(`${f.home}/.codex/config.toml`, "after\n");
-  expect(f.run(["restore", "--dry-run"]).code).toBe(1);
+  expectCode(f.run(["restore", "--dry-run"]), 1);
   expect(read(`${f.home}/.codex/config.toml`)).toBe("after\n");
 });
 
@@ -154,7 +154,7 @@ test("бэкап затёртого — точный: значения секр�
   const f = fixture();
   put(`${f.config}/local/secrets.env`, "GH=ghp_restore_secret_1234567890\n");
   put(`${f.home}/.codex/config.toml`, "token = \"ghp_restore_secret_1234567890\"\n");
-  expect(f.run(["restore", "--yes"]).code).toBe(0);
+  expectCode(f.run(["restore", "--yes"]), 0);
   const saved = readdirSync(`${f.config}/local/backups`).find((d) => d.startsWith("before-restore-"))!;
   expect(read(`${f.config}/local/backups/${saved}/.codex/config.toml`)).toBe("token = \"ghp_restore_secret_1234567890\"\n");
 });
@@ -167,16 +167,16 @@ test("цели проектов Claude в учёте — серверы прое
   copyAgentSettings(f.home, [".claude.json"], `${f.config}/local/backups/before-miksy-${STAMP}`);
   // Как после adopt: сервер проекта перенесён в слой и записан miksy
   put(`${f.home}/.claude.json`, claudeJson({ projects: { [proj]: { allowedTools: [] } } }));
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(JSON.parse(read(`${f.home}/.claude.json`)!).projects[proj].mcpServers.pg.command).toBe("pg-miksy");
   const early = f.run(["restore", "--yes"]);
-  expect(early.code).toBe(1);
+  expectCode(early, 1);
   expect(early.out).toContain(`Серверы проектов Claude перенесу после miksy clean --all (в ~/.claude.json ещё серверы проектов, записанные miksy): pg (проект ${proj})`);
   expect(early.out).not.toContain("Не трогаю");
   expect(early.out).not.toContain("уже на месте.");
-  expect(f.run(["clean", "--all"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all"]), 0);
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(JSON.parse(read(`${f.home}/.claude.json`)!).projects[proj].mcpServers).toEqual({ pg: { command: "pg-before" } });
 }, 30000);
 
@@ -185,7 +185,7 @@ test.skipIf(!win)("Windows: ключ проекта в .claude.json — без �
   put(`${f.home}/.claude.json`, claudeJson({ projects: { "C:/Users/X/app": { mcpServers: { pg: { command: "pg" } } } } }));
   copyAgentSettings(f.home, [".claude.json"], `${f.config}/local/backups/before-miksy-${STAMP}`);
   put(`${f.home}/.claude.json`, claudeJson({ projects: { "c:\\users\\x\\app": { allowedTools: [] } } }));
-  expect(f.run(["restore", "--yes"]).code).toBe(0);
+  expectCode(f.run(["restore", "--yes"]), 0);
   expect(JSON.parse(read(`${f.home}/.claude.json`)!).projects).toEqual({ "c:\\users\\x\\app": { allowedTools: [], mcpServers: { pg: { command: "pg" } } } });
 });
 
@@ -203,7 +203,7 @@ aclTest(false, "папку внутри копии не прочитать — �
   try { r = f.run(["restore", copy, "--yes"]); } finally { unlock(); }
   expect(r.err).toBe("");
   if (!win && process.getuid?.() === 0) return; // root читает всё
-  expect(r.code).toBe(1);
+  expectCode(r, 1);
   expect(r.out).toContain("не возвращён: ~/.gemini/ — в копии не прочитать");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("before .codex/config.toml\n");
 });
@@ -212,7 +212,7 @@ test("без терминала и без --yes — код 2, ничего не 
   const f = fixture();
   changeHome(f.home);
   const r = f.run(["restore"]);
-  expect(r.code).toBe(2);
+  expectCode(r, 2);
   expect(r.err).toContain("miksy restore --yes");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("after\n");
 });
@@ -236,35 +236,35 @@ test("учёт: домашние цели — отказ с командами c
   put(`${f.home}/.codex/config.toml`, "model = \"before\"\n");
   copyAgentSettings(f.home, [".codex/config.toml"], `${f.config}/local/backups/before-miksy-${STAMP}`);
   // codex убран из agents после sync: его цель — отдельной командой с --agent
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   writeFileSync(`${f.config}/local/machine.yaml`, readFileSync(`${f.config}/local/machine.yaml`, "utf8").replace("claude, codex, ", "claude, "));
   const block = f.run(["restore", "--yes"]);
-  expect(block.code).toBe(1);
+  expectCode(block, 1);
   expect(block.out).toContain("miksy ещё записан в домашние настройки агентов (antigravity, claude, codex, opencode)");
   const cmds = block.out.split("\n").filter((l) => l.startsWith("  miksy clean")).map((l) => l.trim());
   expect(cmds).toEqual(["miksy clean --global", "miksy clean --global --agent codex"]);
   expect(block.out).toContain("Ничего не записано.");
-  for (const c of cmds) expect(f.run(c.split(" ").slice(1)).code).toBe(0);
+  for (const c of cmds) expectCode(f.run(c.split(" ").slice(1)), 0);
   const r = f.run(["restore", "--yes"]);
   expect(r.out).toContain("В проектах ещё записано то, что добавил miksy. Если удаляете его совсем — сначала miksy clean --all.");
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(read(`${f.home}/.codex/config.toml`)).toBe("model = \"before\"\n");
 }, 30000);
 
 test("копии нет; неверная метка; неверный путь — сообщение, код 1", () => {
   const f = cliFixture();
   const none = f.run(["restore"]);
-  expect(none.code).toBe(1);
+  expectCode(none, 1);
   expect(none.out).toContain("Копии «до miksy» нет");
   expect(none.out).toContain("архивом из «Установки вручную»");
   mkdirSync(`${f.config}/local/backups/before-miksy-${STAMP}`, { recursive: true });
   const stamp = f.run(["restore", "2020-01-01T00-00-00"]);
-  expect(stamp.code).toBe(1);
+  expectCode(stamp, 1);
   expect(stamp.out).toContain(`Копии с меткой 2020-01-01T00-00-00 нет`);
   expect(stamp.out).toContain(`Копии на этой машине: ${STAMP}`);
   const path = f.run(["restore", `${f.dir}/нет такой`]);
-  expect(path.code).toBe(1);
+  expectCode(path, 1);
   expect(path.out).toContain("такой папки нет");
 });
 
@@ -278,7 +278,7 @@ test("несколько копий: без аргумента — самая р
   for (const arg of [later, `before-miksy-${later}`, `${f.config}/local/backups/before-miksy-${later}`]) {
     put(`${f.home}/.codex/config.toml`, "now\n");
     const r = f.run(["restore", arg, "--yes"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(read(`${f.home}/.codex/config.toml`)).toBe("later\n");
   }
 }, 30000);
@@ -297,7 +297,7 @@ test("посторонние пути в копии — пропущены и н
   put(`${copy}/.claude/backups/.claude.json.backup.1`, "{}");
   put(`${f.home}/.codex/auth.json`, "current login");
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).toContain("Не возвращается — файлы входа и рабочее состояние агентов (история, сессии; старое затёрло бы нынешнее): .claude/.claude.json, .claude/.credentials.json, .claude/backups/, .codex/auth.json");
   expect([read(`${f.home}/.codex/auth.json`), existsSync(`${f.home}/.claude/.credentials.json`)]).toEqual(["current login", false]);
   expect(r.out).toContain("Пропущено — не настройки агентов (3): .config/other/, .ssh/, notes.txt");
@@ -312,14 +312,14 @@ test("на месте файла — папка: не возвращён, пап
   put(`${f.home}/.codex/AGENTS.md/inside.txt`, "keep\n");
   put(`${f.home}/.codex/config.toml`, "after\n");
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(1);
+  expectCode(r, 1);
   expect(r.out).toContain("не возвращён: ~/.codex/AGENTS.md — на этом месте папка");
   expect(r.out).toContain("повторять безопасно");
   expect(read(`${f.home}/.codex/AGENTS.md/inside.txt`)).toBe("keep\n");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("before .codex/config.toml\n");
   rmSync(`${f.home}/.codex/AGENTS.md`, { recursive: true });
   const again = f.run(["restore", "--yes"]);
-  expect(again.code).toBe(0);
+  expectCode(again, 0);
   expect(again.out).toContain("✓ вернулось: 1 файл");
   expect(read(`${f.home}/.codex/AGENTS.md`)).toBe("before .codex/AGENTS.md\n");
 });
@@ -330,7 +330,7 @@ test.skipIf(win)("macOS, Linux: «только для чтения» — наз�
   chmodSync(`${f.home}/.codex/config.toml`, 0o444);
   const r = f.run(["restore", "--yes"]);
   chmodSync(`${f.home}/.codex/config.toml`, 0o644);
-  expect(r.code).toBe(1);
+  expectCode(r, 1);
   expect(r.out).toContain(`не возвращён: ~/.codex/config.toml — файл «только для чтения»: снимите пометку — chmod u+w '${f.home}/.codex/config.toml'`);
 });
 
@@ -351,7 +351,7 @@ test.skipIf(win)("macOS, Linux: ссылки — сквозь dotfiles поль�
   rmSync(`${f.home}/.claude/gone`);
   symlinkSync(`${dot}/elsewhere`, `${f.home}/.claude/gone`);
   const r = f.run(["restore", "--yes"]);
-  expect({ code: r.code, out: r.out.includes("✓ вернулось") }).toEqual({ code: 0, out: true });
+  expect({ code: r.code, out: r.out.includes("✓ вернулось") }, said(r)).toEqual({ code: 0, out: true });
   expect(isLink(`${f.home}/.claude`)).toBe(true);
   expect(read(`${dot}/claude/settings.json`)).toBe("{}");
   expect(target(`${f.home}/.claude/skills`)).toBe(`${dot}/skills`);
@@ -372,7 +372,7 @@ test("пути с ' ’ $ ` пробелом, кириллицей и [ ] в к�
     rmSync(`${f.home}/.codex`, { recursive: true, force: true });
     rmSync(`${f.home}/.claude`, { recursive: true, force: true });
     const r = f.run(["restore", arg, "--yes"]);
-    expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
     expect(read(`${f.home}/.codex/config.toml`)).toBe("cfg\n");
     expect(read(`${f.home}/.claude/skills/${odd}/SKILL.md`)).toBe("s\n");
   }

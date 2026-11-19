@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bunPlaces, environment, installs, opencodeMajor } from "../src/environ";
 import { canonical } from "../src/paths";
-import { cliFixture, CLI, put } from "./helpers";
+import { cliFixture, CLI, put, expectCode } from "./helpers";
 
 const win = process.platform === "win32";
 const os = win ? "windows" as const : process.platform === "darwin" ? "macos" as const : "linux" as const;
@@ -125,7 +125,7 @@ describe("окружение: каталоги настроек агентов �
     const before = run({});
     const r = run({ CODEX_HOME: `${f.dir}/elsewhere` });
     expect(r.out).toMatch(/Справочно:[\s\S]*Окружение \(\d+\) — только сведения, miksy здесь ничего не меняет:\n(  .*\n)*  CODEX_HOME=.*elsewhere: Codex читает настройки из/);
-    expect(r.code).toBe(before.code);
+    expectCode(r, before.code);
     expect(r.out.match(/Проблем: \d+|Всё синхронизировано/)?.[0]).toBe(before.out.match(/Проблем: \d+|Всё синхронизировано/)?.[0]);
   }, 60000);
 });

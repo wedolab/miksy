@@ -5,7 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { adoptMcp, fromNative } from "../src/adopt";
 import { loadSecrets } from "../src/load";
 import type { Machine } from "../src/types";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const machine: Machine = { workspace: "D:/work", os: "windows", home: "C:/Users/u", vars: {} };
 const win = process.platform === "win32";
@@ -73,7 +73,7 @@ describe("adopt: план и подтверждение", () => {
   test("без терминала и без --yes — отказ, ничего не записано; план без значения секрета", () => {
     const f = fixture();
     const r = f.run(["adopt", "--global", "gl", "--to", "workspace"]);
-    expect(r.code).toBe(2);
+    expectCode(r, 2);
     expect(r.err).toContain("--yes");
     expect(r.out).toContain("mcp/gl.yaml");
     expect(r.out + r.err).not.toContain("glpat-abcdefghij1234");
@@ -82,10 +82,10 @@ describe("adopt: план и подтверждение", () => {
 
   test("--dry-run — только план; --yes — запись", () => {
     const f = fixture();
-    expect(f.run(["adopt", "--global", "gl", "--to", "workspace", "--dry-run"]).code).toBe(0);
+    expectCode(f.run(["adopt", "--global", "gl", "--to", "workspace", "--dry-run"]), 0);
     expect(() => readFileSync(`${f.config}/layers/tree/mcp/gl.yaml`)).toThrow();
     const r = f.run(["adopt", "--global", "gl", "--to", "workspace", "--yes"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(readFileSync(`${f.config}/layers/tree/mcp/gl.yaml`, "utf8")).not.toContain("glpat-");
     expect(loadSecrets(f.config)).toEqual({ WORKSPACE_GL_TOKEN: "glpat-abcdefghij1234" });
   });
@@ -114,7 +114,7 @@ describe("sync --out: compare маскирует обе стороны", () => {
     put(`${f.config}/layers/global/mcp/gl.yaml`, "name: gl\ncommand: npx\nargs: [\"--token=${GL}\"]\n");
     put(`${f.config}/local/secrets.env`, "GL=glpat-layer-secret22\n");
     const r = f.run(["sync", "--global", "--out", "sb"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("gl");
     expect(r.out).not.toContain("glpat-current-secret1");
     expect(r.out).not.toContain("glpat-layer-secret22");
@@ -130,7 +130,7 @@ describe("секреты открытым текстом в слоях", () => {
     expect(s.out).toContain("Org/mcp/gl.yaml");
     expect(s.out).not.toContain("glpat-literal-value99");
     const d = f.run(["doctor"]);
-    expect(d.code).toBe(1);
+    expectCode(d, 1);
     expect(d.out).toContain("открытым текстом");
     expect(d.out).not.toContain("glpat-literal-value99");
   });

@@ -5,7 +5,7 @@ import { gitEnv } from "../src/git";
 import { homeDir } from "../src/paths";
 import { ADAPTERS, renderFor } from "../src/registry";
 import { compare } from "../src/sync";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const none = { layers: [], instructions: [], skills: [], notes: [], mcp: [] };
 const secretMcp = { layer: "x", item: { name: "s", command: "echo", env: { TOKEN: "${TOKEN}" } } };
@@ -57,10 +57,10 @@ test("С24: sync --out передаёт keep — own-файл с пропуще�
   rmSync(`${f.config}/layers/tree/instructions`, { recursive: true });
   put(`${f.config}/layers/tree/mcp/s.yaml`, 'name: s\ncommand: echo\nenv: {TOKEN: "${TOKEN}"}\n');
   put(`${f.config}/local/secrets.env`, "TOKEN=opaque-test-secret\n");
-  expect(f.run(["sync", dir]).code).toBe(0);
+  expectCode(f.run(["sync", dir]), 0);
   put(`${f.config}/local/secrets.env`, "");
   const out = `${f.dir}/sandbox`;
-  expect(f.run(["sync", dir, "--out", out]).code).toBe(0);
+  expectCode(f.run(["sync", dir, "--out", out]), 0);
   expect(existsSync(`${out}/codex/project/.codex/config.toml`)).toBe(true);
 }, 60000);
 
@@ -77,7 +77,7 @@ test("С17: глобальный skill через ссылку ~/.claude — н�
   put(`${f.config}/layers/global/skills/my-mine/SKILL.md`, "---\nname: my-mine\ndescription: x\n---\n");
   put(`${f.home}/dotfiles/claude/keep`, "");
   symlinkSync(`${f.home}/dotfiles/claude`, `${f.home}/.claude`, process.platform === "win32" ? "junction" : "dir");
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   expect(f.run(["doctor"]).out).not.toContain("не от miksy");
 }, 60000);
 

@@ -3,7 +3,7 @@
 // варианты, шаги и ожидания — дословно прежние, в одном месте)
 import { expect } from "bun:test";
 import { mkdirSync, renameSync, rmSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, said } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { allow, commit, local, patchLocal, trusted } from "./fixes021b-helpers";
 
@@ -36,7 +36,7 @@ export const roots = (e: Env, drive = e.drive) => put(`${e.f.config}/local/machi
 // fixes021c-paths711.test.ts). noPrint — «отпечатка нет»: и свои ответы — один вопрос
 // Шаг подготовки — успешно: код 0, а не только пустой stderr (EBUSY под нагрузкой — «КОНФЛИКТ … цель пропущена», код 3:
 // отметка «проект забыт» остаётся, и шаг молча меняет путь; проверка 7c, A №1)
-export const ok = (r: { code: number | null; err: string; out: string }) => expect({ code: r.code, err: r.err, out: r.code ? r.out : "" }).toEqual({ code: 0, err: "", out: "" });
+export const ok = (r: { code: number | null; err: string; out: string }) => expect({ code: r.code, err: r.err, out: r.code ? r.out : "" }, said(r)).toEqual({ code: 0, err: "", out: "" });
 
 export const PATHS: { n: string; act: (e: Env) => void; noPrint?: true }[] = [
   { n: "2 clean доступной папки", act: (e) => ok(e.f.run(["clean", e.site])) },
@@ -51,7 +51,7 @@ export const PATHS: { n: string; act: (e: Env) => void; noPrint?: true }[] = [
   { n: "5 забыть → диск вернулся → clean", act: (e) => { off(e); ok(e.f.run(["clean", e.site, "--forget"])); on(e); ok(e.f.run(["clean", e.site])); } },
   { n: "8 root remove с согласием → root add", act: (e) => {
     const r = inProcess(e.f, ["root", "remove", e.drive], e.f.dir, [true]);
-    expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
     ok(e.f.run(["root", "add", e.drive, "--tree", "Clients"]));
   } },
   { n: "13 clean → папку организации переименовали (соседний проект с файлами переехал)", act: (e) => {

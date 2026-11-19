@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CLI } from "./helpers";
+import { CLI, said } from "./helpers";
 import { aclTest } from "./elevated";
 
 const win = process.platform === "win32";
@@ -49,5 +49,5 @@ aclTest(!win || builtinAdmin(), "старая папка запуска без �
   expect({
     unreadable, doctor: re.test(doc.out), first: first.code, cmd: !!cmd, ps,
     code: s.code, err: /EPERM|EACCES|operation not permitted|Ошибка|ОШИБКА/.test(s.out), rotated: left < 21, doctor2: /backups/.test(doc2.out),
-  }).toEqual({ unreadable: true, doctor: true, first: 1, cmd: true, ps: 0, code: 0, err: false, rotated: true, doctor2: false });
+  }, said(first, s)).toEqual({ unreadable: true, doctor: true, first: 1, cmd: true, ps: 0, code: 0, err: false, rotated: true, doctor2: false });
 }, 300000);

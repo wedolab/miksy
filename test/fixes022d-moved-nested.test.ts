@@ -10,7 +10,7 @@ import type { Ask } from "../src/ask";
 import { setup } from "../src/setup";
 import { runCommand } from "../src/commands";
 import { newBackupRun } from "../src/backup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 
 type F = ReturnType<typeof cliFixture>;
@@ -54,7 +54,7 @@ for (const agents of [["claude"], ["claude", "codex"]])
     put(`${f.config}/layers/tree/Code/Acme/instructions/31.md`, "# acme rule\n");
     put(`${f.config}/layers/tree/Code/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [\"${WORKSPACE}/x\"]\n");
     const write = false;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const before = { p1: rules(`${ws}/Org/p1/CLAUDE.local.md`), site: rules(`${ws}/Inner/Acme/site/CLAUDE.local.md`), layers: layers(f, `${ws}/Inner/Acme/site`) };
     mkdirSync(`${f.dir}/disk2`, { recursive: true });
     renameSync(ws, ws2);
@@ -71,7 +71,7 @@ for (const agents of [["claude"], ["claude", "codex"]])
     const text = readFileSync(file, "utf8");
     expect(text.split(m[1]).length).toBe(2);
     writeFileSync(file, text.replace(m[1], () => m[2]));
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const a = f.run(["sync", "--all"]);
     const doc = f.run(["doctor"]);
     expect({
@@ -90,7 +90,7 @@ test("B №2: перенесли содержимое, прежняя папка
   put(`${f.config}/layers/orgx/instructions/50.md`, "# orgx rule\n");
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
   put(`${f.config}/layers/tree/Lab/instructions/11.md`, "# lab rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const before = [rules(`${ws}/Org/p1/CLAUDE.local.md`), rules(`${ws}/Lab/q/CLAUDE.local.md`)];
   mkdirSync(ws2, { recursive: true });
   for (const n of readdirSync(ws)) renameSync(`${ws}/${n}`, `${ws2}/${n}`);
@@ -100,7 +100,7 @@ test("B №2: перенесли содержимое, прежняя папка
     said: /в прежнем основном \S+ проектов нет: перенесли его содержимое или их там не было — делать ничего не нужно/.test(s.out),
     back: s.out.includes("Вернуть его"), leaves: s.out.includes("больше не обновляет"),
     code: a.code, after: [rules(`${ws2}/Org/p1/CLAUDE.local.md`), rules(`${ws2}/Lab/q/CLAUDE.local.md`)],
-  }).toEqual({ said: true, back: false, leaves: false, code: 0, after: before });
+  }, said(a)).toEqual({ said: true, back: false, leaves: false, code: 0, after: before });
 }, 240000);
 
 // B №4: прежний основной без ветки, у нового основного папка с тем же именем (Org) — перенос layers/tree/Org снял бы
@@ -116,7 +116,7 @@ for (const clash of [true, false])
     git(`${work}/Other/r`);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude]\n`);
     put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
     const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
     expect({

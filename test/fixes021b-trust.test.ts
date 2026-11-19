@@ -3,7 +3,7 @@
 // неверное поведение — здесь с верными ожиданиями
 import { expect, test } from "bun:test";
 import { mkdirSync, renameSync, rmSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { allow, commit, hasTag, local, oldEngine, oldRunner, patchLocal, trusted, userTrusts } from "./fixes021b-helpers";
 
@@ -182,7 +182,7 @@ test.skipIf(!hasTag())("A2′: «нет» доверию Claude, записан�
   // Прежний v0.2.0 читает такой local/trust.json (с отметкой alone) без ошибок и одобрения не снимает
   const o = run(["sync", deny]);
   expect(o.err).toBe("");
-  expect(o.code).toBe(0);
+  expectCode(o, 0);
   expect(read(`${deny}/.claude/settings.local.json`)).toContain("tdeny");
 }, 300000);
 

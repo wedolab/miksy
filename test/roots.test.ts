@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, renameSync, symlinkSync } from "node:fs";
 import { dirsOf, locate, type Root, treeJoin } from "../src/roots";
 import { orphanTreeDirs, parseRoots } from "../src/load";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, read, rootsFixture, yamlRoots } from "./rootshelp";
 
 describe("корни: путь → корень и место в дереве, обратно", () => {
@@ -39,7 +39,7 @@ describe("корни: путь → корень и место в дереве, �
     symlinkSync(f.ws, `${f.dir}/wslink`, process.platform === "win32" ? "junction" : "dir");
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: `${f.dir}/wslink`, tree: "Link" }])}agents: [claude]\n`);
     const r = f.run(["projects"]);
-    expect(r.code).toBe(1);
+    expectCode(r, 1);
     expect(r.err).toContain(`корень ${f.ws} указан дважды (${f.ws} и ${f.dir}/wslink — один и тот же каталог: повтор, junction или симлинк)`);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, f.drive])}agents: [claude]\n`);
     expect(f.run(["projects"]).err).toContain("не указана ветка дерева слоёв");
@@ -50,7 +50,7 @@ describe("корни: команды", () => {
   test("projects: корни, места в дереве; вложенный корень — свой (справка: внутри какого корня)", () => {
     const f = rootsFixture();
     const r = f.run(["projects"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("Корни workspace (5):");
     expect(r.out).toContain(`  ${f.drive} → layers/tree/Clients\n`);
     expect(r.out).toContain(`  ${f.inner} → layers/tree/Code  (внутри корня ${f.ws})`);
@@ -63,7 +63,7 @@ describe("корни: команды", () => {
   test("sync --all: слои по месту в дереве, общее двум корням — слоем map.yaml; ${WORKSPACE} — основной корень у целей любого корня; doctor чистый", () => {
     const f = rootsFixture();
     const all = f.run(["sync", "--all", "--yes"]);
-    expect(all.code).toBe(0);
+    expectCode(all, 0);
     expect(all.out).toContain(`workspace ${f.ws}, ${f.drive} → layers/tree/Clients`);
     expect(f.rules(`${f.drive}/Acme/site`)).toEqual(["workspace", "clients", "acme", "shared"]);
     expect(f.rules(`${f.archive}/Acme/app`)).toEqual(["workspace", "shared"]);
@@ -74,7 +74,7 @@ describe("корни: команды", () => {
     expect(f.rules(`${f.ws}/Grp/q`)).toEqual([]);
     const projects = JSON.parse(read(`${f.home}/.claude.json`)).projects;
     for (const p of [`${f.drive}/Acme/site`, `${f.ws}/Org/p1`, `${f.inner}/p`, `${f.books}/novel`]) expect(projects[p].mcpServers.ws.args).toEqual([`${f.ws}/x`]);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const d = f.run(["doctor"]);
     expect(d.out).toContain("Всё синхронизировано");
     expect(d.out).toContain("корней: 5");
@@ -84,20 +84,20 @@ describe("корни: команды", () => {
 
   test("исчезнувший корень (каталога нет): пропускается с предупреждением, учёт его целей не трогается и не «пропал»", () => {
     const f = rootsFixture();
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const manifest = () => Object.keys(JSON.parse(read(`${f.config}/local/state/manifest.json`)).targets);
     expect(manifest()).toContain(`claude|${f.archive}/Acme/app`);
     renameSync(f.archive, `${f.archive}-away`);
     const p = f.run(["projects"]);
-    expect(p.code).toBe(0);
+    expectCode(p, 0);
     expect(p.out).toContain(`корень ${f.archive} → layers/tree/Archive недоступен (каталога нет)`);
     expect(p.out).not.toMatch(/^Archive\/Acme\/app$/m);
     const d = f.run(["doctor"]);
     expect(d.out).not.toContain("Учёт ссылается на несуществующие каталоги");
     expect(d.out).toContain(`Учёт целей недоступного корня (1) не проверяется — подключите диск: ${f.archive}/Acme/app`);
     expect(d.out).toContain("Всё синхронизировано");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(manifest()).toContain(`claude|${f.archive}/Acme/app`);
     renameSync(`${f.archive}-away`, f.archive);
     expect(f.run(["doctor"]).out).toContain("Всё синхронизировано");
@@ -122,7 +122,7 @@ describe("корни: команды", () => {
   test("explain: корень и место в дереве; вложенный корень — внутри какого; корень — не цель; вне корней — глобальный срез", () => {
     const f = rootsFixture();
     const e = f.run(["explain", `${f.drive}/Acme/site`]);
-    expect(e.code).toBe(0);
+    expectCode(e, 0);
     expect(e.out).toMatch(new RegExp(`Корень +${f.drive}\n`));
     expect(e.out).toMatch(/Место в дереве +layers\/tree\/Clients\/Acme\/site/);
     expect(e.out).toMatch(/Слои +workspace → Clients → Clients\/Acme → acme/);
@@ -137,11 +137,11 @@ describe("корни: команды", () => {
   test("target в другом корне: пометка — в слое по месту в дереве; корень — не цель", () => {
     const f = rootsFixture();
     const t = f.run(["target", `${f.drive}/Acme`]);
-    expect(t.code).toBe(0);
+    expectCode(t, 0);
     expect(read(`${f.config}/layers/tree/Clients/Acme/layer.yaml`)).toBe("target: true\n");
     expect(f.run(["projects"]).out).toContain("Clients/Acme   (группа");
     const root = f.run(["target", f.drive]);
-    expect(root.code).toBe(1);
+    expectCode(root, 1);
     expect(root.err).toContain("сам workspace (корень): он не цель (общие настройки его проектов — слой layers/tree/Clients)");
   }, 30000);
 });
@@ -151,26 +151,26 @@ describe("sync без пути — проект текущего каталог�
     const f = rootsFixture();
     mkdirSync(`${f.drive}/Acme/site/src/deep`, { recursive: true });
     const r = f.run(["sync"], { cwd: `${f.drive}/Acme/site/src/deep` });
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("Clients/Acme/site");
     expect(f.rules(`${f.drive}/Acme/site`)).toEqual(["workspace", "clients", "acme", "shared"]);
     expect(existsSync(`${f.archive}/Acme/app/CLAUDE.local.md`)).toBe(false);
     for (const cwd of [f.drive, f.ws]) {
       const root = f.run(["sync"], { cwd });
-      expect(root.code).toBe(2);
+      expectCode(root, 2);
       expect(root.err).toContain("— корень workspace, а не проект: sync без пути (и с путём «.») — для одного проекта. Все проекты — miksy sync --all, домашние настройки агентов — miksy sync --global");
-      expect(f.run(["sync", "."], { cwd }).code).toBe(2);
+      expectCode(f.run(["sync", "."], { cwd }), 2);
     }
     expect(existsSync(`${f.drive}/CLAUDE.local.md`)).toBe(false);
     mkdirSync(`${f.dir}/elsewhere`);
     const out = f.run(["sync", "--dry-run"], { cwd: `${f.dir}/elsewhere` });
-    expect(out.code).toBe(2);
+    expectCode(out, 2);
     expect(out.err).toContain(`${f.dir}/elsewhere — каталог вне workspace`);
     expect(out.err).toContain("Здесь: проектов (git-репо) в нём нет, а корень workspace — папка с проектами.");
     expect(out.err).toContain("если сюда вы будете класть проекты — miksy root add .; домашние настройки агентов — miksy sync --global");
     // clean — только явно
     const c = f.run(["clean"], { cwd: `${f.drive}/Acme/site` });
-    expect(c.code).toBe(2);
+    expectCode(c, 2);
     expect(c.err).toContain("clean убирает записанное — только явно");
     expect(existsSync(`${f.drive}/Acme/site/CLAUDE.local.md`)).toBe(true);
   }, 60000);
@@ -178,10 +178,10 @@ describe("sync без пути — проект текущего каталог�
   test("explain без пути — текущий каталог; --global — домашние настройки", () => {
     const f = rootsFixture();
     const e = f.run(["explain"], { cwd: `${f.drive}/Acme/site` });
-    expect(e.code).toBe(0);
+    expectCode(e, 0);
     expect(e.out).toMatch(/Проект +Clients\/Acme\/site/);
     const g = f.run(["explain", "--global"], { cwd: `${f.drive}/Acme/site` });
     expect(g.out).toContain("домашний каталог агентов");
-    expect(f.run(["explain", "--global", "."]).code).toBe(2);
+    expectCode(f.run(["explain", "--global", "."]), 2);
   }, 30000);
 });

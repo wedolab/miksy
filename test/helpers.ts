@@ -1,7 +1,8 @@
 // Общее для тестов CLI: конфигурация, домашний каталог и workspace во временном каталоге
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { expect } from "bun:test";
 
 export const CLI = resolve(import.meta.dir, "..", "src", "cli.ts");
 
@@ -35,7 +36,7 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
       stderr: "pipe",
     });
     const res = { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
-    ciDump(args, o.cwd ?? dir, res.code, res.out, res.err);
+    Object.defineProperty(res, "cmd", { value: `miksy ${args.join(" ")} (cwd ${o.cwd ?? dir})`, enumerable: false });
     return res;
   };
   return { dir, config, home, ws, run };
@@ -64,25 +65,35 @@ export const agentHomeFiles = (home: string) => AGENT_HOME.flatMap((d) => {
   return !existsSync(p) ? [] : statSync(p).isDirectory() ? textFiles(p) : [p];
 });
 
-// На CI (GitHub задаёт CI=true) — вывод команды miksy с кодом ≠ 0 в лог теста: редкие «3 вместо 0» и «1 вместо 0» на
-// macOS GitHub не воспроизводятся на стенде (круги 10d-4, 10d-5). Локально — тишина. Тесты, где ненулевой код ожидаем,
-// тоже печатают — это шум; вывод одной команды — не больше 6000 символов. Пишем прямо в дескриптор 2, без
-// process.stderr: в Bun 1.3.14 под --parallel на Linux первое обращение к нему падает «EEXIST … epoll_ctl»
-// (круг 10d-7, 46 падений на CI 0.3.1). Диагностика не роняет тест ни при каком сбое записи
-export function ciDump(args: string[], cwd: string, code: number | null, out: string, err: string) {
-  if (!process.env.CI || code === 0) return;
-  const cut = (s: string) => (s.length > 6000 ? `${s.slice(0, 6000)}\n… (ещё ${s.length - 6000} символов)` : s);
-  const text = `\n[miksy code ${code}] miksy ${args.join(" ")} (cwd ${cwd})\n--- stdout\n${cut(out)}\n--- stderr\n${cut(err)}\n--- end\n`;
-  try {
-    const buf = Buffer.from(text);
-    for (let at = 0, idle = 0; at < buf.length && idle < 100;) {
-      const n = writeSync(2, buf, at);
-      at += n;
-      idle = n > 0 ? 0 : idle + 1;
-    }
-  } catch {
-    try { console.error(text); } catch { /* диагностика — не повод ронять тест */ }
-  }
+// Говорящие проверки кода выхода (круг 10h): при несовпадении в сообщении — команда (если известна), ожидаемый и
+// полученный код, stdout и stderr (обрезка до 6000 символов). Результат — любой объект запуска: { code, out, err } тестов
+// CLI, Bun.spawnSync ({ exitCode, stdout, stderr }; вывод inherit — «нет»). Команду знают результаты cliFixture.run
+// (скрытое поле cmd — toEqual его не видит)
+type Ran = { code?: number | null; exitCode?: number | null; out?: unknown; err?: unknown; stdout?: unknown; stderr?: unknown; cmd?: unknown };
+const cut = (s: string) => (s.length > 6000 ? `${s.slice(0, 6000)}\n… (ещё ${s.length - 6000} символов)` : s);
+const text = (v: unknown) => v === undefined || v === null ? "(нет)" : typeof v === "string" ? v : v instanceof Uint8Array ? Buffer.from(v).toString() : String(v);
+const codeOf = (r: Ran) => (r.code !== undefined ? r.code : r.exitCode);
+function said1(r: Ran): string {
+  if (!r || typeof r !== "object") return `\n(результат: ${String(r)})`;
+  const cmd = typeof r.cmd === "string" ? `\nкоманда: ${r.cmd}` : "";
+  return `${cmd}\nкод ${codeOf(r)}\n--- stdout\n${cut(text(r.out ?? r.stdout))}\n--- stderr\n${cut(text(r.err ?? r.stderr))}\n--- конец`;
+}
+// Текст для второго аргумента expect: что сказали команды (массивы раскрываются)
+export const said = (...rs: unknown[]): string => rs.flat().map((r) => said1(r as Ran)).join("\n");
+export function expectCode(r: Ran, want: number | null) {
+  const got = codeOf(r);
+  if (got === want) return expect(got).toBe(want);
+  expect(got, `код выхода ${got} вместо ${want}${said1(r)}`).toBe(want);
+}
+export function expectCodeIn(r: Ran, allowed: (number | null)[]) {
+  const got = codeOf(r);
+  if (allowed.includes(got ?? null)) return expect(allowed).toContain(got);
+  expect(allowed, `код выхода ${got} — ожидался один из ${allowed.join(", ")}${said1(r)}`).toContain(got);
+}
+export function expectNotCode(r: Ran, not: number | null) {
+  const got = codeOf(r);
+  if (got !== not) return expect(got).not.toBe(not);
+  expect(got, `код выхода ${got} — ожидался любой другой${said1(r)}`).not.toBe(not);
 }
 
 // git init для заготовки теста: сбой — сразу ошибка с причиной, а не проект без .git и загадочный код 3 позже

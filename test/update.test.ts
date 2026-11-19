@@ -10,7 +10,7 @@ import { runCommand } from "../src/commands";
 import { ENGINE } from "../src/load";
 import { canonical } from "../src/paths";
 import { changesText, finishUpdate, update } from "../src/update";
-import { ciDump, cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 const git = (dir: string, ...a: string[]) => {
@@ -77,7 +77,6 @@ function repos(o: { stable?: boolean; userBranch?: string } = {}) {
       cwd: dir, stdin: "ignore", stdout: "pipe", stderr: "pipe",
       env: { ...process.env, ...ID, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home },
     });
-    ciDump(args, dir, r.exitCode, r.stdout.toString(), r.stderr.toString());
     return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
   };
   const head = () => git(user, "rev-parse", "HEAD");
@@ -96,7 +95,7 @@ describe("miksy update — ветка stable", () => {
     const r = repos();
     const before = r.head();
     const out = r.run(["update"]);
-    expect(out.code).toBe(0);
+    expectCode(out, 0);
     expect(out.out).toContain("У вас последняя версия: 0.1.0");
     expect(r.head()).toBe(before);
     expect(r.run(["update", "--check"]).out).toContain("У вас последняя версия: 0.1.0");
@@ -108,7 +107,7 @@ describe("miksy update — ветка stable", () => {
     const refs = () => git(r.user, "for-each-ref", "--format=%(refname) %(objectname)");
     const before = refs();
     const out = r.run(["update", "--check"]);
-    expect(out.code).toBe(0);
+    expectCode(out, 0);
     expect(out.out).toContain("Есть новая версия: 0.2.0; у вас 0.1.0");
     expect(refs()).toBe(before);
     expect(git(r.user, "tag")).toBe("v0.1.0");
@@ -120,7 +119,7 @@ describe("miksy update — ветка stable", () => {
     r.release("0.2.1", { "Исправлено": ["- ошибка Y"] });
     const before = r.head();
     const no = r.run(["update"]);
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(no.out).toContain("Новая версия: 0.2.1; у вас 0.1.0");
     expect(no.out).toContain("## 0.2.1");
     expect(no.out).toContain("## 0.2.0");
@@ -131,7 +130,7 @@ describe("miksy update — ветка stable", () => {
     expect(r.head()).toBe(before);
 
     const yes = r.run(["update", "--yes"]);
-    expect(yes.code).toBe(0);
+    expectCode(yes, 0);
     expect(r.head()).toBe(git(r.bare, "rev-parse", "stable"));
     expect(r.branchOf()).toBe("stable");
     expect(yes.out).toContain("✓ движок обновлён: 0.1.0 → 0.2.1");
@@ -156,7 +155,7 @@ describe("miksy update — ветка stable", () => {
     const file = `${r.user}/src/explain.ts`;
     writeFileSync(file, readFileSync(file, "utf8") + "\n// моя правка\n");
     const out = r.run(["update", "--yes"]);
-    expect(out.code).toBe(1);
+    expectCode(out, 1);
     expect(out.out).toContain("незакоммиченные правки");
     expect(out.out).toContain("src/explain.ts");
     expect(out.out).toContain("stash");
@@ -174,7 +173,7 @@ describe("miksy update — ветка stable", () => {
     git(r.user, "commit", "-q", "-m", "mine");
     const before = r.head();
     const out = r.run(["update", "--yes"]);
-    expect(out.code).toBe(1);
+    expectCode(out, 1);
     expect(out.out).toContain("разошлась с origin/stable");
     expect(out.out).toContain("branch stable-mine");
     expect(r.head()).toBe(before);
@@ -189,7 +188,7 @@ describe("miksy update — ветка stable", () => {
     expect(r.run(["update"]).out).toContain("движок на ветке feature");
     git(r.user, "checkout", "-q", "stable");
     expect(r.run(["update", "--main"]).out).toContain("--main — обновление ветки разработки main");
-    expect(r.run(["update", "--check", "--yes"]).code).toBe(2);
+    expectCode(r.run(["update", "--check", "--yes"]), 2);
   }, 60000);
 
   test("движок не git-клон — отказ", () => {
@@ -199,12 +198,12 @@ describe("miksy update — ветка stable", () => {
     cpSync(`${r.user}/package.json`, `${copy}/package.json`);
     const out = Bun.spawnSync([process.execPath, `${copy}/src/cli.ts`, "update"], { stdout: "pipe", stderr: "pipe",
       env: { ...process.env, MIKSY_CONFIG: r.f.config, HOME: r.f.home, USERPROFILE: r.f.home } });
-    expect(out.exitCode).toBe(1);
+    expectCode(out, 1);
     expect(out.stderr.toString()).toContain("не git-клон");
     // Сбой самого git (здесь — испорченная настройка в окружении) — его сообщение, а не «не git-клон»
     const broken = Bun.spawnSync([process.execPath, `${r.user}/src/cli.ts`, "update", "--check"], { stdout: "pipe", stderr: "pipe",
       env: { ...process.env, MIKSY_CONFIG: r.f.config, HOME: r.f.home, USERPROFILE: r.f.home, GIT_CONFIG_COUNT: "1" } });
-    expect(broken.exitCode).toBe(1);
+    expectCode(broken, 1);
     expect(broken.stderr.toString()).toContain("git в каталоге движка не работает");
     expect(Bun.spawnSync([process.execPath, `${copy}/src/cli.ts`, "--version"]).stdout.toString().trim()).toBe("miksy 0.1.0");
   }, 60000);
@@ -216,7 +215,7 @@ describe("miksy update — ветка main (тестеры, склонирова
     r.release("0.2.0", { "Новое": ["- x"] }, NEW_CODE);
     r.devCommit("unreleased.txt");
     const no = r.run(["update"]);
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(no.out).toContain("ветке разработки main");
     expect(no.out).toContain("Перейти на stable: 0.1.0 → 0.2.0");
     expect(no.out).toContain("только с --yes");
@@ -224,7 +223,7 @@ describe("miksy update — ветка main (тестеры, склонирова
     expect(r.run(["update", "--check"]).out).toContain("Последний релиз — 0.2.0 (ветка stable)");
 
     const yes = r.run(["update", "--yes"]);
-    expect(yes.code).toBe(0);
+    expectCode(yes, 0);
     expect(r.branchOf()).toBe("stable");
     expect(r.head()).toBe(git(r.bare, "rev-parse", "stable"));
     expect(git(r.user, "rev-parse", "--abbrev-ref", "stable@{upstream}")).toBe("origin/stable");
@@ -239,7 +238,7 @@ describe("miksy update — ветка main (тестеры, склонирова
     const r = repos({ userBranch: "main" });
     writeFileSync(`${r.user}/package.json`, readFileSync(`${r.user}/package.json`, "utf8") + "\n");
     const out = r.run(["update", "--yes"]);
-    expect(out.code).toBe(1);
+    expectCode(out, 1);
     expect(out.out).toContain("незакоммиченные правки");
     expect(r.branchOf()).toBe("main");
   }, 60000);
@@ -247,14 +246,14 @@ describe("miksy update — ветка main (тестеры, склонирова
   test("stable ещё нет — остаться на main; --main обновляет main fast-forward", () => {
     const r = repos({ stable: false });
     const out = r.run(["update"]);
-    expect(out.code).toBe(0);
+    expectCode(out, 0);
     expect(out.out).toContain("ещё нет ветки stable");
     expect(r.run(["update", "--check"]).out).toContain("Релизов (ветки stable) в удалённом репо ещё нет");
     r.devCommit("next.txt");
     expect(r.run(["update", "--check"]).out).toContain("В main есть новые коммиты");
     const before = r.head();
     const main = r.run(["update", "--main", "--yes"]);
-    expect(main.code).toBe(0);
+    expectCode(main, 0);
     expect(r.head()).not.toBe(before);
     expect(r.head()).toBe(git(r.bare, "rev-parse", "main"));
     expect(r.branchOf()).toBe("main");

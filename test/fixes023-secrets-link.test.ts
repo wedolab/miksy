@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CLI } from "./helpers";
+import { CLI, expectCode, said } from "./helpers";
 
 const win = process.platform === "win32";
 const tmp = (p: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p))).replaceAll("\\", "/");
@@ -45,7 +45,7 @@ for (const kind of ["открытая", "битая"] as const)
     expect({
       codes: [dry.code, real.code], dry: refusals(dry.out, true), real: refusals(real.out, false), create: /файл секрета A_TOKEN: создать/.test(dry.out),
       p1: existsSync(`${w.ws}/Org/p1/opencode.json`), p2: existsSync(`${w.ws}/Org/p2/opencode.json`), p3: existsSync(`${w.ws}/Lab/p3/.opencode/miksy.md`),
-    }).toEqual({ codes: [3, 3], dry: 2, real: 2, create: false, p1: false, p2: false, p3: true });
+    }, said(dry, real)).toEqual({ codes: [3, 3], dry: 2, real: 2, create: false, p1: false, p2: false, p3: true });
     // A6: итог — правдой: цели пропущены из-за ошибки, а не «конфликтов … эти места не изменены»
     expect({ skipped: real.out.includes("Целей пропущено из-за ошибки: 2 — в них ничего не записано"), conflicts: /Конфликтов: /.test(real.out) }).toEqual({ skipped: true, conflicts: false });
     // Круг 9b: --dry-run — будущее время, как в строке цели
@@ -54,9 +54,9 @@ for (const kind of ["открытая", "битая"] as const)
       // Команда закрытия из строки (Windows — PowerShell, иначе sh) дословно — затем пишутся обе цели
       const cmd = real.out.match(/закройте вручную(?: \(PowerShell\))?: (.+)$/m)![1].trim();
       const r = win ? Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd], { stdout: "pipe" }) : Bun.spawnSync(["sh", "-c", cmd]);
-      expect(r.exitCode).toBe(0);
+      expectCode(r, 0);
       const again = w.run(["sync", "--all", "--yes"]);
-      expect({ code: again.code, p1: existsSync(`${w.ws}/Org/p1/opencode.json`), p2: existsSync(`${w.ws}/Org/p2/opencode.json`), token: existsSync(`${w.vault}/A_TOKEN`) })
+      expect({ code: again.code, p1: existsSync(`${w.ws}/Org/p1/opencode.json`), p2: existsSync(`${w.ws}/Org/p2/opencode.json`), token: existsSync(`${w.vault}/A_TOKEN`) }, said(again))
         .toEqual({ code: 0, p1: true, p2: true, token: true });
     }
   }, 300000);
@@ -83,7 +83,7 @@ test("A5: секрет уже записан, цель ссылки открыл
   const env = { ...process.env, MIKSY_CONFIG: config, HOME: home, USERPROFILE: home };
   const run = (args: string[]) => { const r = Bun.spawnSync([process.execPath, CLI, ...args], { cwd: root, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" }); return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() }; };
   const first = run(["sync", "--all", "--yes"]);
-  expect({ code: first.code, tok: existsSync(`${vault}/A_TOKEN`) }).toEqual({ code: 0, tok: true });
+  expect({ code: first.code, tok: existsSync(`${vault}/A_TOKEN`) }, said(first)).toEqual({ code: 0, tok: true });
   // Цель открыли
   if (win) Bun.spawnSync([icaclsExe, vault.replaceAll("/", "\\"), "/grant", "*S-1-1-0:(OI)(CI)(R)"], { stdout: "pipe" });
   else Bun.spawnSync(["chmod", "755", vault]);
@@ -91,7 +91,7 @@ test("A5: секрет уже записан, цель ссылки открыл
   const dry = run(["sync", "--all", "--yes", "--dry-run"]);
   const real = run(["sync", "--all", "--yes"]);
   const errs = (o: string) => o.split("\n").filter((l) => /ОШИБКА/.test(l)).length;
-  expect({ dry: [dry.code, errs(dry.out)], real: [real.code, errs(real.out)] }).toEqual({ dry: [real.code, errs(real.out)], real: [real.code, errs(real.out)] });
+  expect({ dry: [dry.code, errs(dry.out)], real: [real.code, errs(real.out)] }, said(dry, real)).toEqual({ dry: [real.code, errs(real.out)], real: [real.code, errs(real.out)] });
 }, 300000);
 
 // Повторная проверка 9a, №1: файл секрета — битая ссылка в открытой цели local/secrets — --dry-run и sync говорят одно
@@ -115,7 +115,7 @@ test.skipIf(win && !can())("A5: файл секрета — битая ссыл�
   const env = { ...process.env, MIKSY_CONFIG: config, HOME: home, USERPROFILE: home };
   const run = (args: string[]) => { const r = Bun.spawnSync([process.execPath, CLI, ...args], { cwd: root, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" }); return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() }; };
   const first = run(["sync", "--all", "--yes"]);
-  expect({ code: first.code, tok: existsSync(`${vault}/A_TOKEN`) }).toEqual({ code: 0, tok: true });
+  expect({ code: first.code, tok: existsSync(`${vault}/A_TOKEN`) }, said(first)).toEqual({ code: 0, tok: true });
   const fs = require("node:fs") as typeof import("node:fs"); fs.rmSync(`${vault}/A_TOKEN`); fs.symlinkSync(`${root}/nowhere`, `${vault}/A_TOKEN`, "file");
   // Цель открыли
   if (win) Bun.spawnSync([icaclsExe, vault.replaceAll("/", "\\"), "/grant", "*S-1-1-0:(OI)(CI)(R)"], { stdout: "pipe" });
@@ -124,5 +124,5 @@ test.skipIf(win && !can())("A5: файл секрета — битая ссыл�
   const dry = run(["sync", "--all", "--yes", "--dry-run"]);
   const real = run(["sync", "--all", "--yes"]);
   const errs = (o: string) => o.split("\n").filter((l) => /ОШИБКА/.test(l)).length;
-  expect({ dry: [dry.code, errs(dry.out)], real: [real.code, errs(real.out)] }).toEqual({ dry: [real.code, errs(real.out)], real: [real.code, errs(real.out)] });
+  expect({ dry: [dry.code, errs(dry.out)], real: [real.code, errs(real.out)] }, said(dry, real)).toEqual({ dry: [real.code, errs(real.out)], real: [real.code, errs(real.out)] });
 }, 300000);

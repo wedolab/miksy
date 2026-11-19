@@ -5,7 +5,7 @@
 // серверы), слои одноимённой папки нового основного не тронуты. Мастер — в процессе, поддельная система, движок — копия
 import { expect, test } from "bun:test";
 import { cpSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 import { inCmd, inSetup } from "./fixes022e-helpers";
 
@@ -29,12 +29,12 @@ for (const o of [{ name: "без ветки" }, { name: "с веткой W", mai
       put(`${f.config}/map.yaml`, "global:\n  - { use: global }\nlayers:\n  - { match: \"Org/**\", use: orgx }\n");
       put(`${f.config}/layers/orgx/skills/mapskill/SKILL.md`, skill("mapskill"));
     }
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     renameSync(ws, `${ws}.off`);
     inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const p2Before = layers(f, `${work}/Org/p2`);
-    expect(f.run(["clean", `${ws}/Org/p1`, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", `${ws}/Org/p1`, "--forget"]), 0);
     renameSync(`${ws}.off`, ws);
     const c = f.run(["clean", `${ws}/Org/p1`]);
     expect(c.out).toContain("Слои его проектов под неё скопируйте, а не переносите: ветки у него не было — layers/tree/<папка> → layers/tree/<ветка>/<папка>; была");
@@ -44,10 +44,10 @@ for (const o of [{ name: "без ветки" }, { name: "с веткой W", mai
     else cpSync(`${f.config}/layers/tree/Org`, `${f.config}/layers/tree/${B}/Org`, { recursive: true });
     const map0 = read(`${f.config}/map.yaml`);
     if (o.viaMap) writeFileSync(`${f.config}/map.yaml`, `${map0.trimEnd()}\n  - { match: "${B}/Org/**", use: orgx }\n`);
-    expect(inCmd(f, ["root", "add", ws, "--tree", B], [false]).code).toBe(0);
+    expectCode(inCmd(f, ["root", "add", ws, "--tree", B], [false]), 0);
     for (const l of c.out.split("\n").filter((x) => /^\s+miksy sync /.test(x))) for (const part of l.trim().split("; "))
       f.run([...part.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => m[1] ?? m[2]).slice(1));
-    expect(inCmd(f, ["root", "remove", ws], [false]).code).toBe(0);
+    expectCode(inCmd(f, ["root", "remove", ws], [false]), 0);
     rmSync(`${f.config}/layers/tree/${B}`, { recursive: true, force: true });
     if (o.viaMap) writeFileSync(`${f.config}/map.yaml`, map0);
     const left = files(`${ws}/Org/p1`).filter((p) => !/^\.git/.test(p));

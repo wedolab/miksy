@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { quoteArg } from "../src/paths";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode } from "./helpers";
 import { yamlRoots } from "./rootshelp";
 
 const win = process.platform === "win32";
@@ -31,7 +31,7 @@ for (const name of NAMES)
 // Рецензия 9a, №2: путь с $ в подсказке «теперь корень workspace» (doctor) — оболочка передаёт как есть
 test("A2: путь с $ в подсказке rootedText — оболочка передаёт как есть", () => {
   const f = cliFixture({ agents: ["claude"], projects: ["Pro$1x"] });
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const m = `${f.config}/local/machine.yaml`;
   writeFileSync(m, readFileSync(m, "utf8").replace(/^workspace: .*$/m, yamlRoots([f.ws, { path: `${f.ws}/Pro$1x`, tree: "Code" }]).trimEnd()));
   const doc = f.run(["doctor"]);

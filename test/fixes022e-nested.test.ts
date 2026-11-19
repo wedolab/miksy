@@ -5,7 +5,7 @@
 // одноимённых папок нет папки вложенного корня. Мастер — в процессе, поддельная система, движок — копия в песочнице
 import { expect, test } from "bun:test";
 import { cpSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 import { inSetup } from "./fixes022e-helpers";
 
@@ -23,7 +23,7 @@ function base() {
   put(`${f.config}/layers/tree/Code/instructions/30.md`, "# code rule\n");
   put(`${f.config}/layers/tree/Code/Acme/instructions/31.md`, "# acme rule\n");
   put(`${f.config}/layers/tree/Code/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [\"${WORKSPACE}/x\"]\n");
-  { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
+  { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }, said(r)).toEqual({ code: 0, out: "" }); }
   const before = { p1: rules(`${ws}/Org/p1/CLAUDE.local.md`), site: rules(`${ws}/Inner/Acme/site/CLAUDE.local.md`), layers: layers(f, `${ws}/Inner/Acme/site`) };
   mkdirSync(`${f.dir}/disk2`, { recursive: true });
   return { f, ws, ws2, before };
@@ -44,7 +44,7 @@ test("F1: папку СКОПИРОВАЛИ с вложенным корнем �
   // Дословно: path: на новое место, sync --global и --all; затем «скопировали»: clean в прежней копии, --force в новой
   const file = `${f.config}/local/machine.yaml`;
   writeFileSync(file, readFileSync(file, "utf8").replace(m[1], () => m[2]));
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   f.run(["sync", "--all"]);
   for (const p of [`${ws}/Org/p1`, `${ws}/Inner/Acme/site`]) f.run(["clean", p]);
   for (const p of [`${ws2}/Org/p1`, `${ws2}/Inner/Acme/site`]) f.run(["sync", p, "--force"]);
@@ -87,7 +87,7 @@ test("F1: вложенный корень глубже одноимённой п
   git(`${ws}/Lab/p2`); git(`${ws}/Lab/Inner/Acme/site`); git(`${work}/Lab/q`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Lab/Inner`, tree: "Code" }])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Lab/instructions/10.md`, "# lab rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
   expect({ named: line.includes("у нового основного есть папка с тем же именем (Lab)"), recipe: line.includes("Вернуть его: 1)") }).toEqual({ named: true, recipe: false });

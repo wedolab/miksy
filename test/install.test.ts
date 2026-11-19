@@ -6,7 +6,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonical } from "../src/paths";
-import { put } from "./helpers";
+import { put, expectCode } from "./helpers";
 
 const ROOT = resolve(import.meta.dir, "..");
 const win = process.platform === "win32";
@@ -71,7 +71,7 @@ EOF
     fakes(f.bin);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const r = run(f, `${f.dl}/install.sh`, "y\n\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("curl -fsSL https://bun.sh/install | bash");
     expect(readFileSync(`${f.home}/curl-args`, "utf8")).toContain("https://bun.sh/install");
     const dest = `${f.home}/Projects/miksy`;
@@ -81,7 +81,7 @@ EOF
 
     // Повтор из клона: Bun уже в ~/.bun (не в PATH) — подхвачен, вопросов нет
     const again = run(f, `${dest}/install.sh`, "");
-    expect(again.code).toBe(0);
+    expectCode(again, 0);
     expect(again.out).not.toContain("Куда скачать");
     expect(again.out).toContain("✓ git, Bun 1.4.3");
   }, 120000);
@@ -116,7 +116,7 @@ EOF
     chmodSync(`${f.home}/.bun/bin/bun`, 0o755);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const r = run(f, `${f.dl}/install.sh`, "\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain(`Внимание: на машине несколько установок Bun — используется ${f.bin}/bun:`);
     expect(r.out).toContain(`  ${f.bin}/bun  ← используется`);
     expect(r.out).toContain(`  ${f.home}/.bun/bin/bun\n`);
@@ -138,7 +138,7 @@ EOF
     fakes(f.bin);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const r = run(f, `${f.dl}/install.sh`, "y\n\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const dest = `${f.home}/Projects/miksy`;
     const head = Bun.spawnSync(["git", "-C", dest, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim();
     expect(head === "stable" ? head : `${head}; вывод install.sh:\n${r.out}`).toBe("stable");
@@ -156,10 +156,10 @@ EOF
     fakes(f.bin);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const no = run(f, `${f.dl}/install.sh`, "\n");
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(existsSync(`${f.home}/.bun`)).toBe(false);
     const bad = run(f, `${f.dl}/install.sh`, "y\n\n", `${f.dir}/nope.git`);
-    expect(bad.code).toBe(1);
+    expectCode(bad, 1);
     expect(bad.out).toContain("gh auth login");
     expect(bad.out).toContain("MIKSY_REPO=git@github.com:");
   }, 60000);
@@ -171,7 +171,7 @@ EOF
     chmodSync(`${f.bin}/bun`, 0o755);
     copyFileSync(join(ROOT, "install.sh"), `${f.dl}/install.sh`);
     const r = run(f, `${f.dl}/install.sh`, "\n");
-    expect(r.code).toBe(1);
+    expectCode(r, 1);
     expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
     expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
   }, 60000);
@@ -200,7 +200,7 @@ describe.skipIf(!win)("install.ps1", () => {
     fakes(f);
     copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
     const r = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(readFileSync(`${f.home}/ps-args`, "utf8")).toContain("irm bun.sh/install.ps1 | iex");
     const dest = `${f.home}/Projects/miksy`;
     expect(existsSync(`${dest}/src/cli.ts`)).toBe(true);
@@ -220,7 +220,7 @@ ${again.out}`).toBe("");
     put(`${f.home}/.bun/bin/bun.cmd`, readFileSync(`${f.dir}/fakebun.cmd`, "utf8"));
     copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
     const r = run(f, `${f.dl}/install.ps1`, "\r\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const used = `${f.bin}/bun.cmd`.replaceAll("/", "\\");
     expect(r.out).toContain(`Внимание: на машине несколько установок Bun — используется ${used}:`);
     expect(r.out).toContain(`  ${used}  ← используется`);
@@ -241,7 +241,7 @@ ${again.out}`).toBe("");
     fakes(f);
     copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
     const r = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const dest = `${f.home}/Projects/miksy`;
     expect(Bun.spawnSync(["git", "-C", dest, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim()).toBe("stable");
     expect(existsSync(`${dest}/RELEASE`)).toBe(true);
@@ -258,10 +258,10 @@ ${again.out}`).toBe("");
     fakes(f);
     copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
     const no = run(f, `${f.dl}/install.ps1`, "\r\n");
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(existsSync(`${f.home}/.bun`)).toBe(false);
     const bad = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n", `${f.dir}/nope.git`);
-    expect(bad.code).toBe(1);
+    expectCode(bad, 1);
     expect(bad.out).toContain("gh auth login");
   }, 180000);
 
@@ -271,7 +271,7 @@ ${again.out}`).toBe("");
     put(`${f.bin}/bun.cmd`, `@echo off\r\nif "%~1"=="--version" (echo 1.4.2& exit /b 0)\r\necho %CD% %*> "%USERPROFILE%\\bun-args"\r\n`);
     copyFileSync(join(ROOT, "install.ps1"), `${f.dl}/install.ps1`);
     const r = run(f, `${f.dl}/install.ps1`, "\r\n");
-    expect(r.code).toBe(1);
+    expectCode(r, 1);
     expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
     expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
   }, 180000);

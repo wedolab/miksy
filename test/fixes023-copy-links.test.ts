@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { copyAgentSettings } from "../src/setup";
 import { applyRestore, planRestore } from "../src/restore";
+import { said } from "./helpers";
 
 const win = process.platform === "win32";
 const tmp = (p: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p))).replaceAll("\\", "/");
@@ -44,7 +45,7 @@ test.skipIf(!win)("A9: копия «до miksy» — junction, битый juncti
   for (const n of names) { const p = `${home}/.claude/${n}`; if (lstatSync(p).isSymbolicLink()) { try { rmSync(p); } catch { Bun.spawnSync(["cmd", "/c", "rmdir", p.replaceAll("/", "\\")]); } } }
   const back = { exitCode: applyRestore(planRestore(copy, home), home, () => {}).failed.length ? 1 : 0 };
   const restored = kinds(names.map((n) => `${home}/.claude/${n}`));
-  expect({ code: back.exitCode, restored, gone: existsSync(`${dot}/gone`) }).toEqual({
+  expect({ code: back.exitCode, restored, gone: existsSync(`${dot}/gone`) }, said(back)).toEqual({
     code: 0,
     restored: { ".claude/skills": "Junction/1", ".claude/gone": "Junction/1", ".claude/agents": "Junction/1", ".claude/settings.json": "SymbolicLink/0" },
     gone: false,

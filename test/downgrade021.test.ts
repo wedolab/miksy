@@ -5,7 +5,7 @@
 // Отметку версии учёта (A5) v0.2.1 после отката не переписывает — это умеют версии с 0.2.2: сообщение «учёт записан
 // более новой версией» на v0.2.1 остаётся до первого sync с изменениями (README, «Особенности версий»)
 import { expect, test } from "bun:test";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode, said } from "./helpers";
 import { inProcess, ledger, read } from "./rootshelp";
 import { commit, hasTag, oldEngine, oldRunner, userTrusts } from "./fixes021b-helpers";
 
@@ -18,14 +18,14 @@ test.skipIf(!hasTag(TAG))("учёт и local/trust.json этой версии (�
   const p1 = `${f.ws}/Org/p1`, p2 = `${f.ws}/Org/p2`, p3 = `${f.ws}/Org/p3`;
   // Эта версия: p1 — доверие ставил miksy, затем clean; p2 — «нет» доверию Claude, «да» серверам .mcp.json (alone);
   // p3 — забыт
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-  expect(f.run(["clean", p1]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
+  expectCode(f.run(["clean", p1]), 0);
   commit(p2, MCP);
-  expect(f.run(["trust", p2, "--deny"]).code).toBe(0);
+  expectCode(f.run(["trust", p2, "--deny"]), 0);
   userTrusts(f.home, p2);
   expect(inProcess(f, ["trust", p2], f.dir, ["y"]).err).toBe("");
-  expect(f.run(["sync", p2]).code).toBe(0);
-  expect(f.run(["clean", p3, "--forget"]).code).toBe(0);
+  expectCode(f.run(["sync", p2]), 0);
+  expectCode(f.run(["clean", p3, "--forget"]), 0);
   const mine = { ledger: read(`${f.config}/local/state/manifest.json`), trust: read(`${f.config}/local/trust.json`) };
   expect(JSON.parse(mine.trust).decisions).toBeTruthy();
   expect(Object.keys(ledger(f.config).targets).length).toBeGreaterThan(0);
@@ -36,7 +36,7 @@ test.skipIf(!hasTag(TAG))("учёт и local/trust.json этой версии (�
     expect(s.err).toBe("");
     expect(s.out).not.toMatch(/учёт повреждён|не разбирается|КОНФЛИКТ/);
   }
-  expect(steps.slice(0, 3).map((s) => s.code)).toEqual([0, 0, 0]);
+  expect(steps.slice(0, 3).map((s) => s.code), said(steps.slice(0, 3))).toEqual([0, 0, 0]);
   // Вернулись на эту версию — всё читается
   const back = f.run(["doctor"]);
   expect({ err: back.err, broken: /учёт повреждён|не разбирается/.test(back.out) }).toEqual({ err: "", broken: false });

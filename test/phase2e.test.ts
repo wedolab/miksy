@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { executableSettings, mcpJsonServers } from "../src/trust";
 import { backup, newBackupRun, runDir } from "../src/backup";
 import { loadManifest } from "../src/manifest";
@@ -36,9 +36,9 @@ describe("Г1: отпечаток решения — полная структу
   test("env сервера .mcp.json изменён после «да» — решение спрашивается заново, одобрение и доверие сняты", () => {
     const f = cliFixture(), dir = `${f.ws}/Org/p1`;
     commit(dir, { ".mcp.json": JSON.stringify({ mcpServers: { team: { command: "runner", args: ["serve"], env: { PAYLOAD: "safe" } } } }) });
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const ok = f.run(["trust", dir, "--confirm"]);
-    expect(ok.code).toBe(0);
+    expectCode(ok, 0);
     // Показ: значения env и аргументы — видны до ответа
     expect(ok.out).toContain("PAYLOAD");
     expect(ok.out).toContain("safe");
@@ -134,7 +134,7 @@ describe("Г3: неотслеживаемые исполняемые настр�
   test("свои файлы не считаются: одобрения miksy, ответы пользователя в диалогах Claude доверенного проекта, свой конфиг Codex", () => {
     const f = cliFixture({ agents: ["claude", "codex"] }), dir = `${f.ws}/Org/p1`;
     put(`${f.config}/layers/tree/mcp/ctx.yaml`, "name: ctx\ncommand: echo\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(claudeTrusted(f.home)).toBe(true);
     expect(codexTrusted(f.home)).toBe(true);
     // Claude записал ответы «всегда разрешать» и одобрение сервера в доверенном проекте
@@ -201,13 +201,13 @@ describe("Г7, Г8: учёт файлов секретов", () => {
     put(`${f.config}/local/secrets.env`, "OLD=old_value_12345678\nNEW=new_value_12345678\n");
     const layer = (ref: string) => put(`${f.config}/layers/tree/Org/mcp/s.yaml`, `name: s\nurl: https://example.invalid/mcp\nheaders:\n  Authorization: \${${ref}}\n`);
     layer("OLD");
-    expect(f.run(["sync", dir]).code).toBe(0);
+    expectCode(f.run(["sync", dir]), 0);
     const cfg = `${dir}/opencode.json`;
     const saved = read(cfg);
     expect(saved).toContain("/OLD}");
     put(cfg, saved.replace("{", '{\n  "user": true,'));
     layer("NEW");
-    expect(f.run(["sync", dir]).code).toBe(3);
+    expectCode(f.run(["sync", dir]), 3);
     expect(read(cfg)).toContain("/OLD}");
     const st = Object.values(manifest(f).targets).find((t) => t.servers)!;
     expect(st.servers!.s).toContain("OLD");
@@ -215,7 +215,7 @@ describe("Г7, Г8: учёт файлов секретов", () => {
     put(cfg, saved);
     put(`${f.config}/local/secrets.env`, "OLD=old_value_12345678\n");
     const r = f.run(["sync", dir]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(read(cfg)).toContain("/OLD}");
     expect(existsSync(`${f.config}/local/secrets/OLD`)).toBe(true);
   }, 90000);
@@ -225,10 +225,10 @@ describe("Г7, Г8: учёт файлов секретов", () => {
     put(`${f.config}/local/secrets/TOK`, "user_value_12345\n");
     put(`${f.config}/local/secrets.env`, "TOK=user_value_12345\n");
     put(`${f.config}/layers/global/mcp/srv.yaml`, "name: srv\ncommand: echo\nenv:\n  TOKEN: ${TOK}\n");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(manifest(f).secretFiles ?? []).not.toContain("TOK");
     rmSync(`${f.config}/layers/global/mcp/srv.yaml`);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(read(`${f.config}/local/secrets/TOK`)).toBe("user_value_12345\n");
   }, 60000);
 });
@@ -238,7 +238,7 @@ describe("Г9: правила группы — по разбору и хешу �
     const f = cliFixture({ projects: ["Org/p1"] });
     put(`${f.config}/layers/tree/Org/layer.yaml`, "target: true\n");
     put(`${f.config}/layers/tree/Org/instructions/10-org.md`, "# ORG_RULE\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const ws = real(f.ws);
     expect(read(`${ws}/Org/CLAUDE.local.md`)).toContain("ORG_RULE");
     expect(read(`${ws}/Org/p1/CLAUDE.local.md`)).not.toContain("ORG_RULE");
@@ -253,13 +253,13 @@ describe("Г10: exclude вместе с одобрением", () => {
   test("miksy trust --confirm: файл одобрений скрыт от git сразу", () => {
     const f = cliFixture(), dir = `${f.ws}/Org/p1`;
     commit(dir, { ".mcp.json": JSON.stringify({ mcpServers: { team: { command: "team-server" } } }) });
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["trust", dir, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["trust", dir, "--confirm"]), 0);
     expect(localSettings(dir).enabledMcpjsonServers).toEqual(["team"]);
-    expect(git(dir, "check-ignore", "-q", ".claude/settings.local.json").exitCode).toBe(0);
+    expectCode(git(dir, "check-ignore", "-q", ".claude/settings.local.json"), 0);
     expect(git(dir, "status", "--porcelain", "--untracked-files=all").stdout.toString()).not.toContain("settings.local.json");
     // Отказ после согласия: своё одобрение снято, строка ушла из блока, учёт согласован
-    expect(f.run(["trust", dir, "--deny"]).code).toBe(0);
+    expectCode(f.run(["trust", dir, "--deny"]), 0);
     expect(localSettings(dir).enabledMcpjsonServers ?? []).toEqual([]);
     expect(read(`${dir}/.git/info/exclude`)).not.toContain("settings.local.json");
     const st = Object.values(manifest(f).targets).find((t) => Object.keys(t.exclude).length);

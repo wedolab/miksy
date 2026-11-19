@@ -10,7 +10,7 @@ import { environment, opencodeMajor } from "../src/environ";
 import { canonical } from "../src/paths";
 import { rcAddsDir } from "../src/setup";
 import type { Machine, Resolved } from "../src/types";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const win = process.platform === "win32";
 const os = win ? "windows" as const : process.platform === "darwin" ? "macos" as const : "linux" as const;
@@ -117,8 +117,8 @@ describe("агент antigravity (прежнее имя gemini — синони�
     put(`${f.config}/layers/tree/mcp/p.yaml`, "name: p\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/skipped.yaml`, "name: skipped\ncommand: echo\nagents:\n  gemini: skip\n");
     put(`${f.config}/local/secrets.env`, "TOK=artificial-token-1234\n");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(f.run(["doctor"]).out).toContain("Всё синхронизировано");
     // agents: { gemini: skip } в слое — тот же агент
     expect(JSON.parse(read(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`)).mcpServers.skipped).toBeUndefined();
@@ -134,7 +134,7 @@ describe("агент antigravity (прежнее имя gemini — синони�
 
     for (const args of [["--global"], ["--all", "--yes"]]) {
       const r = f.run(["sync", ...args]);
-      expect(r.code).toBe(0);
+      expectCode(r, 0);
       expect(r.out).not.toMatch(/КОНФЛИКТ/);
     }
     const manifest = JSON.parse(read(`${f.config}/local/state/manifest.json`));

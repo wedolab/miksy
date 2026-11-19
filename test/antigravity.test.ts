@@ -7,6 +7,7 @@ import { currentGlobal, currentProject, readJsonc, strictJson } from "../adapter
 import type { Machine, Resolved } from "../src/types";
 import { plan } from "../src/apply";
 import { emptyState } from "../src/manifest";
+import { expectCode } from "./helpers";
 
 const temp = mkdtempSync(join(tmpdir(), "antigravity-test-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
@@ -177,7 +178,7 @@ describe("antigravity adapter", () => {
 
     test("plan исключает /.agents/plugins/miksy/ через .git/info/exclude и защищает отслеживаемые файлы", () => {
       const { cfg, machine, project } = fixture();
-      expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
+      expectCode(Bun.spawnSync(["git", "init", "--quiet", project]), 0);
 
       const r = antigravity.render(cfg, { scope: "project", dir: project, rel: "project" }, machine);
       const actionsUntracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "antigravity");
@@ -190,7 +191,7 @@ describe("antigravity adapter", () => {
       // Если файл плагина попал в git — plan выдаёт конфликт
       mkdirSync(join(project, ".agents", "plugins", "miksy", "rules"), { recursive: true });
       writeFileSync(join(project, ".agents", "plugins", "miksy", "rules", "AGENTS.md"), "# Team\n");
-      expect(Bun.spawnSync(["git", "-C", project, "add", "--", ".agents/plugins/miksy/rules/AGENTS.md"]).exitCode).toBe(0);
+      expectCode(Bun.spawnSync(["git", "-C", project, "add", "--", ".agents/plugins/miksy/rules/AGENTS.md"]), 0);
 
       const actionsTracked = plan(r, { scope: "project", dir: project, rel: "project" }, machine, emptyState(), false, "antigravity");
       expect(actionsTracked.some((a) => a.kind === "conflict" && a.abs.includes("AGENTS.md"))).toBe(true);

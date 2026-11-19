@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENGINE } from "../src/load";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, ledger, read } from "./rootshelp";
 
 const TAG = "v0.1.1";
@@ -40,9 +40,9 @@ test.skipIf(!hasTag)("рецепт README: до переключения — к�
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
   };
   // Новая версия: второй корень, всё записано
-  expect(f.run(["root", "add", `${f.dir}/drive`, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["root", "add", `${f.dir}/drive`, "--tree", "Clients"]), 0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   // Рецепт, шаги новой версией: дополнительный корень убрать (в терминале — согласиться убрать записанное)
   const rm = inProcess(f, ["root", "remove", `${f.dir}/drive`], f.dir, [true]);
   expect(rm.err).toBe("");
@@ -50,20 +50,20 @@ test.skipIf(!hasTag)("рецепт README: до переключения — к�
   expect(existsSync(`${f.dir}/drive/Acme/site/CLAUDE.local.md`)).toBe(false);
   // Имя агента — как понимает 0.1.x; записанное Antigravity — убрать
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("antigravity", "gemini"));
-  expect(f.run(["clean", "--all", "--agent", "antigravity"]).code).toBe(0);
-  expect(f.run(["clean", "--global", "--agent", "antigravity"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all", "--agent", "antigravity"]), 0);
+  expectCode(f.run(["clean", "--global", "--agent", "antigravity"]), 0);
   expect(Object.keys(ledger(f.config).targets).filter((k) => /^(antigravity|gemini)\|/.test(k))).toEqual([]);
   // Прежняя версия: setup --yes, sync --global, sync --all — без конфликтов; Antigravity записан её именем
   const steps = [old(["setup", "--yes"]), old(["sync", "--global"]), old(["sync", "--all", "--yes"])];
-  for (const s of steps) expect({ code: s.code, err: s.err }).toEqual({ code: 0, err: "" });
+  for (const s of steps) expect({ code: s.code, err: s.err }, said(s)).toEqual({ code: 0, err: "" });
   expect(steps[1].out + steps[2].out).not.toContain("КОНФЛИКТ");
   expect(read(`${f.home}/.gemini/GEMINI.md`)).toContain("miksy:begin");
   expect(existsSync(`${f.ws}/Org/p1/.agents/plugins/miksy/plugin.json`)).toBe(true);
   expect(old(["doctor"]).out).toContain("Всё синхронизировано");
   // Снова новая версия: учёт gemini переходит к antigravity, конфликтов нет
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   const all = f.run(["sync", "--all", "--yes"]);
-  expect(all.code).toBe(0);
+  expectCode(all, 0);
   expect(all.out).not.toContain("КОНФЛИКТ");
   expect(f.run(["doctor"]).out).toContain("Всё синхронизировано");
 }, 300000);
@@ -72,8 +72,8 @@ test.skipIf(!hasTag)("после root remove последнего дополни
   const engine = oldEngine();
   const f = cliFixture({ projects: ["Org/p1"] });
   git(`${f.dir}/drive/Acme/site`);
-  expect(f.run(["root", "add", `${f.dir}/drive`, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["root", "remove", `${f.dir}/drive`]).code).toBe(0);
+  expectCode(f.run(["root", "add", `${f.dir}/drive`, "--tree", "Clients"]), 0);
+  expectCode(f.run(["root", "remove", `${f.dir}/drive`]), 0);
   const r = Bun.spawnSync([process.execPath, `${engine}/src/cli.ts`, "doctor"], {
     cwd: f.dir, env: { ...process.env, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
   });
@@ -99,25 +99,25 @@ test.skipIf(!hasTag)("основной корень с tree и второй ко
     });
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
   };
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(existsSync(`${f.ws}/Org/p1/.claude/skills/sk/SKILL.md`)).toBe(true);
   // Рецепт отката, шаги 1–4 новой версией
   expect(inProcess(f, ["root", "remove", drive], f.dir, [true]).err).toBe("");
   put(file, `workspace: ${f.ws}\nagents: [claude, gemini]\n`);
-  expect(f.run(["clean", "--all", "--agent", "antigravity"]).code).toBe(0);
-  expect(f.run(["clean", "--global", "--agent", "antigravity"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all", "--agent", "antigravity"]), 0);
+  expectCode(f.run(["clean", "--global", "--agent", "antigravity"]), 0);
   // Прежняя версия
   const steps = [old(["setup", "--yes"]), old(["sync", "--global"]), old(["sync", "--all", "--yes"])];
-  for (const s of steps) expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ") }).toEqual({ code: 0, err: "", conflict: false });
+  for (const s of steps) expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ") }, said(s)).toEqual({ code: 0, err: "", conflict: false });
   // Возврат по README: update (он сам предложит sync --global и sync --all), затем вернуть корень, tree, имя; sync --all
   const afterUpdate = [f.run(["sync", "--global"]), f.run(["sync", "--all", "--yes"])];
-  for (const s of afterUpdate) expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ") }).toEqual({ code: 0, conflict: false });
+  for (const s of afterUpdate) expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ") }, said(s)).toEqual({ code: 0, conflict: false });
   put(file, `workspace:\n  - { path: "${f.ws}", tree: "Main" }\nagents: [claude, antigravity]\n`);
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
   const back = f.run(["sync", "--all", "--yes"]);
-  expect({ code: back.code, conflict: back.out.includes("КОНФЛИКТ") }).toEqual({ code: 0, conflict: false });
+  expect({ code: back.code, conflict: back.out.includes("КОНФЛИКТ") }, said(back)).toEqual({ code: 0, conflict: false });
   const d = f.run(["doctor"]);
   expect(d.out).toContain("Всё синхронизировано");
   expect({ p1: status(`${f.ws}/Org/p1`), site: status(`${drive}/Acme/site`) }).toEqual({ p1: "", site: "" });
@@ -153,17 +153,17 @@ test.skipIf(!hasTag)("отметка «проект забыт» и решени
   // p1: ответы в Claude были до miksy, команда добавила .mcp.json; p2: доверие miksy, ответы в Claude, затем .mcp.json
   team(p1);
   allow(p1);
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   allow(p2);
   team(p2);
   expect(f.run(["sync", p2]).out).toContain("Нужно решение");
-  for (const p of [p1, p2]) expect(f.run(["trust", p, "--confirm"]).code).toBe(0);
+  for (const p of [p1, p2]) expectCode(f.run(["trust", p, "--confirm"]), 0);
   expect(f.run(["sync", "--all", "--yes"]).out).not.toContain("Нужно решение");
   // Второй корень: «забыть» при отключённом диске — отметка в учёте; диск вернулся
   renameSync(drive, `${drive}-disk`);
   mkdirSync(drive);
-  expect(f.run(["root", "remove", drive, "--forget"]).code).toBe(0);
+  expectCode(f.run(["root", "remove", drive, "--forget"]), 0);
   rmSync(drive, { recursive: true });
   renameSync(`${drive}-disk`, drive);
   const before = ledger(f.config) as { forgotten?: Record<string, unknown>; targets: Record<string, { everTrusted?: true }> };
@@ -171,13 +171,13 @@ test.skipIf(!hasTag)("отметка «проект забыт» и решени
   // Прежняя версия (рецепт: корни убраны, workspace одной строкой)
   expect(read(`${f.config}/local/machine.yaml`)).toMatch(/^workspace: /m);
   const steps = [old(["setup", "--yes"]), old(["sync", "--global"]), old(["sync", "--all", "--yes"]), old(["sync", "--all", "--yes"])];
-  for (const s of steps) expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ"), ask: s.out.includes("Нужно решение") }).toEqual({ code: 0, err: "", conflict: false, ask: false });
+  for (const s of steps) expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ"), ask: s.out.includes("Нужно решение") }, said(s)).toEqual({ code: 0, err: "", conflict: false, ask: false });
   expect({ p1: trusted(p1), p2: trusted(p2) }).toEqual({ p1: true, p2: true });
   // 0.1.1 переписала учёт без отметки «проект забыт» (README говорит)
   expect((ledger(f.config) as { forgotten?: unknown }).forgotten).toBeUndefined();
   // Снова новая версия: без вопросов и конфликтов, доверие стоит
   const back = [f.run(["sync", "--all", "--yes"]), f.run(["sync", "--all", "--yes"])];
-  for (const s of back) expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), ask: s.out.includes("Нужно решение"), removed: s.out.includes("снимается") }).toEqual({ code: 0, conflict: false, ask: false, removed: false });
+  for (const s of back) expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), ask: s.out.includes("Нужно решение"), removed: s.out.includes("снимается") }, said(s)).toEqual({ code: 0, conflict: false, ask: false, removed: false });
   expect({ p1: trusted(p1), p2: trusted(p2) }).toEqual({ p1: true, p2: true });
   expect(f.run(["doctor"]).out).not.toContain("Нужно решение");
 }, 300000);
@@ -195,15 +195,15 @@ test.skipIf(!hasTag)("рецепт, шаг 0: забытый проект, ди�
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
   };
   put(`${f.config}/layers/tree/Org/mcp/tool.yaml`, "name: tool\ncommand: tool\nargs: []\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   renameSync(f.ws, `${f.ws}-disk`);
   mkdirSync(f.ws);
-  expect(f.run(["clean", p1, "--forget"]).code).toBe(0);
+  expectCode(f.run(["clean", p1, "--forget"]), 0);
   rmSync(f.ws, { recursive: true });
   renameSync(`${f.ws}-disk`, f.ws);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const s = old(["sync", "--all", "--yes"]);
-  expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ"), git: status(p1) }).toEqual({ code: 0, err: "", conflict: false, git: "" });
+  expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ"), git: status(p1) }, said(s)).toEqual({ code: 0, err: "", conflict: false, git: "" });
 }, 300000);
 
 // Рецепт README для корня, убранного с «забыть», когда диск вернулся (проверка 6x, A3; круг 6y, B.5): шаг 0 —
@@ -226,31 +226,31 @@ test.skipIf(!hasTag)("рецепт, шаг 0 для корня, убранног
     .some(([k, v]) => k.toLowerCase() === site.toLowerCase() && (v as { hasTrustDialogAccepted?: boolean }).hasTrustDialogAccepted === true);
   const asked = (r: { out: string }) => r.out.includes("Нужно решение");
   put(`${f.config}/layers/tree/Clients/mcp/crm.yaml`, "name: crm\ncommand: crm\nargs: []\n");
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${site}/.claude/settings.local.json`, JSON.stringify({ ...local(), permissions: { allow: ["Bash(ls:*)"] } }, null, 2));
   renameSync(drive, `${drive}-disk`);
   mkdirSync(drive);
-  expect(f.run(["root", "remove", drive, "--forget"]).code).toBe(0);
+  expectCode(f.run(["root", "remove", drive, "--forget"]), 0);
   rmSync(drive, { recursive: true });
   renameSync(`${drive}-disk`, drive);
   // Шаг 0: вернуть корень и sync --all — отметка «забыт» снята, учёт снова есть
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect((ledger(f.config) as { forgotten?: object }).forgotten).toBeUndefined();
   // Шаг 1: убрать корень, согласившись убрать записанное
   const rm = inProcess(f, ["root", "remove", drive], f.dir, [true]);
-  expect({ code: rm.code, err: rm.err }).toEqual({ code: 0, err: "" });
+  expect({ code: rm.code, err: rm.err }, said(rm)).toEqual({ code: 0, err: "" });
   for (const s of [old(["setup", "--yes"]), old(["sync", "--global"]), old(["sync", "--all", "--yes"])])
-    expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ") }).toEqual({ code: 0, err: "", conflict: false });
+    expect({ code: s.code, err: s.err, conflict: s.out.includes("КОНФЛИКТ") }, said(s)).toEqual({ code: 0, err: "", conflict: false });
   // Возврат по README
   f.run(["sync", "--global"]);
   f.run(["sync", "--all", "--yes"]);
-  expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
+  expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
   const back = f.run(["sync", "--all", "--yes"]);
   if (asked(back)) {
     expect(back.out.includes("ответы в окне Claude")).toBe(true);
-    expect(f.run(["trust", site, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", site, "--confirm"]), 0);
   }
   const runs = [1, 2].map(() => f.run(["sync", "--all", "--yes"]));
   expect({ asked: runs.map(asked), trusted: trusted(), codex: existsSync(`${site}/.codex/config.toml`), git: status(site).replace("?? .claude/settings.local.json\n", "") })
@@ -288,7 +288,7 @@ test.skipIf(!hasTag)("цель без git со своим хуком в settings
     expect({ asked: asked(o), removed: /Grp \(снять своё\)/.test(o.out), mcp: block.includes(".mcp.json: MCP g"), hook: block.includes("my-notify.sh") })
       .toEqual({ asked: true, removed: true, mcp: true, hook: false });
     expect(read(`${f.home}/.codex/config.toml`).toLowerCase()).toContain(`${grp.toLowerCase().replaceAll("/", process.platform === "win32" ? "\\\\" : "/")}"]\ntrust_level = "trusted"`);
-    if (oldYes) expect(old(["trust", grp, "--confirm"]).code).toBe(0);
+    if (oldYes) expectCode(old(["trust", grp, "--confirm"]), 0);
     const back = f.run(["sync", "--all", "--yes"]);
     const again = back.out.slice(back.out.indexOf("Нужно решение"));
     expect({ asked: asked(back), hook: asked(back) && again.includes("my-notify.sh") }).toEqual({ asked: oldYes, hook: oldYes });

@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const real = (p: string) => realpathSync.native(p).replaceAll("\\", "/");
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
@@ -13,7 +13,7 @@ test("explain: каталог вне workspace — глобальный срез
   const f = cliFixture();
   mkdirSync(`${f.dir}/elsewhere`);
   const r = f.run(["explain", `${f.dir}/elsewhere`]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).toContain("вне workspace — только глобальные настройки");
   expect(r.out).toContain("global");
   expect(r.out).not.toContain("см. `miksy explain` без пути");
@@ -56,14 +56,14 @@ describe("каталоги без git на уровне проектов", () =>
   test("sync --all — одной строкой, doctor — справочно (не проблема); остальные каталоги не показываются", () => {
     const f = fixture();
     const plan = f.run(["sync", "--all", "--dry-run"]);
-    expect(plan.code).toBe(0);
+    expectCode(plan, 0);
     expect(plan.out).toContain("  не git-репо — настроек не получат (3): Acme/MyTasks, Notes, Org/work — git init или miksy target <путь>");
     expect(plan.out.match(/не git-репо/g)?.length).toBe(1);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const doc = f.run(["doctor"]);
     expect(doc.out).toContain("Всё синхронизировано");
-    expect(doc.code).toBe(0);
+    expectCode(doc, 0);
     expect(doc.out).toMatch(/Справочно:[\s\S]*Каталоги без git на уровне проектов \(3\) — настроек не получат: git init в каталоге или miksy target <путь>:\n  Acme\/MyTasks\n  Notes\n  Org\/work/);
     // clean --all — без подсказки
     expect(f.run(["clean", "--all", "--dry-run"]).out).not.toContain("не git-репо");
@@ -80,7 +80,7 @@ describe("miksy target", () => {
   test("пометка: layer.yaml создаётся; без терминала — подсказка sync; цель в sync --all, explain, projects", () => {
     const f = fixture();
     const r = f.run(["target", "Acme/MyTasks"], { cwd: f.ws });
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("Acme/MyTasks: сделать целью — layers/tree/Acme/MyTasks/layer.yaml: создать с target: true");
     expect(r.out).toContain(`Дальше: miksy sync "${f.ws}/Acme/MyTasks"`);
     expect(read(`${f.config}/layers/tree/Acme/MyTasks/layer.yaml`)).toBe("target: true\n");
@@ -95,14 +95,14 @@ describe("miksy target", () => {
     // Повтор — уже цель
     expect(f.run(["target", `${f.ws}/Acme/MyTasks`]).out).toContain("Acme/MyTasks: уже цель");
     // Записали — правила слоёв дерева в каталоге
-    expect(f.run(["sync", `${f.ws}/Acme/MyTasks`]).code).toBe(0);
+    expectCode(f.run(["sync", `${f.ws}/Acme/MyTasks`]), 0);
     expect(read(`${f.ws}/Acme/MyTasks/CLAUDE.local.md`)).toContain("# rule acme");
   }, 60000);
 
   test("без пути — текущий каталог; в терминале «да» — sync этой цели; над проектами — sync --all", () => {
     const f = fixture();
     const r = f.ask(["target"], [true], `${f.ws}/Notes`);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.questions).toEqual(["Записать настройки в Notes сейчас (miksy sync Notes)?"]);
     expect(read(`${f.config}/layers/tree/Notes/layer.yaml`)).toBe("target: true\n");
     expect(read(`${f.ws}/Notes/CLAUDE.local.md`)).toContain("miksy:begin");
@@ -118,11 +118,11 @@ describe("miksy target", () => {
     put(`${f.config}/layers/tree/Acme/known/layer.yaml`, text);
     expect(f.run(["target", `${f.ws}/Acme/known`, "--dry-run"]).out).toContain("--dry-run: ничего не записано.");
     expect(read(`${f.config}/layers/tree/Acme/known/layer.yaml`)).toBe(text);
-    expect(f.run(["target", `${f.ws}/Acme/known`]).code).toBe(0);
+    expectCode(f.run(["target", `${f.ws}/Acme/known`]), 0);
     expect(read(`${f.config}/layers/tree/Acme/known/layer.yaml`)).toBe(text + "target: true\n");
     // Регистр слоя — как в конфигурации (каталог workspace Notes, слой notes); CRLF и комментарий сохраняются
     put(`${f.config}/layers/tree/notes/layer.yaml`, "description: заметки\r\ntarget: false # пока нет\r\n");
-    expect(f.run(["target", `${f.ws}/Notes`]).code).toBe(0);
+    expectCode(f.run(["target", `${f.ws}/Notes`]), 0);
     expect(read(`${f.config}/layers/tree/notes/layer.yaml`)).toBe("description: заметки\r\ntarget: true # пока нет\r\n");
   }, 30000);
 
@@ -130,28 +130,28 @@ describe("miksy target", () => {
     const f = fixture();
     mkdirSync(`${f.dir}/outside`);
     mkdirSync(`${f.ws}/Acme/skills`, { recursive: true });
-    const err = (path: string) => { const r = f.run(["target", path]); expect(r.code).toBe(1); return r.err; };
+    const err = (path: string) => { const r = f.run(["target", path]); expectCode(r, 1); return r.err; };
     expect(err(`${f.dir}/outside`)).toContain("вне workspace");
     expect(err(f.ws)).toContain("сам workspace");
     expect(err(`${f.ws}/Acme/app/sub`)).toContain("внутри проекта Acme/app");
     expect(err(`${f.ws}/Acme/app`)).toContain("git-репо: это проект");
     expect(err(`${f.ws}/Acme/nope`)).toContain("каталога нет");
     expect(err(`${f.ws}/Acme/skills`)).toContain("зарезервировано");
-    expect(f.run(["target", "a", "b"]).code).toBe(2);
+    expectCode(f.run(["target", "a", "b"]), 2);
     expect(existsSync(`${f.config}/layers/tree/Acme/app/layer.yaml`)).toBe(false);
   }, 30000);
 
   test("--remove: пометка снимается (пустой файл и каталоги слоя — удаляются), записанное — убирается clean", () => {
     // opencode не ведёт реестра проектов, который пополнял бы sync: без пометки каталог — уже не цель
     const f = fixture(["opencode"]);
-    expect(f.run(["target", `${f.ws}/Acme/MyTasks`]).code).toBe(0);
-    expect(f.run(["sync", `${f.ws}/Acme/MyTasks`]).code).toBe(0);
+    expectCode(f.run(["target", `${f.ws}/Acme/MyTasks`]), 0);
+    expectCode(f.run(["sync", `${f.ws}/Acme/MyTasks`]), 0);
     expect(existsSync(`${f.ws}/Acme/MyTasks/opencode.json`)).toBe(true);
     const dry = f.run(["target", `${f.ws}/Acme/MyTasks`, "--remove", "--dry-run"]);
     expect(dry.out).toContain("layers/tree/Acme/MyTasks/layer.yaml: удалить (в нём ничего не останется)");
     expect(existsSync(`${f.config}/layers/tree/Acme/MyTasks/layer.yaml`)).toBe(true);
     const r = f.ask(["target", `${f.ws}/Acme/MyTasks`, "--remove"], [true]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.questions).toEqual(["Убрать то, что miksy записал в Acme/MyTasks (miksy clean Acme/MyTasks)?"]);
     expect(existsSync(`${f.config}/layers/tree/Acme/MyTasks`)).toBe(false);
     expect(existsSync(`${f.config}/layers/tree/Acme/instructions/10-acme.md`)).toBe(true);
@@ -163,9 +163,9 @@ describe("miksy target", () => {
   test("--remove у слоя с другими ключами — убирается только строка; без терминала — подсказка clean", () => {
     const f = fixture(["opencode"]);
     put(`${f.config}/layers/tree/Acme/known/layer.yaml`, "description: d\ntarget: true\nexclude: []\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const r = f.run(["target", `${f.ws}/Acme/known`, "--remove"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(read(`${f.config}/layers/tree/Acme/known/layer.yaml`)).toBe("description: d\nexclude: []\n");
     expect(r.out).toContain(`Дальше: miksy clean "${f.ws}/Acme/known"`);
   }, 60000);
@@ -174,8 +174,8 @@ describe("miksy target", () => {
     const f = fixture();
     const dir = `${f.ws}/Acme/MyTasks`;
     for (const d of [dir, `${f.ws}/Notes`]) {
-      expect(f.run(["target", d]).code).toBe(0);
-      expect(f.run(["sync", d]).code).toBe(0);
+      expectCode(f.run(["target", d]), 0);
+      expectCode(f.run(["sync", d]), 0);
     }
     // sync записал доверие в ~/.claude.json: запись projects[<каталог>] — только от miksy
     const r = f.ask(["target", dir, "--remove"], [true]);
@@ -196,10 +196,10 @@ describe("miksy target", () => {
 
   test("группа над проектами: --remove — sync --all убирает файлы бывшей группы", () => {
     const f = fixture();
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(existsSync(`${f.ws}/Org/CLAUDE.local.md`)).toBe(true);
     const r = f.ask(["target", `${f.ws}/Org`, "--remove"], [true]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.questions[0]).toContain("miksy sync --all");
     expect(read(`${f.config}/layers/tree/Org/layer.yaml`)).toBeNull();
     expect(r.out).toContain("пометка target: true снята: Org");

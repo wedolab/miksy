@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { RenderResult, Target } from "../src/adapter";
 import { apply, applyPlanned, plan, verifyMerges } from "../src/apply";
 import { emptyState } from "../src/manifest";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "jm-")).replaceAll("\\", "/");
@@ -70,7 +70,7 @@ describe("JSON-merge", () => {
     put(`${fx.config}/layers/tree/mcp/ctx.yaml`, "name: ctx\nurl: https://ctx/mcp\n");
     put(`${fx.home}/.claude.json`, "{ broken");
     const r = fx.run(["sync", "--all", "--yes"]);
-    expect(r.code).toBe(3);
+    expectCode(r, 3);
     expect(r.out).toContain("JSON");
     expect(existsSync(`${fx.ws}/Org/p1/CLAUDE.local.md`)).toBe(true);
     expect(existsSync(`${fx.ws}/Org/p2/CLAUDE.local.md`)).toBe(true);

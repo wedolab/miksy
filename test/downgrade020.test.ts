@@ -8,7 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENGINE } from "../src/load";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectCodeIn } from "./helpers";
 import { inProcess, ledger, read } from "./rootshelp";
 
 const TAG = "v0.2.0";
@@ -36,13 +36,13 @@ test.skipIf(!hasTag)("учёт и local/trust.json 0.2.1 (отметка дов�
     return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
   };
   // 0.2.1: p1 — доверие ставил miksy, затем clean (отметка trustedBefore); p2 — командный .mcp.json, «да», затем «нет»
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-  expect(f.run(["clean", p1]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
+  expectCode(f.run(["clean", p1]), 0);
   put(`${p2}/.mcp.json`, JSON.stringify({ mcpServers: { team: { command: "team-server" } } }));
   gitc(p2, "add", ".mcp.json");
   gitc(p2, "commit", "-qm", "team");
   expect(inProcess(f, ["sync", p2], f.dir, ["y"]).questions.length).toBe(1);
-  expect(f.run(["trust", p2, "--deny"]).code).toBe(0);
+  expectCode(f.run(["trust", p2, "--deny"]), 0);
   expect(Object.keys((ledger(f.config) as { trustedBefore?: Record<string, string> }).trustedBefore ?? {}).length).toBe(1);
   expect(JSON.parse(read(`${f.config}/local/trust.json`)).decisions).toBeTruthy();
   // v0.2.0: doctor, sync --all и снова doctor — без ошибок учёта и решений
@@ -51,7 +51,7 @@ test.skipIf(!hasTag)("учёт и local/trust.json 0.2.1 (отметка дов�
     expect(s.err).toBe("");
     expect(s.out).not.toMatch(/учёт повреждён|не разбирается/);
   }
-  expect(steps[1].code === 0 || steps[1].code === 3).toBe(true);
+  expectCodeIn(steps[1], [0, 3]);
   // Вернулись на 0.2.1 — всё читается
   const back = f.run(["doctor"]);
   expect({ err: back.err, broken: /учёт повреждён|не разбирается/.test(back.out) }).toEqual({ err: "", broken: false });

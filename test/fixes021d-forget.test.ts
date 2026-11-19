@@ -3,7 +3,7 @@
 // (случаи C1, C2) с ожиданием верного поведения
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectCodeIn } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -26,7 +26,7 @@ function base() {
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [x]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const dropCodex = () => put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   return { f, drive, site, dropCodex };
 }
@@ -37,12 +37,12 @@ for (const [name, drop] of [["C1: codex в agents", false], ["C2: codex убра
     if (drop) dropCodex();
     renameSync(drive, `${drive}-disk`);
     const g = f.run(["clean", site, "--forget", "--agent", "codex"]);
-    expect(g.code).toBe(0);
+    expectCode(g, 0);
     renameSync(`${drive}-disk`, drive);
     const hint = cmds(g.out);
     expect(hint.length).toBeGreaterThan(0);
     for (const c of hint) expect(c).toContain("--agent codex");
-    for (const c of hint) if (!c.includes("--force")) expect([0, 3]).toContain(run(f, c).code);
+    for (const c of hint) if (!c.includes("--force")) expectCodeIn(run(f, c), [0, 3]);
     // Записанное Claude — на месте; файлов codex нет
     expect(read(`${site}/CLAUDE.local.md`)).toContain("# clients");
     expect(filesIn(site).filter((p) => p.startsWith(".codex") || p.startsWith(".agents"))).toEqual([]);

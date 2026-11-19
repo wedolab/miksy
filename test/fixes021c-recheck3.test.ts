@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7c — повторная проверка 3 (out/review021i/miksy/test/zzrev021i.test.ts), с ожиданием верного поведения
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -38,7 +38,7 @@ function base(agents: string[]) {
   const homeBefore = { claude: read(`${f.home}/.claude.json`), codex: read(`${f.home}/.codex/config.toml`) };
   const s0 = f.run(["sync", "--all", "--yes"]);
   if (s0.code) console.log("SYNC0 " + s0.out + s0.err);
-  expect(s0.code).toBe(0);
+  expectCode(s0, 0);
   return { f, drive, site, homeBefore };
 }
 

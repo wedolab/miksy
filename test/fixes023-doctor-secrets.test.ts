@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { CLI } from "./helpers";
+import { CLI, expectCodeIn, said } from "./helpers";
 
 const win = process.platform === "win32";
 const icacls = (...a: string[]) => Bun.spawnSync([join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe"), ...a], { stdout: "pipe", stderr: "pipe" }).exitCode;
@@ -31,7 +31,7 @@ function world(link: boolean) {
 
 test("A7: ссылка local/secrets на открытую папку — в doctor одна строка о ней", () => {
   const w = world(true);
-  expect([0, 3]).toContain(w.run(["sync", "--global"]).code);
+  expectCodeIn(w.run(["sync", "--global"]), [0, 3]);
   if (win) icacls(w.vault.replaceAll("/", "\\"), "/grant", "*S-1-1-0:(OI)(CI)(R)"); else Bun.spawnSync(["chmod", "755", w.vault]);
   const doc = w.run(["doctor"]);
   const lines = doc.out.split("\n").filter((l) => l.includes(`${w.config}/local/secrets →`) || l.includes(`${w.config}/local/secrets:`));
@@ -55,7 +55,7 @@ const cantUnread = win && (() => {
 
 test.skipIf(!win || cantUnread)("A7: файл секрета без доступа даже вам — «не читается», а не «устарел»; sync перезаписывает", () => {
   const w = world(false);
-  expect([0, 3]).toContain(w.run(["sync", "--global"]).code);
+  expectCodeIn(w.run(["sync", "--global"]), [0, 3]);
   const file = `${w.config}/local/secrets/A_TOKEN`;
   // Как оставляла 0.2.1: ни одной записи прав
   icacls(file.replaceAll("/", "\\"), "/inheritance:r");
@@ -68,7 +68,7 @@ test.skipIf(!win || cantUnread)("A7: файл секрета без доступ
   let value = "";
   try { value = readFileSync(file, "utf8"); } catch (e) { value = (e as Error).message; }
   icacls(w.root.replaceAll("/", "\\"), "/grant", `*${sid()}:(OI)(CI)F`, "/t", "/c", "/q");
-  expect({ unreadable, line: /не читается \(нет доступа даже вам\) — miksy sync перезапишет его/.test(line), stale: /устарел/.test(line), sync: [0, 3].includes(s.code), value })
+  expect({ unreadable, line: /не читается \(нет доступа даже вам\) — miksy sync перезапишет его/.test(line), stale: /устарел/.test(line), sync: [0, 3].includes(s.code), value }, said(s))
     .toEqual({ unreadable: true, line: true, stale: false, sync: true, value: "abcdef123\n" });
 }, 300000);
 

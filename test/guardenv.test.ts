@@ -7,7 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { canonical, fold, inside } from "../src/paths";
-import { put } from "./helpers";
+import { put, expectCode, said } from "./helpers";
 
 const PRINT = "console.log(JSON.stringify({ HOME: process.env.HOME ?? null, USERPROFILE: process.env.USERPROFILE ?? null, MIKSY_CONFIG: process.env.MIKSY_CONFIG ?? null }))";
 const sandbox = { HOME: process.env.HOME ?? null, USERPROFILE: process.env.USERPROFILE ?? null, MIKSY_CONFIG: process.env.MIKSY_CONFIG ?? null };
@@ -34,7 +34,7 @@ test("node:child_process без env — тоже песочное окружен
 
 test("git в тестах не читает настройки машины: все источники конфигурации — в песочнице, глобальный gitignore не прячет файлы", () => {
   const repo = mkdtempSync(join(tmpdir(), "gitenv-")).replaceAll("\\", "/");
-  expect(Bun.spawnSync(["git", "init", "-q", repo]).exitCode).toBe(0);
+  expectCode(Bun.spawnSync(["git", "init", "-q", repo]), 0);
   const origins = Bun.spawnSync(["git", "-C", repo, "config", "--list", "--show-origin"], { stdout: "pipe" }).stdout.toString()
     .split(/\r?\n/).filter(Boolean).map((l) => l.split("\t")[0]);
   // Только файлы песочницы: ни системного и глобального конфига машины, ни настроек из окружения («command line:» —
@@ -59,5 +59,5 @@ test.skipIf(!!process.env.MIKSY_GUARDENV_NESTED)("настройки git из о
       GIT_CONFIG_PARAMETERS: `'core.excludesfile'='${dir}/ignore'` },
   });
   const out = r.stdout.toString() + r.stderr.toString();
-  expect({ code: r.exitCode, pass: / 1 pass/.test(out), fail: / [1-9]\d* fail/.test(out) }).toEqual({ code: 0, pass: true, fail: false });
+  expect({ code: r.exitCode, pass: / 1 pass/.test(out), fail: / [1-9]\d* fail/.test(out) }, said(r)).toEqual({ code: 0, pass: true, fail: false });
 }, 120000);

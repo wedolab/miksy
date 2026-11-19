@@ -3,7 +3,7 @@
 // out/check021/miksy2/test/zz-check021b-case.test.ts с верными ожиданиями
 import { expect, test } from "bun:test";
 import { mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 
 // layers/tree с учётом регистра; false — так нельзя (не Windows и не Linux, нет прав) — тест пропускается
@@ -30,8 +30,8 @@ test.skipIf(!canCase)("B №2: два каталога слоёв, отлича�
   put(`${f.config}/layers/tree/clients/instructions/20-lower.md`, "# rule lower\n");
   const names = readdirSync(`${f.config}/layers/tree`).filter((n) => n.toLowerCase() === "clients");
   if (names.length < 2) return; // каталог без учёта регистра
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const got = [...read(`${drive}/Acme/site/CLAUDE.local.md`).matchAll(/^# rule (\w+)$/gm)].map((m) => m[1]);
   const d = f.run(["doctor"]);
   expect(d.out).toContain("Каталоги слоёв отличаются только регистром (1)");
@@ -51,10 +51,10 @@ test.skipIf(!canCase)("B №2: adopt --to <ветка в другом регис
   put(`${f.home}/.claude.json`, JSON.stringify({ mcpServers: { foo: { command: "echo", args: ["foo"] } } }, null, 2));
   expect(f.run(["doctor"]).out).toContain("mcp foo");
   const a = f.run(["adopt", "--global", "foo", "--to", "clients", "--yes"]);
-  expect(a.code).toBe(0);
+  expectCode(a, 0);
   expect(readdirSync(`${f.config}/layers/tree`).filter((n) => n.toLowerCase() === "clients")).toEqual(["Clients"]);
   expect(read(`${f.config}/layers/tree/Clients/mcp/foo.yaml`)).toContain("foo");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const claude = JSON.parse(read(`${f.home}/.claude.json`));
   const key = Object.keys(claude.projects ?? {}).find((k) => k.toLowerCase() === `${drive}/Acme/site`.toLowerCase());
   const servers = key ? Object.keys(claude.projects[key].mcpServers ?? {}) : [];

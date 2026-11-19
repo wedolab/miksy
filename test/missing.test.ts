@@ -1,7 +1,7 @@
 // Недостающий секрет: пропускается только сервер, которому он нужен; уже записанный — не удаляется
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const servers = (home: string, dir: string) => {
   const cfg = JSON.parse(readFileSync(`${home}/.claude.json`, "utf8"));
@@ -14,7 +14,7 @@ describe("недостающий секрет", () => {
     put(`${f.config}/layers/tree/mcp/ctx.yaml`, "name: ctx\nurl: https://ctx/mcp\n");
     put(`${f.config}/layers/tree/mcp/gl.yaml`, "name: gl\ncommand: npx\nenv:\n  TOKEN: ${GL_TOKEN}\n");
     const r = f.run(["sync", `${f.ws}/Org/p1`]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("пропущен сервер gl");
     expect(r.out).toContain("GL_TOKEN");
     expect(r.out).not.toContain("КОНФЛИКТ");
@@ -27,7 +27,7 @@ describe("недостающий секрет", () => {
     const f = cliFixture();
     put(`${f.config}/layers/tree/mcp/gl.yaml`, "name: gl\ncommand: npx\nenv:\n  TOKEN: ${GL_TOKEN}\n");
     put(`${f.config}/local/secrets.env`, "GL_TOKEN=v1\n");
-    expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+    expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
     expect(servers(f.home, `${f.ws}/Org/p1`)).toEqual(["gl"]);
     put(`${f.config}/local/secrets.env`, "\n");
     const r = f.run(["sync", `${f.ws}/Org/p1`]);
@@ -40,7 +40,7 @@ describe("недостающий секрет", () => {
     const f = cliFixture();
     put(`${f.config}/layers/tree/mcp/gl.yaml`, "name: gl\ncommand: npx\nenv:\n  TOKEN: ${GL_TOKEN}\nagents:\n  claude: skip\n");
     const r = f.run(["sync", `${f.ws}/Org/p1`]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).not.toContain("GL_TOKEN");
   }, 30000);
 
@@ -49,7 +49,7 @@ describe("недостающий секрет", () => {
     put(`${f.config}/layers/tree/mcp/r.yaml`, "name: r\nurl: https://r/mcp\nagents:\n  claude:\n    raw:\n      headers:\n        X-Key: ${R_KEY}\n");
     put(`${f.config}/local/secrets.env`, "R_KEY=k1\n");
     const r = f.run(["sync", `${f.ws}/Org/p1`]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("agents.claude.raw не поддерживается");
     expect(existsSync(`${f.home}/.claude.json`) ? readFileSync(`${f.home}/.claude.json`, "utf8") : "").not.toContain("k1");
   }, 30000);

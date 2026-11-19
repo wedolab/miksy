@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ENGINE } from "../src/load";
 import { parseToml } from "../src/toml";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { readDocs } from "./docs";
 import { inProcess, read } from "./rootshelp";
 
@@ -41,7 +41,7 @@ describe("B.1 — miksy trust <проект>: узнанный по шапке �
     expect(t.out.includes("evil")).toBe(true);
     const deny = f.run(["trust", p1, "--agent", "codex", "--deny"]);
     // Код 3 — файл по-прежнему в конфликте (trust после решения пересчитывает проект)
-    expect({ code: deny.code, err: deny.err }).toEqual({ code: 3, err: "" });
+    expect({ code: deny.code, err: deny.err }, said(deny)).toEqual({ code: 3, err: "" });
     expect(Object.values(decisions(f.config)).some((d) => d.codex?.answer === "no")).toBe(true);
     // После «нет» — sync без вопроса (решение пользователя), доверия нет
     const again = f.run(["sync", "--all", "--yes"]);
@@ -104,8 +104,8 @@ describe("B.2 — Codex в цели без git (zz-review6y-codex-nogit)", () =>
     const f = cliFixture({ agents: ["codex"], projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
     put(`${f.config}/layers/tree/Org/mcp/tool.yaml`, "name: tool\ncommand: tool\nargs: []\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["clean", p1, "--forget"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["clean", p1, "--forget"]), 0);
     const t = inProcess(f, ["trust", p1, "--agent", "codex"], f.dir, []);
     const s = f.run(["sync", "--all", "--yes"]);
     expect({ foreign: t.out.includes("конфиг Codex не от miksy"), asked: asked(s), trusted: codexTrusted(f.home, p1) }).toEqual({ foreign: false, asked: false, trusted: true });

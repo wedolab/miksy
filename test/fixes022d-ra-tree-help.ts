@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
-import { CLI } from "./helpers";
+import { CLI, said } from "./helpers";
 import { aclTest } from "./elevated";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 
@@ -85,7 +85,7 @@ for (const how of [part])
       };
       // Временный каталог — вернуть себе доступ, чтобы песочница удалилась
       Bun.spawnSync([sysx("icacls.exe"), nat(root), "/grant", `*${sid()}:(OI)(CI)F`, "/t", "/c", "/q"], { stdout: "pipe", stderr: "pipe" });
-      expect({ steps: r.steps.length <= 1, last: last.code === 0 || last.code === 3, more: more.filter((o) => /Ошибка|ОШИБКА|частично/.test(o.out)).map((o) => o.args), vault: r.vault, doctorAfter: r.doctorAfter, beforeSays: doc.code !== 0 || afterOld.length === 0 })
+      expect({ steps: r.steps.length <= 1, last: last.code === 0 || last.code === 3, more: more.filter((o) => /Ошибка|ОШИБКА|частично/.test(o.out)).map((o) => o.args), vault: r.vault, doctorAfter: r.doctorAfter, beforeSays: doc.code !== 0 || afterOld.length === 0 }, said(last, doc, more))
         .toEqual({ steps: true, last: true, more: [], vault: [], doctorAfter: [], beforeSays: true });
     }, 600000, how === "noinherit");
 
@@ -119,7 +119,7 @@ for (const how of [part])
     const again = run(["sync", "--global", "--force"]);
     const doc = run(["doctor"]);
     Bun.spawnSync([sysx("icacls.exe"), nat(root), "/grant", `*${sid()}:(OI)(CI)F`, "/t", "/c", "/q"], { stdout: "pipe", stderr: "pipe" });
-    expect({ first: first.code, tree: /Закройте папку бэкапов и всё в ней/.test(line), again: again.code, vault: problems(vault), doctor: doc.out.split("\n").filter((l) => /backups/.test(l)) })
+    expect({ first: first.code, tree: /Закройте папку бэкапов и всё в ней/.test(line), again: again.code, vault: problems(vault), doctor: doc.out.split("\n").filter((l) => /backups/.test(l)) }, said(first, again))
       .toEqual({ first: 1, tree: true, again: 0, vault: [], doctor: [] });
   }, 300000);
 
@@ -148,6 +148,6 @@ test.skipIf(!win || !OLD)("v0.2.1 → 0.2.2: local/secrets → цель noinheri
   const n2 = run(CLI, ["sync", "--global"]);
   const doc2 = run(CLI, ["doctor"]);
   Bun.spawnSync([sysx("icacls.exe"), nat(root), "/grant", `*${sid()}:(OI)(CI)F`, "/t", "/c", "/q"], { stdout: "pipe", stderr: "pipe" });
-  expect({ after1, n2: n2.code }).toEqual({ after1: "abcdef123\n", n2: 0 });
+  expect({ after1, n2: n2.code }, said(n2)).toEqual({ after1: "abcdef123\n", n2: 0 });
 }, 300000);
 }

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { claude } from "../adapters/claude";
 import { sha } from "../src/manifest";
 import type { Resolved } from "../src/types";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const real = (p: string) => realpathSync.native(p).replaceAll("\\", "/");
 
@@ -38,7 +38,7 @@ describe("вложенные проекты", () => {
       targets: { [`claude|${parent}`]: { files: { [`${parent}/CLAUDE.local.md`]: sha("old\n") }, merges: {}, exclude: {} } },
     }));
     const r = f.run(["sync", "--all", "--yes"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(existsSync(`${parent}/CLAUDE.local.md`)).toBe(false);
     expect(existsSync(`${f.ws}/Org/parent/child/CLAUDE.local.md`)).toBe(true);
     expect(r.out).toContain("внутри есть другие проекты");
@@ -47,7 +47,7 @@ describe("вложенные проекты", () => {
   test("sync <каталог без git с проектами внутри> — без CLAUDE.local.md", () => {
     const f = cliFixture({ projects: ["Org/p1"] });
     const r = f.run(["sync", `${f.ws}/Org`]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(existsSync(`${f.ws}/Org/CLAUDE.local.md`)).toBe(false);
   }, 30000);
 
@@ -57,7 +57,7 @@ describe("вложенные проекты", () => {
     put(`${f.config}/layers/tree/mcp/gl.yaml`, "name: gl\ncommand: npx\nenv:\n  TOKEN: ${GL_TOKEN}\n");
     put(`${f.config}/local/secrets.env`, "GL_TOKEN=glpat-very-secret\n");
     const r = f.run(["sync", `${f.ws}/Org/notes`]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const toml = readFileSync(`${f.ws}/Org/notes/.codex/config.toml`, "utf8");
     expect(toml).not.toContain("glpat-very-secret");
     expect(toml.replace(/\\+/g, "/")).toContain("local/run/codex/");

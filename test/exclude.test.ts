@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { RenderResult, Target } from "../src/adapter";
 import { apply, plan } from "../src/apply";
 import { emptyState } from "../src/manifest";
+import { expectCode } from "./helpers";
 
 const git = (dir: string, ...args: string[]) =>
   Bun.spawnSync(["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdout: "pipe", stderr: "pipe" });
@@ -76,7 +77,7 @@ describe("exclude", () => {
     writeFileSync(`${main}/README`, "r");
     git(main, "add", "README");
     git(main, "commit", "--quiet", "-m", "init");
-    expect(git(main, "worktree", "add", "--quiet", wt).exitCode).toBe(0);
+    expectCode(git(main, "worktree", "add", "--quiet", wt), 0);
     const home = `${d}/home`;
     mkdirSync(home);
     const machine = { workspace: d, os: "linux" as const, home, vars: {} };

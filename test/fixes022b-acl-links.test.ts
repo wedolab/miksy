@@ -15,7 +15,7 @@ import { setup } from "../src/setup";
 import { checkLocalAccess, checkSecretFiles, linkedDir, privateLocal, writeSecretFiles } from "../src/secretfiles";
 import { backup, newBackupRun } from "../src/backup";
 import type { Ask } from "../src/ask";
-import { CLI } from "./helpers";
+import { CLI, said } from "./helpers";
 
 const win = process.platform === "win32";
 const sys = (exe: string) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", exe);
@@ -279,7 +279,7 @@ ${r.out}`);
       doctorAfter: runs.doctor.out.match(/Небезопасные права[^\n]*/g) ?? [],
       openAfter: checkLocalAccess(`${w.config}/local`).bad,
       dot: rights(w.d.dot),
-    }).toEqual({
+    }, said(s)).toEqual({
       setup: 0, copy: true,
       codes: { dry: 0, global: 0, all: 0, clean: 0, cleanGlobal: 0, setup: 0, update: 0 },
       complaints: [], doctorBefore: true, doctorAfter: [], openAfter: [], dot: dotBefore,

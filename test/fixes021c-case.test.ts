@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7c (проверка 7b, B №5): target: true — только из каталога слоёв, который применяется. Из out/check021b/miksy2/test/zz-revb-case.test.ts
 import { expect, test } from "bun:test";
 import { mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 
 function caseTree(config: string): boolean {
@@ -36,6 +36,6 @@ test.skipIf(!canCase)("B №5: двойники регистра — помет�
   put(`${f.config}/layers/tree/${used}/Acme/notes/layer.yaml`, "target: true\n");
   expect(notes(f.run(["projects"]).out)).toBe(true);
   const r = f.run(["target", `${drive}/Acme/notes`, "--remove"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(read(`${f.config}/layers/tree/${used}/Acme/notes/layer.yaml`)).not.toContain("target: true");
 }, 180000);

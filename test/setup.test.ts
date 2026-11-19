@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultWorkspace, expandPath, ourShim, referencedVars, shimText, unsafeWorkspace } from "../src/setup";
 import { stableBun } from "../src/launch";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode } from "./helpers";
 
 test("setup: переменные из MCP всех слоёв и где они нужны", () => {
   const root = mkdtempSync(join(tmpdir(), "miksy-setup-"));
@@ -78,7 +78,7 @@ describe("setup: команда miksy", () => {
   test("BUN_INSTALL: команда создаётся в его bin, а не в ~/.bun", () => {
     const f = setupFixture();
     mkdirSync(`${f.home}/.bun/bin`, { recursive: true });
-    expect(f.run().code).toBe(0);
+    expectCode(f.run(), 0);
     expect(existsSync(f.shim)).toBe(true);
     expect(existsSync(`${f.home}/.bun/bin/${shimName}`)).toBe(false);
   });
@@ -87,7 +87,7 @@ describe("setup: команда miksy", () => {
     const f = setupFixture();
     writeFileSync(f.shim, "echo another tool\n");
     const r = f.run();
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(readFileSync(f.shim, "utf8")).toBe("echo another tool\n");
     expect(r.out).toContain("не от miksy");
   });
@@ -95,7 +95,7 @@ describe("setup: команда miksy", () => {
   test("machine.yaml уже есть — показан его workspace, а не предложенный по умолчанию", () => {
     const f = setupFixture();
     const r = f.run();
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain(`Workspace: ${f.ws}  (из local/machine.yaml)`);
   });
 
@@ -103,7 +103,7 @@ describe("setup: команда miksy", () => {
     const f = setupFixture();
     const old = process.platform === "win32" ? `@bun "D:/old/miksy/src/cli.ts" %*\r\n` : `#!/bin/sh\nexec bun "/old/miksy/src/cli.ts" "$@"\n`;
     writeFileSync(f.shim, old);
-    expect(f.run().code).toBe(0);
+    expectCode(f.run(), 0);
     expect(readFileSync(f.shim, "utf8")).not.toBe(old);
     expect(readFileSync(f.shim, "utf8")).toContain("src/cli.ts");
   });
@@ -134,25 +134,25 @@ describe("setup: команда miksy запоминает Bun", () => {
 
   test("команда создаётся с путём Bun без версии и запускает его; код выхода — как у miksy", () => {
     const f = fixture();
-    expect(f.setup().exitCode).toBe(0);
+    expectCode(f.setup(), 0);
     const text = readFileSync(f.shim, "utf8");
     expect(text).toBe(shimText(os, stableBun(process.execPath).replaceAll("\\", "/"), CLI_PATH));
     expect(ourShim(text)).toBe(true);
     const ok = f.call("help");
-    expect(ok.code).toBe(0);
+    expectCode(ok, 0);
     expect(ok.out).toContain("miksy sync");
     expect(ok.err).toBe("");
-    expect(f.call("sync", "--нет-такого").code).toBe(2);
+    expectCode(f.call("sync", "--нет-такого"), 2);
   }, 30000);
 
   test("Bun пропал — bun из PATH с предупреждением", () => {
     const f = fixture();
     writeFileSync(f.shim, shimText(os, `${f.dir}/нет-bun/bin/${win ? "bun.exe" : "bun"}`, CLI_PATH));
     const r = f.call("help");
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("miksy sync");
     expect(r.err).toMatch(win ? /Bun ".*bun\.exe" not found - running bun from PATH/ : /нет Bun .*нет-bun.* — запускаю bun из PATH/);
-    expect(f.call("sync", "--нет-такого").code).toBe(2);
+    expectCode(f.call("sync", "--нет-такого"), 2);
   });
 
   test("прежний формат (bun из PATH) и другой Bun — своя команда, обновляется; похожая чужая — нет", () => {
@@ -183,9 +183,9 @@ describe("setup: команда miksy запоминает Bun", () => {
     writeFileSync(f.shim, shimText(os, bun, CLI_PATH));
     const ok = f.call("help");
     expect(ok.err).toBe("");
-    expect(ok.code).toBe(0);
+    expectCode(ok, 0);
     expect(ok.out).toContain("miksy sync");
-    expect(f.call("sync", "--нет-такого").code).toBe(2);
+    expectCode(f.call("sync", "--нет-такого"), 2);
   });
 
   test("путь с не-ASCII — .cmd под chcp 65001 с возвратом страницы; sh — в кавычках", () => {
@@ -212,6 +212,6 @@ test("setup: несколько установок программы — соо
     env: { ...process.env, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home, BUN_INSTALL: `${f.dir}/bun-install`,
       [key]: [`${f.dir}/n1`, `${f.dir}/n2`, process.env[key]].join(win ? ";" : ":") },
   });
-  expect(r.exitCode).toBe(0);
+  expectCode(r, 0);
   expect(r.stdout.toString()).toContain(`• Node.js: установок несколько — используется ${f.dir}/n1/${win ? "node.exe" : "node"} (первая в PATH), ещё: ${f.dir}/n2/`);
 });

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { backup, newBackupRun, originalBackup, runDir } from "../src/backup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import type { Adapter } from "../src/adapter";
 import { renderFor } from "../src/registry";
 import { secretRef } from "../src/vars";
@@ -63,7 +63,7 @@ describe("бэкапы запусков", () => {
     // Сервер miksy до 2а без учёта: литерал в ~/.claude.json, учёта нет (новая машина)
     put(`${f.home}/.claude.json`, JSON.stringify({ projects: { [`${f.ws}/Org/p1`]: { hasTrustDialogAccepted: false, mcpServers: { tok: { type: "stdio", command: "tok-server", args: [], env: { TOKEN: PLAIN } } } } } }));
     const r = f.run(["sync", "--all", "--yes"]);
-    expect(r.code).toBe(3);
+    expectCode(r, 3);
     expect(r.out).toContain("значение секрета MYTOK");
     expect(r.out).toContain("--force");
     expect(r.out + r.err).not.toContain(PLAIN);

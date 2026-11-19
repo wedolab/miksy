@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { unknownKeys } from "../src/load";
 import { canonical } from "../src/paths";
 import { compareVersions, describeEngine, newerLedger, packageVersion } from "../src/version";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 const git = (dir: string, ...a: string[]) => Bun.spawnSync(["git", "-C", dir, ...a], { stdout: "pipe", env: { ...process.env, ...ID } }).stdout.toString().trim();
@@ -47,10 +47,10 @@ describe("версия движка", () => {
   test("miksy --version, miksy version, help и doctor показывают версию", () => {
     const f = cliFixture();
     const v = f.run(["--version"]);
-    expect(v.code).toBe(0);
+    expectCode(v, 0);
     expect(v.out).toMatch(new RegExp(`^miksy ${VERSION.replaceAll(".", "\\.")}`));
     expect(f.run(["version"]).out).toBe(v.out);
-    expect(f.run(["version", "x"]).code).toBe(2);
+    expectCode(f.run(["version", "x"]), 2);
     expect(f.run(["help"]).out.split("\n")[0]).toStartWith(`miksy ${VERSION}`);
     expect(f.run(["doctor"]).out.split("\n")[0]).toStartWith(`miksy doctor — версия ${VERSION}`);
   }, 30000);
@@ -66,7 +66,7 @@ describe("версия движка", () => {
 describe("совместимость: учёт записан более новой версией", () => {
   test("sync пишет версию движка в учёт; учёт новее — предупреждение в sync и в «Справочно» doctor, ничего не блокируется", () => {
     const f = cliFixture();
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const path = `${f.config}/local/state/manifest.json`;
     const m = JSON.parse(readFileSync(path, "utf8"));
     expect(m.engine).toBe(VERSION);
@@ -78,11 +78,11 @@ describe("совместимость: учёт записан более нов�
     expect(newerLedger(`${VERSION}-3-gabc1234`)).toBeNull();
     expect(newerLedger(`${VERSION} (коммит abc1234, есть правки)`)).toBeNull();
     const dry = f.run(["sync", "--global", "--dry-run"]);
-    expect(dry.code).toBe(0);
+    expectCode(dry, 0);
     expect(dry.out).toContain("предупреждение: учёт miksy (local/state/manifest.json) записан более новой версией движка — 99.0.0");
     // Запись не блокируется; после неё учёт — этой версии (без изменений sync учёт не переписывает)
     put(`${f.config}/layers/global/instructions/01.md`, "# ещё правило\n");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(JSON.parse(readFileSync(path, "utf8")).engine).toBe(VERSION);
     expect(f.run(["doctor"]).out).not.toContain("более новой версией");
     // Поле неверного типа — как нет поля, учёт не «повреждён»

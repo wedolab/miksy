@@ -8,7 +8,7 @@ import type { RenderResult, Target } from "../src/adapter";
 import { apply, plan } from "../src/apply";
 import { emptyState } from "../src/manifest";
 import type { Resolved } from "../src/types";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode } from "./helpers";
 
 const git = (dir: string, ...args: string[]) =>
   Bun.spawnSync(["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { stdout: "ignore", stderr: "ignore" });
@@ -160,7 +160,7 @@ describe("git: потерянный ответ — один повтор", () =>
     } finally { g.setGitSpawnForTest(null); }
     const { g: g2, state: s2 } = await fake([empty(1), empty(1)]);
     try {
-      expect(g2.gitSpawn(["-C", d, "checkout", "-q", "-b", "x"], { readOnly: false }).code).toBe(1);
+      expectCode(g2.gitSpawn(["-C", d, "checkout", "-q", "-b", "x"], { readOnly: false }), 1);
       expect(s2.calls).toBe(1);
     } finally { g2.setGitSpawnForTest(null); }
   });

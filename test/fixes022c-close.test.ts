@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { aclProblem, closeCommand } from "../src/secretfiles";
-import { CLI } from "./helpers";
+import { CLI, expectCode, said } from "./helpers";
 import { foreignForBuiltinAdmin, openToOthers, USERS } from "./openacl";
 
 const win = process.platform === "win32";
@@ -79,12 +79,12 @@ for (const kind of ["dir", "file"] as const)
         if (r === "только ваша") {
           // Уже закрыта: строки нет; команда для неё (closeCommand) ничего не ломает
           expect(l1).toBeUndefined();
-          expect(runCmd(closeCommand(w.target, kind === "dir")).exitCode).toBe(0);
+          expectCode(runCmd(closeCommand(w.target, kind === "dir")), 0);
         } else {
           expect(l1).toBeTruthy();
           const cmd = l1!.match(/закройте вручную(?: \(PowerShell\))?: (.+)$/)![1].trim();
           const res = runCmd(cmd);
-          expect({ code: res.exitCode, err: res.stderr.toString().trim() }).toEqual({ code: 0, err: "" });
+          expect({ code: res.exitCode, err: res.stderr.toString().trim() }, said(res)).toEqual({ code: 0, err: "" });
         }
         let readable = true;
         try { readFileSync(kind === "dir" ? (put(`${w.vault}/probe`), `${w.vault}/probe`) : w.target, "utf8"); } catch { readable = false; }
@@ -97,5 +97,5 @@ for (const kind of ["dir", "file"] as const)
           sync: sync.code,
           skipped: /не заданы переменные|файлы секретов не записаны/.test(sync.out),
           secretFile: kind === "dir" ? existsSync(`${w.vault}/A_TOKEN`) : true,
-        }).toEqual({ closed: null, readable: true, doctorLine: null, sync: 0, skipped: false, secretFile: true });
+        }, said(sync)).toEqual({ closed: null, readable: true, doctorLine: null, sync: 0, skipped: false, secretFile: true });
       }, 120000);

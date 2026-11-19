@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode, said } from "./helpers";
 import { applyClaude, applyRestore, claudePlan, planRestore, quotePath, readOnlyHint, reason } from "../src/restore";
 
 const win = process.platform === "win32";
@@ -35,7 +35,7 @@ test.skipIf(!win)("С1: Windows — команда из подсказки сн�
   const hint = reason(Object.assign(new Error("x"), { code: "EPERM" }), { rel: "config.toml", src: "" }, t);
   const cmd = hint.slice(hint.indexOf("attrib -r"));
   const r = Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd], { stdout: "pipe", stderr: "pipe" });
-  expect(r.exitCode).toBe(0);
+  expectCode(r, 0);
   writeFileSync(t, "y"); // пометка снята — запись проходит
   expect(read(t)).toBe("y");
 }, 30000);
@@ -47,7 +47,7 @@ test("С2: затираемое за ссылкой пользователя —
   put(`${f.dir}/dotfiles/settings.json`, "new\n");
   mkdirSync(`${f.home}/.claude`, { recursive: true });
   symlinkSync(`${f.dir}/dotfiles/settings.json`, `${f.home}/.claude/settings.json`, "file");
-  expect(f.run(["restore", "--yes"]).code).toBe(0);
+  expectCode(f.run(["restore", "--yes"]), 0);
   expect(read(`${f.dir}/dotfiles/settings.json`)).toBe("old\n");
   expect(isLink(`${f.home}/.claude/settings.json`)).toBe(true);
   const br = readdirSync(`${f.config}/local/backups`).find((d) => d.startsWith("before-restore-"))!;
@@ -66,7 +66,7 @@ test("С2: ссылка из копии на месте ссылки польз�
   mkdirSync(`${f.home}/.claude`, { recursive: true });
   symlinkSync(`${f.dir}/b.md`, `${f.home}/.claude/CLAUDE.md`, "file");
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).toContain("(ссылка не сохраняется — только куда вела, в итоге)");
   expect(r.out).toContain(`заменённые ссылки (в бэкап не сохраняются) вели на: ~/.claude/CLAUDE.md → ${f.dir}/b.md`);
   expect(read(`${f.dir}/b.md`)).toBe("B\n");
@@ -122,7 +122,7 @@ test("С4: битый .claude.json в копии — предупреждени�
   put(`${f.home}/.claude.json`, "{}");
   for (const args of [["restore", "--dry-run"], ["restore", "--yes"], ["restore", "--yes"]]) {
     const r = f.run(args);
-    expect({ code: r.code, fix: r.out.includes("Исправьте"), leak: r.out.includes("sk-secret") }).toEqual({ code: 0, fix: false, leak: false });
+    expect({ code: r.code, fix: r.out.includes("Исправьте"), leak: r.out.includes("sk-secret") }, said(r)).toEqual({ code: 0, fix: false, leak: false });
     expect(r.out).toContain("Предупреждение: серверы Claude из копии не прочитать — файл копии .claude.json повреждён");
   }
   expect(read(`${f.home}/.codex/config.toml`)).toBe("cfg\n");
@@ -133,7 +133,7 @@ test("М1: сервер Claude с именем constructor или toString пе�
   put(`${copyDir(f)}/.claude.json`, JSON.stringify({ mcpServers: { constructor: { command: "c" }, toString: { command: "t" } }, projects: { constructor: { mcpServers: { p: { command: "p" } } } } }));
   put(`${f.home}/.claude.json`, JSON.stringify({ mcpServers: {} }, null, 2));
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   const live = JSON.parse(read(`${f.home}/.claude.json`)!);
   expect(live.mcpServers).toEqual({ constructor: { command: "c" }, toString: { command: "t" } });
   expect(live.projects.constructor).toEqual({ mcpServers: { p: { command: "p" } } });
@@ -199,7 +199,7 @@ test("повторная проверка 10c-2: сервер Claude с имен
   put(`${copyDir(f)}/.claude.json`, '{"mcpServers":{"__proto__":{"command":"p"}}}');
   put(`${f.home}/.claude.json`, JSON.stringify({ mcpServers: {} }, null, 2));
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(read(`${f.home}/.claude.json`)).toContain('"__proto__": {');
   expect(Object.keys(JSON.parse(read(`${f.home}/.claude.json`)!).mcpServers)).toEqual(["__proto__"]);
 });
@@ -209,7 +209,7 @@ test("повторная проверка 10c-2: .claude.json в копии — 
   mkdirSync(`${copyDir(f)}/.claude.json`, { recursive: true });
   put(`${f.home}/.claude.json`, "{}");
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(1);
+  expectCode(r, 1);
   expect(r.out).toContain("файл копии .claude.json не прочитать (нет доступа или это не файл)");
   expect(r.out).not.toContain("повреждён");
 });

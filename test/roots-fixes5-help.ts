@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, ledger, read, rootsFixture, yamlRoots } from "./rootshelp";
 import { applyMoves } from "../src/relocate";
 
@@ -50,7 +50,7 @@ const id = (agent: string, dir: string) => `${agent}|${dir}`.toLowerCase();
 const forgetAway = (f: { run: (a: string[]) => { code: number | null; out: string } }, root: string, app: string) => {
   unplug(root);
   const c = f.run(["clean", app, "--forget"]);
-  expect(c.code).toBe(0);
+  expectCode(c, 0);
   plugBack(root);
   return c;
 };
@@ -81,8 +81,8 @@ describe("B.1: ответы пользователя в окне Claude и до�
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
     team(app);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     allowInClaude(app);
     const before = f.run(["sync", app]);
     expect({ ask: asked(before), trusted: trusted(f.home, app), approvals: local(app).enabledMcpjsonServers, git: status(app) })
@@ -97,8 +97,8 @@ describe("B.1: ответы пользователя в окне Claude и до�
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
     team(app);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     allowInClaude(app);
     expect(asked(f.run(["sync", app]))).toBe(false);
     forgetAway(f, f.archive, app);
@@ -110,7 +110,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
   test("H1c: проект без командных настроек (без .mcp.json), «всегда разрешать» в Claude; «забыть» → диск вернулся → sync: доверие Claude возвращается без вопроса", () => {
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(trusted(f.home, app)).toBe(true);
     allowInClaude(app);
     expect(asked(f.run(["sync", app]))).toBe(false);
@@ -125,7 +125,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
     team(app);
     allowInClaude(app);
     expect(asked(f.run(["sync", app]))).toBe(true);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     const runs = [f.run(["sync", app]), f.run(["sync", app]), f.run(["sync", app])];
     expect(runs.map(swing)).toEqual([STEADY, STEADY, STEADY]);
     expect(trusted(f.home, app)).toBe(true);
@@ -135,7 +135,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
   test("доверие miksy → ответы в Claude → команда добавила .mcp.json → вопрос → «да» → четыре sync подряд без вопроса и без «снимается», доверие стоит", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     expect(trusted(f.home, app)).toBe(true);
     allowInClaude(app);
     expect(swing(f.run(["sync", app]))).toEqual(STEADY);
@@ -146,7 +146,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
     // Тот же вопрос и после того, как доверие снято: ответы Claude по-прежнему не в нём
     const again = f.run(["sync", app]);
     expect({ ask: asked(again), allow: again.out.includes("разрешено без вопроса") }).toEqual({ ask: true, allow: false });
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     const runs = [1, 2, 3, 4].map(() => f.run(["sync", app]));
     expect(runs.map(swing)).toEqual([STEADY, STEADY, STEADY, STEADY]);
     expect({ trusted: trusted(f.home, app), approvals: local(app).enabledMcpjsonServers }).toEqual({ trusted: true, approvals: ["team"] });
@@ -201,7 +201,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
     // Вопрос не меняется от запуска к запуску (один вопрос)
     const s2 = f.run(["sync", app]);
     expect({ ask: asked(s2), allow: s2.out.includes("разрешено без вопроса") }).toEqual({ ask: true, allow: true });
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     const runs = [1, 2, 3].map(() => f.run(["sync", app]));
     expect(runs.map(swing)).toEqual([STEADY, STEADY, STEADY]);
     expect(trusted(f.home, app)).toBe(true);
@@ -218,7 +218,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
   test("граница: «ответы Claude» в отслеживаемом git settings.local.json — настройки команды: в вопросе, доверие miksy снимается", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     expect(trusted(f.home, app)).toBe(true);
     allowInClaude(app, "Bash(rm:*)");
     gitc(app, "add", "-f", ".claude/settings.local.json");
@@ -231,8 +231,8 @@ describe("B.1: ответы пользователя в окне Claude и до�
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
     team(app);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["trust", app, "--confirm"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["trust", app, "--confirm"]), 0);
     allowInClaude(app);
     expect(asked(f.run(["sync", app]))).toBe(false);
     forgetAway(f, f.archive, app);
@@ -259,7 +259,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
   test("G1: чужой .codex/config.toml с шапкой miksy (не под строкой exclude) в проекте с доверием miksy — доверие снимается, нужен ответ пользователя", () => {
     const f = cliFixture({ agents: ["codex"], projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", p1]).code).toBe(0);
+    expectCode(f.run(["sync", p1]), 0);
     expect(codexTrusted(f.home)).toBe(true);
     const evil = "# Сгенерировано miksy. Не править вручную — изменения вносить в конфигурацию miksy (слои).\n[mcp_servers.evil]\ncommand = \"evil.exe\"\nargs = []\n";
     put(`${p1}/.codex/config.toml`, evil);
@@ -274,7 +274,7 @@ describe("B.1: ответы пользователя в окне Claude и до�
     put(`${p1}/.codex/config.toml`, evil);
     const s = f.run(["sync", p1]);
     expect({ trusted: codexTrusted(f.home), conflict: s.out.includes("КОНФЛИКТ"), ask: asked(s) }).toEqual({ trusted: false, conflict: true, ask: false });
-    expect(f.run(["sync", p1, "--force"]).code).toBe(0);
+    expectCode(f.run(["sync", p1, "--force"]), 0);
     expect({ trusted: codexTrusted(f.home), evil: read(`${p1}/.codex/config.toml`).includes("evil") }).toEqual({ trusted: true, evil: false });
   }, 120000);
 });
@@ -292,7 +292,7 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     const manifest = `${f.config}/local/state/manifest.json`;
     // Машина A
     put(`${f.config}/local/machine.yaml`, yamlA);
-    expect(f.run(["sync", p1]).code).toBe(0);
+    expectCode(f.run(["sync", p1]), 0);
     expect(read(`${p1}/.codex/config.toml`)).toContain("tool.exe");
     const ledgerA = read(manifest);
     const exA = exclude(p1);
@@ -316,7 +316,7 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
   test("проект без «забыть»: файл miksy под точной строкой, которого нет в учёте и который miksy не пишет, — sync и clean его не трогают", () => {
     const f = cliFixture({ agents: ["codex"], projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", p1]).code).toBe(0);
+    expectCode(f.run(["sync", p1]), 0);
     const text = read(`${p1}/.codex/config.toml`);
     expect(text).toContain("Сгенерировано miksy");
     expect(exclude(p1)).toContain("/.codex/config.toml");
@@ -334,12 +334,12 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
   test("отметка: «забыть» запоминает только факт и доверие Claude (без файлов и хешей), --dry-run её не ставит; первый sync после возвращения диска убирает ненужное и снимает её, повтор — «изменений нет»", () => {
     const f = archiveFixture(["claude", "codex"]);
     const app = f.app;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect({ claude: trusted(f.home, app), codex: read(`${app}/.codex/config.toml`).includes("Сгенерировано miksy") }).toEqual({ claude: true, codex: true });
     unplug(f.archive);
-    expect(f.run(["clean", app, "--forget", "--dry-run"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget", "--dry-run"]), 0);
     expect(marks(f.config)).toEqual({});
-    expect(f.run(["clean", app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget"]), 0);
     expect(marks(f.config)).toEqual({ [id("claude", app)]: { trusted: true }, [id("codex", app)]: {} });
     expect(targetsUnder(f.config, "/Acme/app")).toEqual([]);
     // Диск так и не вернулся — отметка остаётся
@@ -352,20 +352,20 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     const dry = f.run(["sync", app, "--dry-run"]);
     expect({ gone: dry.out.includes("больше не нужен"), marks: Object.keys(marks(f.config)).length }).toEqual({ gone: true, marks: 2 });
     const s = f.run(["sync", app]);
-    expect({ code: s.code, gone: s.out.includes("больше не нужен"), files: files(app), marks: marks(f.config), git: status(app) })
+    expect({ code: s.code, gone: s.out.includes("больше не нужен"), files: files(app), marks: marks(f.config), git: status(app) }, said(s))
       .toEqual({ code: 0, gone: true, files: [], marks: {}, git: "" });
     expect(changed(f.run(["sync", app]).out)).toEqual([]);
   }, 180000);
 
   test("отметка: clean после возвращения диска (без sync) убирает ненужное по уликам и снимает отметку; повторный clean — «изменений нет»", () => {
     const f = archiveFixture(["claude", "codex"]);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     forgetAway(f, f.archive, f.app);
     expect(Object.keys(marks(f.config)).length).toBe(2);
     const dry = f.run(["clean", f.app, "--dry-run"]);
     expect(Object.keys(marks(f.config)).length).toBe(2);
     const c = f.run(["clean", f.app]);
-    expect({ code: c.code, gone: c.out.includes("больше не нужен"), same: dry.out.includes("больше не нужен"), files: files(f.app), marks: marks(f.config), git: status(f.app) })
+    expect({ code: c.code, gone: c.out.includes("больше не нужен"), same: dry.out.includes("больше не нужен"), files: files(f.app), marks: marks(f.config), git: status(f.app) }, said(c))
       .toEqual({ code: 0, gone: true, same: true, files: [], marks: {}, git: "" });
     expect(changed(f.run(["clean", f.app]).out)).toEqual([]);
   }, 180000);
@@ -373,10 +373,10 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
   test("root remove --forget → root add → sync --all по подсказкам: ненужное убрано, отметки сняты, повторный sync --all — без изменений", () => {
     const f = archiveFixture(["claude", "codex"]);
     const app = f.app;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     const r = f.run(["root", "remove", f.archive, "--forget"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(Object.keys(marks(f.config)).length).toBe(2);
     const add = r.out.match(/верните папку корнем — (miksy root add "[^"]+" --tree (?:"[^"]+"|\S+));/)?.[1] ?? "";
     const then = r.out.match(/затем (miksy sync --all)/)?.[1] ?? "";
@@ -384,9 +384,9 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     // Пока диска не было, правила проекта убрали из слоёв
     rmSync(`${f.config}/layers/tree/instructions`, { recursive: true });
     plugBack(f.archive);
-    expect(f.run(shellWords(add).slice(1)).code).toBe(0);
+    expectCode(f.run(shellWords(add).slice(1)), 0);
     const s = f.run([...shellWords(then).slice(1), "--yes"]);
-    expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), gone: s.out.includes("больше не нужен"), files: files(app), marks: marks(f.config), git: status(app) })
+    expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), gone: s.out.includes("больше не нужен"), files: files(app), marks: marks(f.config), git: status(app) }, said(s))
       .toEqual({ code: 0, conflict: false, gone: true, files: [], marks: {}, git: "" });
     // Повтор — без действий (строка «новые — miksy в них ещё не писал» — список, не действие)
     expect(changed(f.run(["sync", "--all", "--yes"]).out).filter((l) => !/^ {2}новые — /.test(l))).toEqual([]);
@@ -399,11 +399,11 @@ describe("рецензия круга 6x", () => {
   test("R1: «да» в терминале sync (а не trust --confirm) после изменения команды — четыре sync без вопроса", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     allowInClaude(app);
     team(app);
     const q = inProcess(f, ["sync", app], f.dir, ["y"]);
-    expect({ code: q.code, err: q.err, questions: q.questions.length }).toEqual({ code: 0, err: "", questions: 1 });
+    expect({ code: q.code, err: q.err, questions: q.questions.length }, said(q)).toEqual({ code: 0, err: "", questions: 1 });
     const runs = [1, 2, 3, 4].map(() => f.run(["sync", app]));
     expect(runs.map(swing)).toEqual([STEADY, STEADY, STEADY, STEADY]);
     expect(trusted(f.home, app)).toBe(true);
@@ -412,7 +412,7 @@ describe("рецензия круга 6x", () => {
   test("п. 3 (R2): clean, который до проекта не дошёл (диска всё ещё нет), отметку «забыт» не снимает", () => {
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     // При «забыть» ближняя часть — конфликт (битый ~/.claude.json): цель остаётся в учёте с ближними записями
     const good = read(`${f.home}/.claude.json`);
@@ -433,7 +433,7 @@ describe("рецензия круга 6x", () => {
   test("п. 4 (R5): учёт прежней версии без everTrusted, trust --deny, затем trust --confirm — ответов Claude нет в списке", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     allowInClaude(app);
     const m = ledger(f.config);
     for (const t of Object.values(m.targets)) delete (t as { everTrusted?: true }).everTrusted;
@@ -449,13 +449,13 @@ describe("рецензия круга 6x", () => {
   // файлы остались бы навсегда без учёта; пустых отметок в учёте нет
   test("п. 6: отметка агента, которого убрали из agents, остаётся до его clean --agent; пустых отметок в учёте нет", () => {
     const f = archiveFixture(["claude", "codex"]);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     forgetAway(f, f.archive, f.app);
     expect(Object.keys(marks(f.config)).length).toBe(2);
     put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
-    expect(f.run(["sync", f.app]).code).toBe(0);
+    expectCode(f.run(["sync", f.app]), 0);
     expect(Object.keys(marks(f.config)).map((k) => k.slice(0, k.indexOf("|")))).toEqual(["codex"]);
-    expect(f.run(["clean", f.app, "--agent", "codex"]).code).toBe(0);
+    expectCode(f.run(["clean", f.app, "--agent", "codex"]), 0);
     expect("forgotten" in ledger(f.config)).toBe(false);
   }, 120000);
 
@@ -480,7 +480,7 @@ describe("рецензия 6w без находок: подсказки досл
     const f = rootsFixture(ALL);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const before = files(app);
     unplug(f.archive);
     const c = f.run(["clean", app]);
@@ -490,7 +490,7 @@ describe("рецензия 6w без находок: подсказки досл
     plugBack(f.archive);
     const r = f.run(shellWords(hint).slice(1));
     const again = f.run(shellWords(hint).slice(1));
-    expect({ code: r.code, before: before.length > 0, left: files(app), git: statusIgnored(app), ledger: targetsUnder(f.config, "/Acme/app"), again: again.out.includes("изменений нет") })
+    expect({ code: r.code, before: before.length > 0, left: files(app), git: statusIgnored(app), ledger: targetsUnder(f.config, "/Acme/app"), again: again.out.includes("изменений нет") }, said(r))
       .toEqual({ code: 0, before: true, left: [], git: "", ledger: [], again: true });
   }, 180000);
 
@@ -498,10 +498,10 @@ describe("рецензия 6w без находок: подсказки досл
     const f = rootsFixture(ALL);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     const c = f.run(["clean", app, "--forget"]);
-    expect(c.code).toBe(0);
+    expectCode(c, 0);
     const sync = c.out.match(/Если диск найдётся: (miksy sync "[^"]+")/)?.[1] ?? "";
     const clean = c.out.match(/после этого (miksy clean "[^"]+")/)?.[1] ?? "";
     expect({ sync, clean }).toEqual({ sync: `miksy sync "${app}"`, clean: `miksy clean "${app}"` });
@@ -509,7 +509,7 @@ describe("рецензия 6w без находок: подсказки досл
     const s = f.run(shellWords(sync).slice(1));
     const k = f.run(shellWords(clean).slice(1));
     const again = f.run(shellWords(clean).slice(1));
-    expect({ sync: s.code, clean: k.code, left: files(app), git: statusIgnored(app), ledger: targetsUnder(f.config, "/Acme/app"), again: again.out.includes("изменений нет"), marks: marks(f.config) })
+    expect({ sync: s.code, clean: k.code, left: files(app), git: statusIgnored(app), ledger: targetsUnder(f.config, "/Acme/app"), again: again.out.includes("изменений нет"), marks: marks(f.config) }, said(s, k))
       .toEqual({ sync: 0, clean: 0, left: [], git: "", ledger: [], again: true, marks: {} });
   }, 180000);
 
@@ -517,24 +517,24 @@ describe("рецензия 6w без находок: подсказки досл
     const f = rootsFixture(ALL);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     unplug(f.archive);
     const r = f.run(["root", "remove", f.archive, "--forget"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const add = r.out.match(/верните папку корнем — (miksy root add "[^"]+" --tree (?:"[^"]+"|\S+));/)?.[1] ?? "";
     const then = r.out.match(/затем (miksy sync --all)/)?.[1] ?? "";
     const rm = r.out.match(/после этого (miksy root remove "[^"]+")/)?.[1] ?? "";
     expect({ add: add !== "", then, rm: rm !== "" }).toEqual({ add: true, then: "miksy sync --all", rm: true });
     plugBack(f.archive);
-    expect(f.run(shellWords(add).slice(1)).code).toBe(0);
+    expectCode(f.run(shellWords(add).slice(1)), 0);
     const s = f.run([...shellWords(then).slice(1), "--yes"]);
-    expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ") }).toEqual({ code: 0, conflict: false });
+    expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ") }, said(s)).toEqual({ code: 0, conflict: false });
     const rr = f.run(shellWords(rm).slice(1));
-    expect(rr.code).toBe(0);
+    expectCode(rr, 0);
     const cleans = [...rr.out.matchAll(/^\s+(miksy clean "[^"]+")$/gm)].map((m) => m[1]);
     expect(cleans.length).toBeGreaterThan(0);
-    for (const k of cleans) expect(f.run(shellWords(k).slice(1)).code).toBe(0);
+    for (const k of cleans) expectCode(f.run(shellWords(k).slice(1)), 0);
     const doc = f.run(["doctor"]);
     expect({ left: files(app), git: statusIgnored(app), ledger: targetsUnder(f.config, f.archive), problems: /Проблем: [1-9]/.test(doc.out) ? doc.out : "", marks: marks(f.config) })
       .toEqual({ left: [], git: "", ledger: [], problems: "", marks: {} });
@@ -544,12 +544,12 @@ describe("рецензия 6w без находок: подсказки досл
     const f = rootsFixture(ALL);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     forgetAway(f, f.archive, app);
     const s1 = f.run(["sync", app]);
     const s2 = f.run(["sync", app]);
     const changed = s2.out.split(/\r?\n/).filter((l) => /^ {2}\S/.test(l) && !/^ {2}предупреждение/.test(l));
-    expect({ s1: s1.code, conflict: s1.out.includes("КОНФЛИКТ"), changed, git: status(app) }).toEqual({ s1: 0, conflict: false, changed: [], git: "" });
+    expect({ s1: s1.code, conflict: s1.out.includes("КОНФЛИКТ"), changed, git: status(app) }, said(s1)).toEqual({ s1: 0, conflict: false, changed: [], git: "" });
   }, 180000);
 });
 
@@ -561,7 +561,7 @@ describe("рецензия 6w без находок: план --dry-run прот
   test("D1: clean --forget --dry-run при отключённом диске — те же действия и итог, что у clean --forget", () => {
     const f = rootsFixture(["claude", "codex"]);
     const app = `${f.archive}/Acme/app`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     const dry = f.run(["clean", app, "--forget", "--dry-run"]);
     const real = f.run(["clean", app, "--forget"]);
@@ -571,7 +571,7 @@ describe("рецензия 6w без находок: план --dry-run прот
   test("D2: clean цели без учёта (диск вернулся после «забыть») --dry-run — те же действия, что у clean", () => {
     const f = rootsFixture(["claude", "codex", "opencode"]);
     const app = `${f.archive}/Acme/app`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     forgetAway(f, f.archive, app);
     const dry = f.run(["clean", app, "--dry-run"]);
     const real = f.run(["clean", app]);
@@ -596,23 +596,23 @@ describe.skipIf(process.platform !== "win32")("рецензия 6w без нах
   test("root (список): корень недоступен — нет диска", () => {
     const { f, L } = setup();
     const r = inProcess(f, ["root"]);
-    expect({ code: r.code, err: r.err, line: r.out.split("\n").find((l) => l.includes(`${L}:/`)) ?? "" }).toEqual({ code: 0, err: "", line: `  ${L}:/ → layers/tree/Drive  — недоступен (нет диска)` });
+    expect({ code: r.code, err: r.err, line: r.out.split("\n").find((l) => l.includes(`${L}:/`)) ?? "" }, said(r)).toEqual({ code: 0, err: "", line: `  ${L}:/ → layers/tree/Drive  — недоступен (нет диска)` });
   });
 
   test("clean пути проекта в другом написании (q:\\acme\\SITE): записанное на диске остаётся в учёте, подсказка — путь учёта", () => {
     const { f, L, site } = setup();
     const r = inProcess(f, ["clean", `${L.toLowerCase()}:\\acme\\SITE`]);
-    expect({ code: r.code, err: r.err, hint: r.out.includes(`miksy clean "${site}" --forget`), kept: Object.keys(ledger(f.config).targets), marks: marks(f.config) })
+    expect({ code: r.code, err: r.err, hint: r.out.includes(`miksy clean "${site}" --forget`), kept: Object.keys(ledger(f.config).targets), marks: marks(f.config) }, said(r))
       .toEqual({ code: 0, err: "", hint: true, kept: [`claude|${site}`], marks: {} });
   });
 
   test("clean --forget, затем root remove Q: (без косой) и q:\\ — корень убран, учёт пуст, отметка «забыт» — только факт", () => {
     const { f, L, site } = setup();
     const c = inProcess(f, ["clean", `${site}/`, "--forget"]);
-    expect({ code: c.code, err: c.err, forgot: c.out.includes("забыто"), left: Object.keys(ledger(f.config).targets), marks: marks(f.config) })
+    expect({ code: c.code, err: c.err, forgot: c.out.includes("забыто"), left: Object.keys(ledger(f.config).targets), marks: marks(f.config) }, said(c))
       .toEqual({ code: 0, err: "", forgot: true, left: [], marks: { [id("claude", site)]: {} } });
     const r = inProcess(f, ["root", "remove", `${L.toLowerCase()}:\\`]);
-    expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
     expect(inProcess(f, ["root"]).out).not.toContain(`${L}:/`);
   });
 
@@ -622,7 +622,7 @@ describe.skipIf(process.platform !== "win32")("рецензия 6w без нах
     expect(marks(f.config)).toEqual({});
     const r = inProcess(f, ["root", "remove", `${L}:`, "--forget"]);
     const add = r.out.match(/miksy root add "([^"]+)" --tree (\S+);/);
-    expect({ dry: dry.code, dryErr: dry.err, code: r.code, err: r.err, add: add ? [add[1], add[2]] : null, left: Object.keys(ledger(f.config).targets) })
+    expect({ dry: dry.code, dryErr: dry.err, code: r.code, err: r.err, add: add ? [add[1], add[2]] : null, left: Object.keys(ledger(f.config).targets) }, said(dry, r))
       .toEqual({ dry: 0, dryErr: "", code: 0, err: "", add: [`${L}:/`, "Drive"], left: [] });
   });
 });

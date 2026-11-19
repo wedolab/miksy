@@ -1,7 +1,7 @@
 // Выпуск 0.2.2, круг 8f, G1 и G2 (проверка 8e, находки 1 и 2; тесты рецензента out/check022e). Мастер в процессе — поддельная система, движок — копия (fixes022e-helpers)
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, read, yamlRoots } from "./rootshelp";
 import { inSetup } from "./fixes022e-helpers";
 
@@ -19,7 +19,7 @@ test("G1: вложенный корень с веткой = имя папки �
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Clients`, tree: "Clients" }])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients rule\n");
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const before = { site: layers(f, `${ws}/Clients/Acme/site`), q: "" };
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   f.run(["sync", "--all"]);
@@ -37,7 +37,7 @@ test("G2: новый основной — другая папка, копии н
   const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
   git(`${ws}/Org/p1`); git(`${ws}/Inner/Acme/site`); git(`${work}/Lab/x`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Inner`, tree: "Code" }])}agents: [claude]\n`);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   // Всё о копии и переходе — только с условием «если папку скопировали или перенесли»; копии нет — пути копии нет
@@ -54,7 +54,7 @@ test("G2: у нового основного своя одноимённая п�
   const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
   git(`${ws}/Org/p1`); git(`${ws}/Clients/Acme/site`); git(`${work}/Clients/q`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Clients`, tree: "Code" }])}agents: [claude]\n`);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   expect({
@@ -75,7 +75,7 @@ test("F1: перенесли, пустые папки остались — по�
   put(`${f.config}/layers/tree/Code/instructions/30.md`, "# code rule\n");
   put(`${f.config}/layers/tree/Code2/instructions/30.md`, "# code2 rule\n");
   put(`${f.config}/layers/tree/Code/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [\"${WORKSPACE}/x\"]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const P = ["Org/p1", "Inner/Acme/site", "Lab/Inner2/x", "Lab/p3"];
   const before = P.map((p) => layers(f, `${ws}/${p}`));
   mkdirSync(`${f.dir}/disk2`, { recursive: true });
@@ -91,7 +91,7 @@ test("F1: перенесли, пустые папки остались — по�
   for (const p of P) f.run(["sync", `${ws2}/${p}`, "--force"]);
   const all = f.run(["sync", "--all"]);
   const after = P.map((p) => layers(f, `${ws2}/${p}`));
-  expect({ code: all.code, after, oldLeft: P.map((p) => read(`${ws}/${p}/CLAUDE.local.md`)) }).toEqual({ code: 0, after: before, oldLeft: ["", "", "", ""] });
+  expect({ code: all.code, after, oldLeft: P.map((p) => read(`${ws}/${p}/CLAUDE.local.md`)) }, said(all, P)).toEqual({ code: 0, after: before, oldLeft: ["", "", "", ""] });
 }, 300000);
 
 // Проверка круга 8f, №1: ветка вложенного корня лежит внутри layers/tree/<папка прежнего основного> (Clients/Main, Org/X) —
@@ -104,7 +104,7 @@ for (const [dir, tree] of [["Clients", "Clients/Main"], ["Inner", "Org/X"], ["Cl
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/${dir}`, tree }])}agents: [claude]\n`);
     put(`${f.config}/layers/tree/${tree}/instructions/10.md`, "# nested rule\n");
     put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
     expect(say(s).includes("Вернуть его: 1)")).toBe(false);
   }, 300000);
@@ -116,7 +116,7 @@ test("G2: «нет на месте», у нового основного сво�
   const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
   git(`${ws}/Org/p1`); git(`${ws}/Inner/Acme/site`); git(`${work}/Inner/q`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Inner`, tree: "Code" }])}agents: [claude]\n`);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   renameSync(ws, `${ws}.off`);
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => l.includes("нет на месте"))!;

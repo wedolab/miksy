@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, statSync } from "node:fs";
 import { apply, plan } from "../src/apply";
 import { emptyState, writeAtomic } from "../src/manifest";
 import { ADAPTERS, renderFor } from "../src/registry";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectNotCode } from "./helpers";
 
 test("R1: MCP-файлы секретны у всех адаптеров, own/JSON/TOML; значения секрета в них нет", () => {
   const f = cliFixture();
@@ -25,20 +25,20 @@ test.skipIf(process.platform === "win32")("R1: новые и существую�
   for (const layer of ["tree", "global"]) put(`${f.config}/layers/${layer}/mcp/s.yaml`, 'name: s\ncommand: echo\nenv: {TOKEN: "${TOKEN}"}\n');
   put(`${f.config}/local/secrets.env`, "TOKEN=opaque-test-secret\n");
   const paths = [`${f.home}/.claude.json`, `${f.home}/.codex/config.toml`, `${f.home}/.config/opencode/opencode.json`, `${f.home}/.gemini/config/mcp_config.json`, `${f.ws}/Org/p1/.codex/config.toml`, `${f.ws}/Org/p1/opencode.json`, `${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`];
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
   for (const p of paths) { expect(statSync(p).mode & 0o777).toBe(0o600); chmodSync(p, 0o644); }
   const report = f.run(["doctor"]);
   expect(report.out).toContain("права");
-  expect(report.code).not.toBe(0);
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+  expectNotCode(report, 0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
   for (const p of paths) expect(statSync(p).mode & 0o777).toBe(0o600);
 }, 60000);
 
 test.skipIf(process.platform === "win32")("R1: setup создаёт local 0700, secrets.env 0600", () => {
   const f = cliFixture();
-  expect(f.run(["setup", "--yes"]).code).toBe(0);
+  expectCode(f.run(["setup", "--yes"]), 0);
   expect(statSync(`${f.config}/local`).mode & 0o777).toBe(0o700);
   expect(statSync(`${f.config}/local/secrets.env`).mode & 0o777).toBe(0o600);
 });

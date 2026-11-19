@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:f
 import { ENGINE } from "../src/load";
 import { canonical } from "../src/paths";
 import { defaultWorkspace, unsafeWorkspace } from "../src/setup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectNotCode } from "./helpers";
 
 test("setup: Unix-пути разного регистра не считаются одним домом", () => {
   expect(unsafeWorkspace("/miksy-no-such-volume/HOME", "/miksy-no-such-volume/home")).toBeNull();
@@ -45,7 +45,7 @@ test("R9: MIKSY_CONFIG без map, YAML с #, vars и бэкап, Homebrew-bun, 
   put(`${f.config}/local/machine.yaml`, `workspace: ${JSON.stringify(ws)}\nvars:\n  CUSTOM: "keep # value"\nagents: [claude]\n`);
   const old = readFileSync(`${f.config}/local/machine.yaml`, "utf8");
   const r = f.run();
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(existsSync(`${f.config}/map.yaml`)).toBe(true);
   const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as any;
   // С14: --force сохраняет workspace и agents (меняются только явным ответом)
@@ -65,7 +65,7 @@ test("R9: setup --yes использует существующий указат
   const pointer = `${f.home}/.miksy`;
   put(pointer, `${f.dir}/old-config\n`);
   const r = f.run(false);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(existsSync(`${f.dir}/old-config/map.yaml`)).toBe(true);
   expect(existsSync(`${f.engine}/../miksy-config/map.yaml`)).toBe(false);
   expect(readFileSync(pointer, "utf8")).toBe(`${f.dir}/old-config\n`);
@@ -76,7 +76,7 @@ test("П5: проект равный дому или содержащий дом
   put(`${f.config}/local/machine.yaml`, `workspace: ${JSON.stringify(f.dir)}\nagents: [codex]\n`);
   for (const dir of [f.home, f.dir]) {
     const r = f.run(["sync", dir, "--dry-run"]);
-    expect(r.code).not.toBe(0);
+    expectNotCode(r, 0);
     expect(r.err).toContain("домашний каталог");
     expect(r.out).not.toContain("записать");
   }

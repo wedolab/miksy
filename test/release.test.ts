@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { nextVersion, parseChangelog, releaseText } from "../src/changelog";
 import { canonical } from "../src/paths";
-import { put } from "./helpers";
+import { put, expectCode, said } from "./helpers";
 
 const SCRIPT = join(import.meta.dir, "..", "scripts", "release.ts");
 const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
@@ -78,18 +78,18 @@ describe("bun run release", () => {
   test("первый выпуск: версия из package.json без тега — тег, stable, дата в CHANGELOG; без --push — только подсказка", () => {
     const r = repo();
     const dry = r.run("--dry-run");
-    expect(dry.code).toBe(0);
+    expectCode(dry, 0);
     expect(dry.out).toContain("Выпуск miksy 0.1.0 (первый");
     expect(dry.out).toContain("- первый выпуск");
     expect(dry.out).toContain("--dry-run: ничего не изменено");
     expect(git(r.dev, "tag").out).toBe("");
     const no = r.run();
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(no.out).toContain("Без терминала — только с --yes");
     expect(git(r.dev, "tag").out).toBe("");
 
     const yes = r.run("--yes");
-    expect(yes.code).toBe(0);
+    expectCode(yes, 0);
     expect(git(r.dev, "tag").out).toBe("v0.1.0");
     expect(git(r.dev, "rev-parse", "stable").out).toBe(git(r.dev, "rev-parse", "v0.1.0^{commit}").out);
     expect(git(r.dev, "symbolic-ref", "--short", "HEAD").out).toBe("main");
@@ -99,16 +99,16 @@ describe("bun run release", () => {
     expect(git(r.bare, "tag").out).toBe("");
     // Повтор — выпускать нечего
     const again = r.run("--yes");
-    expect(again.code).toBe(1);
+    expectCode(again, 1);
     expect(again.out).toContain("выпускать нечего");
   }, 60000);
 
   test("номер по «Не выпущено»: Исправлено → PATCH, Новое и Ломает (0.x) → MINOR; --push — main, stable и тег в удалённый репо", () => {
     const r = repo();
-    expect(r.run("--yes").code).toBe(0); // 0.1.0
+    expectCode(r.run("--yes"), 0); // 0.1.0
     r.addLine("Исправлено", "- поправлено X");
     const fix = r.run("--yes");
-    expect(fix.code).toBe(0);
+    expectCode(fix, 0);
     expect(r.version()).toBe("0.1.1");
     expect(git(r.dev, "log", "-1", "--format=%s").out).toBe("Release 0.1.1");
     const text = readFileSync(`${r.dev}/CHANGELOG.md`, "utf8");
@@ -122,13 +122,13 @@ describe("bun run release", () => {
     expect(text).toStartWith(`# Изменения miksy\n\nВступление.\n\n## 0.1.1 — ${TODAY}\n`);
     // Выпущено, новых строк нет — выпускать нечего
     const none = r.run("--yes");
-    expect({ code: none.code, nothing: none.out.includes("выпускать нечего") }).toEqual({ code: 1, nothing: true });
+    expect({ code: none.code, nothing: none.out.includes("выпускать нечего") }, said(none)).toEqual({ code: 1, nothing: true });
     expect(text).not.toMatch(/## 0\.1\.1[\s\S]*### Новое[\s\S]*## 0\.1\.0/); // пустые разделы в выпуск не попадают
 
     r.addLine("Новое", "- команда Y");
     r.addLine("Ломает", "- формат Z");
     const minor = r.run("--yes", "--push");
-    expect(minor.code).toBe(0);
+    expectCode(minor, 0);
     expect(r.version()).toBe("0.2.0");
     expect(git(r.bare, "tag").out).toBe("v0.2.0"); // отправлен тег этого выпуска (прежние не отправлялись)
     expect(git(r.bare, "rev-parse", "stable").out).toBe(git(r.dev, "rev-parse", "v0.2.0^{commit}").out);
@@ -138,13 +138,13 @@ describe("bun run release", () => {
 
   test("отказы: незакоммиченные изменения, не та ветка, stable не в истории main, неизвестный аргумент", () => {
     const r = repo();
-    expect(r.run("--yes").code).toBe(0);
+    expectCode(r.run("--yes"), 0);
     r.addLine("Исправлено", "- x");
     writeFileSync(`${r.dev}/package.json`, readFileSync(`${r.dev}/package.json`, "utf8") + " ");
     const dirty = r.run("--yes");
-    expect(dirty.code).toBe(1);
+    expectCode(dirty, 1);
     expect(dirty.out).toContain("незакоммиченные изменения");
-    expect(r.run("--dry-run").code).toBe(0); // показать можно и с правками
+    expectCode(r.run("--dry-run"), 0); // показать можно и с правками
     git(r.dev, "checkout", "--", "package.json");
     git(r.dev, "checkout", "-q", "-b", "feature");
     expect(r.run("--yes").out).toContain("выпуск — с ветки main");
@@ -156,19 +156,19 @@ describe("bun run release", () => {
     git(r.dev, "commit", "-q", "-m", "hotfix");
     git(r.dev, "checkout", "-q", "main");
     const behind = r.run("--yes");
-    expect(behind.code).toBe(1);
+    expectCode(behind, 1);
     expect(behind.out).toContain("git merge stable");
     expect(r.version()).toBe("0.1.0");
-    expect(r.run("--force").code).toBe(2);
+    expectCode(r.run("--force"), 2);
   }, 60000);
 
   test("срочное исправление с ветки stable: выпуск на ней, подсказка слить в main", () => {
     const r = repo();
-    expect(r.run("--yes").code).toBe(0);
+    expectCode(r.run("--yes"), 0);
     git(r.dev, "checkout", "-q", "stable");
     r.addLine("Исправлено", "- срочно");
     const out = r.run("--yes");
-    expect(out.code).toBe(0);
+    expectCode(out, 0);
     expect(r.version()).toBe("0.1.1");
     expect(git(r.dev, "rev-parse", "stable").out).toBe(git(r.dev, "rev-parse", "v0.1.1^{commit}").out);
     expect(out.out).toContain("git push --atomic origin stable v0.1.1");
@@ -182,7 +182,7 @@ describe("bun run release: проверка GitHub", () => {
     const head = git(r.dev, "rev-parse", "HEAD").out;
     const out = r.run("--yes", ...args);
     // Отказ до записей: ни тега, ни коммита выпуска, version прежний
-    expect({ code: out.code, tag: git(r.dev, "tag").out, head: git(r.dev, "rev-parse", "HEAD").out }).toEqual({ code: 1, tag: "", head });
+    expect({ code: out.code, tag: git(r.dev, "tag").out, head: git(r.dev, "rev-parse", "HEAD").out }, said(out)).toEqual({ code: 1, tag: "", head });
     return out.out;
   };
 
@@ -190,7 +190,7 @@ describe("bun run release: проверка GitHub", () => {
     const r = repo();
     const sha = git(r.dev, "rev-parse", "HEAD").out;
     const out = r.run("--yes");
-    expect(out.code).toBe(0);
+    expectCode(out, 0);
     expect(out.out).toContain("Проверка: проверка GitHub зелёная (test (ubuntu-latest), test (macos-latest), test (windows-latest))");
     expect(out.out).toContain(`https://github.com/t/miksy/commit/${sha}/checks`);
     // Подменённый ответ GitHub не выдаётся за настоящий: строка о подмене — и при выпуске, и при отказе
@@ -205,7 +205,7 @@ describe("bun run release: проверка GitHub", () => {
     r.answer({ runs: [job("test (ubuntu-latest)", "completed", "success"), job("test (macos-latest)", "in_progress", null), job("test (macos-latest)", "queued", null)] });
     expect(refused(r)).toContain("проверка GitHub ещё идёт (test (macos-latest)) — повторите позже: https://github.com/t/miksy/commit/");
     const dry = r.run("--dry-run");
-    expect(dry.code).toBe(0);
+    expectCode(dry, 0);
     expect(dry.out).toContain("Выпуск сейчас откажет: проверка GitHub ещё идёт");
     expect(dry.out).toContain("--dry-run: ничего не изменено");
 
@@ -228,21 +228,21 @@ describe("bun run release: проверка GitHub", () => {
     git(r.dev, "commit", "-q", "--allow-empty", "-m", "local");
     const head = git(r.dev, "rev-parse", "--short", "HEAD").out;
     const local = r.runHere("--yes");
-    expect(local.code).toBe(1);
+    expectCode(local, 1);
     expect(local.out).toContain(`коммит ${head} ещё не в origin/main — сначала запушьте его (git push origin main)`);
     expect(git(r.dev, "tag").out).toBe("");
     expect(r.runHere("--dry-run").out).toContain("Выпуск сейчас откажет: коммит");
 
     r.answer({ runs: [job("test (ubuntu-latest)", "completed", "failure")] });
     const skipped = r.runHere("--yes", "--skip-ci");
-    expect(skipped.code).toBe(0);
+    expectCode(skipped, 0);
     expect(skipped.out).toContain("Внимание: проверка GitHub пропущена (--skip-ci).");
     expect(git(r.dev, "tag").out).toBe("v0.1.0");
 
     git(r.dev, "remote", "set-url", "origin", r.bare);
     r.addLine("Исправлено", "- x");
     const other = r.run("--yes");
-    expect(other.code).toBe(1);
+    expectCode(other, 1);
     expect(other.out).toContain("origin — не GitHub");
   }, 60000);
 });

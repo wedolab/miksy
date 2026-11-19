@@ -7,7 +7,7 @@ import type { Ask } from "../src/ask";
 import { setup } from "../src/setup";
 import { runCommand } from "../src/commands";
 import { newBackupRun } from "../src/backup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, yamlRoots } from "./rootshelp";
 
 type F = ReturnType<typeof cliFixture>;
@@ -47,7 +47,7 @@ test("E3: основной с веткой и два вложенных корн
   put(`${f.config}/layers/tree/Main/Grp/instructions/12.md`, "# grp rule\n");
   put(`${f.config}/layers/tree/Code/instructions/30.md`, "# code rule\n");
   put(`${f.config}/layers/tree/Deep/instructions/40.md`, "# deep rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const before = { p1: layers(f, `${ws}/Org/p1`), site: layers(f, `${ws}/Inner/Acme/site`), d1: layers(f, `${ws}/Grp/Deep/d1`) };
   mkdirSync(`${f.dir}/disk2`, { recursive: true });
   renameSync(ws, ws2);
@@ -61,7 +61,7 @@ test("E3: основной с веткой и два вложенных корн
   const a = f.run(["sync", "--all"]);
   const after = { p1: layers(f, `${ws2}/Org/p1`), site: layers(f, `${ws2}/Inner/Acme/site`), d1: layers(f, `${ws2}/Grp/Deep/d1`) };
   const doc = f.run(["doctor"]);
-  expect({ named: (line.match(/; если папку перенесли сюда — теперь /g) ?? []).length, after, code: a.code, doctor: doc.code }).toEqual({ named: 2, after: { p1: before.p1.replace(ws, ws2), site: before.site, d1: before.d1 }, code: 0, doctor: 0 });
+  expect({ named: (line.match(/; если папку перенесли сюда — теперь /g) ?? []).length, after, code: a.code, doctor: doc.code }, said(a, doc)).toEqual({ named: 2, after: { p1: before.p1.replace(ws, ws2), site: before.site, d1: before.d1 }, code: 0, doctor: 0 });
 }, 300000);
 
 // B №2: прежняя папка осталась, проектов-git в ней нет, но есть проект без git, где работал агент (реестр ~/.claude.json)
@@ -73,7 +73,7 @@ test("B №2: в прежнем основном только проект бе�
   put(`${f.home}/.claude.json`, JSON.stringify({ projects: { [`${ws}/Notes/n1`]: {} } }));
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Notes/instructions/10.md`, "# notes rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const synced = rules(`${ws}/Notes/n1/CLAUDE.local.md`);
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => /прежн/.test(l)) ?? "(нет строки)";
@@ -88,10 +88,10 @@ test("B №3: подсказка clean забытого проекта вне wo
   git(`${ws}/Org/p1`); git(`${work}/Org/p2`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   renameSync(ws, away); // диск отключён
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [true]], [/Заменить эти файлы/, [false]]]);
-  const said = s.out.split("\n").find((l) => /нет на месте/.test(l)) ?? "(нет)";
+  const notHereLine = s.out.split("\n").find((l) => /нет на месте/.test(l)) ?? "(нет)";
   const p2before = layers(f, `${work}/Org/p2`);
   const forget = inProcess(f, ["clean", `${ws}/Org/p1`, "--forget"]);
   renameSync(away, ws); // диск подключили
@@ -106,10 +106,10 @@ test("B №3: подсказка clean забытого проекта вне wo
     f.run(args);
   }
   const c2 = f.run(["clean", `${ws}/Org/p1`]);
-  expect(f.run(["root", "remove", ws]).code).toBe(0); // «после clean его можно снова убрать (root remove)»
+  expectCode(f.run(["root", "remove", ws]), 0); // «после clean его можно снова убрать (root remove)»
   f.run(["sync", "--all"]);
   const p2after = layers(f, `${work}/Org/p2`);
-  expect({ add: add.code, hintNoBack: !/как подсказал тот setup/.test(hint), cleaned: c2.code, p1: existsSync(`${ws}/Org/p1/CLAUDE.local.md`) ? readFileSync(`${ws}/Org/p1/CLAUDE.local.md`, "utf8") : false, p2: p2after })
+  expect({ add: add.code, hintNoBack: !/как подсказал тот setup/.test(hint), cleaned: c2.code, p1: existsSync(`${ws}/Org/p1/CLAUDE.local.md`) ? readFileSync(`${ws}/Org/p1/CLAUDE.local.md`, "utf8") : false, p2: p2after }, said(add, c2))
     .toEqual({ add: 0, hintNoBack: true, cleaned: 0, p1: false, p2: p2before });
 }, 300000);
 
@@ -121,7 +121,7 @@ test("B №5: скопировали — clean в прежней копии, syn
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
   put(`${f.config}/layers/tree/Org/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [\"${WORKSPACE}/x\"]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const before = { p1: layers(f, `${ws}/Org/p1`), q: layers(f, `${ws}/Lab/q`) };
   mkdirSync(`${f.dir}/copy`, { recursive: true });
   cpSync(ws, ws2, { recursive: true });
@@ -134,7 +134,7 @@ test("B №5: скопировали — clean в прежней копии, syn
   const a2 = f.run(["sync", "--all"]);
   const doc = f.run(["doctor"]);
   const after = { p1: layers(f, `${ws2}/Org/p1`), q: layers(f, `${ws2}/Lab/q`) };
-  expect({ a2: a2.code, doctor: doc.code, after }).toEqual({ a2: 0, doctor: 0, after: { p1: before.p1.replace(ws, ws2), q: before.q.replace(ws, ws2) } });
+  expect({ a2: a2.code, doctor: doc.code, after }, said(a2, doc)).toEqual({ a2: 0, doctor: 0, after: { p1: before.p1.replace(ws, ws2), q: before.q.replace(ws, ws2) } });
 }, 300000);
 
 // B №4: основным стал дополнительный корень со СВОЕЙ веткой (Clients), у него тоже папка Org. Его проекты берут слои из
@@ -147,7 +147,7 @@ test("B №4: новый основной — бывший дополнител�
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
   put(`${f.config}/layers/tree/Clients/Org/instructions/20.md`, "# clients org rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const before = { p1: layers(f, `${ws}/Org/p1`), x: layers(f, `${drive}/Org/x`) };
   const s = inSetup(f, [[/Корень workspace/, [drive]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => /уходит/.test(l)) ?? "(нет)";
@@ -170,7 +170,7 @@ test("подсказка clean дословно в терминале: root add 
   git(`${ws}/Org/p1`); git(`${ws}/Org/p3`); git(`${work}/Org/p2`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   renameSync(ws, away);
   inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [true]], [/Заменить эти файлы/, [false]]]);
   const p2before = layers(f, `${work}/Org/p2`);
@@ -185,6 +185,6 @@ test("подсказка clean дословно в терминале: root add 
   for (const l of hint.split("\n").filter((x) => /^\s+miksy sync /.test(x))) for (const part of l.trim().split("; ")) f.run([...part.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => m[1] ?? m[2]).slice(1));
   const rm = inProcess(f, ["root", "remove", ws], f.dir, [false, false, false]);
   f.run(["sync", "--all"]);
-  expect({ add: add.code, rm: rm.code, p1: rules(`${ws}/Org/p1/CLAUDE.local.md`), p3: rules(`${ws}/Org/p3/CLAUDE.local.md`), p2: layers(f, `${work}/Org/p2`) })
+  expect({ add: add.code, rm: rm.code, p1: rules(`${ws}/Org/p1/CLAUDE.local.md`), p3: rules(`${ws}/Org/p3/CLAUDE.local.md`), p2: layers(f, `${work}/Org/p2`) }, said(add, rm))
     .toEqual({ add: 0, rm: 0, p1: "(нет файла)", p3: p3before, p2: p2before });
 }, 300000);

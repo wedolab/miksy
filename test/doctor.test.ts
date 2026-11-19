@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { apply, plan, verifyMerges } from "../src/apply";
 import { emptyState, loadManifest, ManifestError } from "../src/manifest";
 import { canonical } from "../src/paths";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectNotCode } from "./helpers";
 
 test("R6: doctor показывает конфликт первого sync без учёта", () => {
   const f = cliFixture({ projects: [] });
@@ -12,7 +12,7 @@ test("R6: doctor показывает конфликт первого sync бе�
   const r = f.run(["doctor"]);
   expect(r.out).toContain("создан не miksy");
   expect(r.out).not.toContain("Всё синхронизировано");
-  expect(r.code).not.toBe(0);
+  expectNotCode(r, 0);
 });
 
 test("R10: optional без родителя снимается с учёта без записи JSON", () => {
@@ -43,7 +43,7 @@ test("Н7: битый manifest — понятная ошибка; doctor про�
   const doctor = f.run(["doctor"]);
   expect(doctor.out).toContain("повреждён");
   expect(doctor.out).toContain("Не синхронизировано");
-  expect(doctor.code).not.toBe(0);
+  expectNotCode(doctor, 0);
   expect(readFileSync(path, "utf8")).toContain("must-not-leak");
 });
 

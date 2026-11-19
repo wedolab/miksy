@@ -6,7 +6,7 @@
 // test/fixes021-wizard.test.ts. Тесты рецензентов — out/reviewer-tests/… (указаны у тестов)
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { missingDrive } from "./nodrive";
 import { git, inProcess, ledger, read, rootsFixture, yamlRoots } from "./rootshelp";
 
@@ -29,7 +29,7 @@ describe("A6 — root add подкаталога git-репо: объяснен�
     const src = `${f.dir}/other/repo/src`;
     mkdirSync(src, { recursive: true });
     const r = f.run(["root", "add", src, "--tree", "R"]);
-    expect(r.code).toBe(2);
+    expectCode(r, 2);
     expect(r.err).toContain(`${src} — папка внутри git-репо ${f.dir}/other/repo`);
     expect(r.err).toContain(`miksy root add "${f.dir}/other"`);
     expect(r.err).toContain(`miksy root add "${src}" --tree R --yes`);
@@ -37,7 +37,7 @@ describe("A6 — root add подкаталога git-репо: объяснен�
     expect({ q: t.questions.length, out: t.out.includes("Корень не добавлен") }).toEqual({ q: 1, out: true });
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain("repo/src");
     const y = f.run(["root", "add", src, "--tree", "R", "--yes"]);
-    expect(y.code).toBe(0);
+    expectCode(y, 0);
     expect(read(`${f.config}/local/machine.yaml`)).toContain("repo/src");
   }, 120000);
 
@@ -46,21 +46,21 @@ describe("A6 — root add подкаталога git-репо: объяснен�
     const sub = `${f.ws}/Org/p1/docs`;
     mkdirSync(sub, { recursive: true });
     const r = f.run(["root", "add", sub, "--tree", "Docs"]);
-    expect(r.code).toBe(2);
+    expectCode(r, 2);
     expect(r.err).toContain(`папка внутри проекта ${f.ws}/Org/p1`);
     expect(r.err).toContain(`miksy sync "${f.ws}/Org/p1"`);
     // Монорепо: внутри папки apps — свои git-репо: это папка с проектами
     git(`${f.dir}/mono`);
     git(`${f.dir}/mono/apps/x`);
     const ok = f.run(["root", "add", `${f.dir}/mono/apps`, "--tree", "Apps"]);
-    expect({ code: ok.code, err: ok.err }).toEqual({ code: 0, err: "" });
+    expect({ code: ok.code, err: ok.err }, said(ok)).toEqual({ code: 0, err: "" });
   }, 120000);
 });
 
 describe("A7 — недоступный вложенный корень в группе (zz-b-nested-away, тест 1)", () => {
   test("пустая точка монтирования Grp/Inner: sync --all и doctor не советуют git init / miksy target", () => {
     const f = rootsFixture(["claude"]);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const keys = Object.keys(ledger(f.config).targets).sort();
     renameSync(f.inner, `${f.dir}/inner-disk`);
     mkdirSync(f.inner);
@@ -98,7 +98,7 @@ describe("A8 — --dry-run у root add и root remove — как настоящ�
     const drive = `${f.dir}/drive`, site = `${drive}/Acme/site`;
     git(site);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const no = f.run(["root", "remove", drive, "--dry-run"]);
     expect(no.out).toContain("Без терминала вопроса нет — записанное в проекты и учёт останутся");
     expect(no.out).toContain(`miksy clean "${site}"`);
@@ -117,10 +117,10 @@ describe("A9 — target --remove без диска (zz-review-target-away)", () 
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: away, tree: "Clients" }])}agents: [claude]\n`);
     put(`${f.config}/layers/tree/Clients/Notes/layer.yaml`, "target: true\n");
     const dry = inProcess(f, ["target", `${away}/Notes`, "--remove", "--dry-run"]);
-    expect({ code: dry.code, err: dry.err }).toEqual({ code: 0, err: "" });
+    expect({ code: dry.code, err: dry.err }, said(dry)).toEqual({ code: 0, err: "" });
     expect(dry.out).toContain("снять пометку цели");
     const r = inProcess(f, ["target", `${away}/Notes`, "--remove"]);
-    expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
     expect(existsSync(`${f.config}/layers/tree/Clients/Notes/layer.yaml`)).toBe(false);
   });
 });
@@ -130,26 +130,26 @@ describe("A12 — clean забытого проекта говорит, что �
     const f = rootsFixture(["claude", "codex", "opencode", "antigravity"]);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
-    expect(f.run(["clean", app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget"]), 0);
     plugBack(f.archive);
     const c1 = f.run(["clean", app]);
-    expect(c1.code).toBe(0);
+    expectCode(c1, 0);
     expect(c1.out).toContain("Проект был забыт");
     expect(c1.out).toContain(`miksy sync "${app}"; miksy clean "${app}"`);
     // По подсказке
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     const c2 = f.run(["clean", app]);
-    expect({ code: c2.code, again: c2.out.includes("Проект был забыт"), left: files(app), git: status(app) }).toEqual({ code: 0, again: false, left: [], git: "" });
+    expect({ code: c2.code, again: c2.out.includes("Проект был забыт"), left: files(app), git: status(app) }, said(c2)).toEqual({ code: 0, again: false, left: [], git: "" });
   }, 180000);
 });
 
 describe("A13 — clean --all при недоступном корне (zz-b6z-cleanall)", () => {
   test("итог: что осталось на недоступном диске и что сделать; root remove --forget по подсказке — учёта нет", () => {
     const f = rootsFixture(["claude"]);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     const dry = f.run(["clean", "--all", "--dry-run"]);
     expect(dry.out).toContain(`Корень ${f.archive} недоступен`);
@@ -161,7 +161,7 @@ describe("A13 — clean --all при недоступном корне (zz-b6z-c
     const hint = r.out.match(/miksy root remove "([^"]+)" --forget/);
     expect(hint?.[1]).toBe(f.archive);
     expect(targetsUnder(f.config, "/Acme/app").length).toBeGreaterThan(0);
-    expect(f.run(["root", "remove", hint![1], "--forget"]).code).toBe(0);
+    expectCode(f.run(["root", "remove", hint![1], "--forget"]), 0);
     expect(targetsUnder(f.config, "/Acme/app")).toEqual([]);
   }, 180000);
 });
@@ -170,7 +170,7 @@ describe("A14 — «забыть» и агент, убранный из agents �
   test("root remove --forget: план и сделанное совпадают — забывается и учёт агента вне agents; doctor называет его учёт и команду, которая убирает его файлы", () => {
     const f = rootsFixture(["claude", "codex"]);
     const app = `${f.archive}/Acme/app`, p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(existsSync(`${p1}/.codex/config.toml`)).toBe(true);
     // codex убрали из agents без clean
     put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
@@ -181,13 +181,13 @@ describe("A14 — «забыть» и агент, убранный из agents �
     const dry = f.run(["root", "remove", f.archive, "--forget", "--dry-run"]);
     const planned = Number(dry.out.match(/записанное в его проекты \((\d+) файл\S*\) забывается/)?.[1]);
     const r = f.run(["root", "remove", f.archive, "--forget"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     const done = [...r.out.matchAll(/\((\d+) файл\S* на недоступном диске\) забыто/g)].map((m) => Number(m[1]));
     expect(done.length).toBe(1);
     expect(planned).toBe(done[0]);
     expect(targetsUnder(f.config, "/Acme/app")).toEqual([]);
     // Команда из doctor убирает файлы codex
-    expect(f.run(["clean", p1, "--agent", "codex"]).code).toBe(0);
+    expectCode(f.run(["clean", p1, "--agent", "codex"]), 0);
     expect(existsSync(`${p1}/.codex/config.toml`)).toBe(false);
     expect(f.run(["doctor"]).out).not.toContain(`miksy clean "${p1}" --agent codex`);
   }, 180000);
@@ -198,15 +198,15 @@ describe("A15 — «забыто»: копия CLAUDE.local.md, куда miksy �
     const f = rootsFixture(["claude"]);
     const app = `${f.archive}/Acme/app`;
     put(`${app}/CLAUDE.local.md`, "# мои заметки\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
     const c = f.run(["clean", app, "--forget"]);
     expect(c.out).not.toContain("которые miksy когда-то заменил");
     expect(c.out).toContain("В 1 файле (CLAUDE.local.md и т. п.) miksy только дописал свой блок");
     plugBack(f.archive);
     // Диск вернулся: sync берёт блок обратно, clean убирает только его — заметки пользователя на месте
-    expect(f.run(["sync", app]).code).toBe(0);
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
+    expectCode(f.run(["clean", app]), 0);
     expect(read(`${app}/CLAUDE.local.md`)).toBe("# мои заметки\n");
   }, 120000);
 });
@@ -215,9 +215,9 @@ describe("A16 — doctor после «забыть» и для серверов,
   test("забытый проект — своя строка, а не «sync ни разу не запускался»", () => {
     const f = rootsFixture(["claude", "codex"]);
     const app = `${f.archive}/Acme/app`;
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     unplug(f.archive);
-    expect(f.run(["clean", app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget"]), 0);
     plugBack(f.archive);
     const d = f.run(["doctor"]).out;
     expect(d).toContain("Проект забыт");
@@ -228,10 +228,10 @@ describe("A16 — doctor после «забыть» и для серверов,
     const f = rootsFixture(["opencode"]);
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/mcp/old.yaml`, "name: old\ncommand: echo\nargs: [old]\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(read(`${app}/opencode.json`)).toContain("\"old\"");
     unplug(f.archive);
-    expect(f.run(["clean", app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget"]), 0);
     plugBack(f.archive);
     rmSync(`${f.config}/layers/tree/Archive/mcp/old.yaml`);
     const d = f.run(["doctor"]).out;
@@ -242,8 +242,8 @@ describe("A16 — doctor после «забыть» и для серверов,
     const f = rootsFixture(["claude", "codex", "opencode", "antigravity"]);
     put(`${f.config}/layers/tree/Archive/mcp/old.yaml`, "name: old\ncommand: echo\nargs: [old]\n");
     put(`${f.config}/layers/global/mcp/gold.yaml`, "name: gold\ncommand: echo\nargs: [gold]\n");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     rmSync(`${f.config}/layers/tree/Archive/mcp/old.yaml`);
     rmSync(`${f.config}/layers/global/mcp/gold.yaml`);
     const d = f.run(["doctor"]).out;
@@ -257,8 +257,8 @@ describe("A16 — doctor после «забыть» и для серверов,
     put(`${f.config}/local/secrets.env`, "GD_TOKEN=abcdefgh12345678\n");
     put(`${f.config}/layers/tree/Org/mcp/gdrive.yaml`, "name: gdrive\ncommand: echo\nargs: [gd]\nenv:\n  T: ${GD_TOKEN}\n");
     put(`${f.config}/layers/global/mcp/ggdrive.yaml`, "name: ggdrive\ncommand: echo\nargs: [gd]\nenv:\n  T: ${GD_TOKEN}\n");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     // Новое определение — с переменной, которой нет
     put(`${f.config}/layers/tree/Org/mcp/gdrive.yaml`, "name: gdrive\ncommand: echo\nargs: [gd]\nenv:\n  T: ${GD_TOKEN}\n  O: ${GD_OTHER}\n");
     put(`${f.config}/layers/global/mcp/ggdrive.yaml`, "name: ggdrive\ncommand: echo\nargs: [gd]\nenv:\n  T: ${GD_TOKEN}\n  O: ${GD_OTHER}\n");

@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { aclProblem } from "../src/secretfiles";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectNotCode } from "./helpers";
 
 const win = process.platform === "win32";
 const TOKENS = {
@@ -55,9 +55,9 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     layers(f, "tree");
     secretsEnv(f);
     const g = f.run(["sync", "--global"]);
-    expect(g.code).toBe(0);
+    expectCode(g, 0);
     const p = f.run(["sync", `${f.ws}/Org/p1`]);
-    expect(p.code).toBe(0);
+    expectCode(p, 0);
     expect(g.out + p.out).not.toMatch(/artificial/);
     expect(leaks(f)).toEqual([]);
     // Claude: stdio — обёртка без args/env, HTTP — headersHelper, секрет в URL — мост
@@ -100,7 +100,7 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     expect(doctor.out).toContain("Значения секретов в конфигах агентов");
     expect(doctor.out).not.toContain(TOKENS.STDIO_TOKEN);
     const r = f.run(["sync", "--global"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(readFileSync(`${f.home}/.claude.json`, "utf8")).not.toContain(TOKENS.STDIO_TOKEN);
     expect(leaks(f)).toEqual([]);
     expect(f.run(["doctor"]).out).not.toContain("Значения секретов в конфигах агентов");
@@ -117,7 +117,7 @@ describe("п.2: файлы секретов local/secrets/<ИМЯ>", () => {
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${STDIO_TOKEN}\n");
     secretsEnv(f, { STDIO_TOKEN: TOKENS.STDIO_TOKEN, UNUSED: "unused-value-0009" }, "\r\n");
     const r = f.run(["sync", "--global"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("файл секрета STDIO_TOKEN");
     const file = `${f.config}/local/secrets/STDIO_TOKEN`;
     expect(readFileSync(file, "utf8")).toBe(TOKENS.STDIO_TOKEN + "\n");
@@ -147,17 +147,17 @@ describe("п.2: файлы секретов local/secrets/<ИМЯ>", () => {
     const f = cliFixture({ agents: ["claude"] });
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${STDIO_TOKEN}\n");
     secretsEnv(f, { STDIO_TOKEN: TOKENS.STDIO_TOKEN });
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const file = `${f.config}/local/secrets/STDIO_TOKEN`;
     expect(existsSync(file)).toBe(true);
     rmSync(file);
     const d1 = f.run(["doctor"]);
-    expect(d1.code).not.toBe(0);
+    expectNotCode(d1, 0);
     expect(d1.out).toContain("STDIO_TOKEN: нет файла секрета");
     // 2г-2 (Ф17): файл, который miksy не создавал, — справочно, sync его не удаляет
     writeFileSync(`${f.config}/local/secrets/STRAY`, "x\n");
     expect(f.run(["doctor"]).out).toContain("STRAY: файл в local/secrets не от miksy");
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(existsSync(file)).toBe(true);
     expect(existsSync(`${f.config}/local/secrets/STRAY`)).toBe(true);
     rmSync(`${f.config}/layers/global/mcp/s.yaml`);
@@ -200,12 +200,12 @@ describe("п.8: отсутствующий секрет — keep обёртки"
     const f = cliFixture({ agents: ["claude", "codex"] });
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${STDIO_TOKEN}\n");
     secretsEnv(f, { STDIO_TOKEN: TOKENS.STDIO_TOKEN });
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
     const scripts = walk(`${f.config}/local/run`);
     expect(scripts.length).toBe(2);
     put(`${f.config}/local/secrets.env`, "");
     const r = f.run(["sync", "--global"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("пропущен сервер s");
     expect(JSON.parse(readFileSync(`${f.home}/.claude.json`, "utf8")).mcpServers.s.command).toMatch(/s-stdio-[0-9a-f]{8}\.(cmd|sh)$/);
     expect(readFileSync(`${f.home}/.codex/config.toml`, "utf8")).toContain("[\"mcp_servers\".\"s\"]");
@@ -221,7 +221,7 @@ describe("п.8: отсутствующий секрет — keep обёртки"
     const f = cliFixture({ agents: ["opencode"] });
     put(`${f.config}/layers/tree/mcp/http.yaml`, 'name: h\nurl: https://x.example/mcp\nheaders:\n  Authorization: "Bearer ${HTTP_TOKEN}"\n');
     secretsEnv(f, { HTTP_TOKEN: TOKENS.HTTP_TOKEN });
-    expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+    expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
     expect(JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8")).mcp.h).toBeDefined();
     // Секрет пропал и файла нет — сервер с {file:} оставлять нельзя
     put(`${f.config}/local/secrets.env`, "");
@@ -238,14 +238,14 @@ describe("п.10: clean убирает обёртки и файлы секрет�
     layers(f, "global");
     layers(f, "tree");
     secretsEnv(f);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
-    expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+    expectCode(f.run(["sync", "--global"]), 0);
+    expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
     expect(walk(`${f.config}/local/secrets`).length).toBe(5);
-    expect(f.run(["clean", "--global"]).code).toBe(0);
+    expectCode(f.run(["clean", "--global"]), 0);
     // Проект ещё использует те же секреты
     expect(walk(`${f.config}/local/secrets`).length).toBe(5);
     expect(walk(`${f.config}/local/run`).some((p) => p.replaceAll("\\", "/").includes("/global/"))).toBe(false);
-    expect(f.run(["clean", `${f.ws}/Org/p1`]).code).toBe(0);
+    expectCode(f.run(["clean", `${f.ws}/Org/p1`]), 0);
     expect(walk(`${f.config}/local/run`)).toEqual([]);
     expect(walk(`${f.config}/local/secrets`)).toEqual([]);
   }, 120000);

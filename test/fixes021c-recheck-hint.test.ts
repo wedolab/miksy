@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7c — повторная проверка 2 (out/review021h/miksy/test/zzrev021h.test.ts): подсказка clean забытой папки — все агенты, прежний корень
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectCodeIn } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -22,7 +22,7 @@ function setup(skillLayer = "Clients") {
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/${skillLayer}/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(drive, `${drive}-disk`);
   inProcess(f, ["root", "remove", drive, "--forget"], f.dir, null);
@@ -34,8 +34,8 @@ function setup(skillLayer = "Clients") {
 function follow(f: ReturnType<typeof setup>["f"], out: string, drive: string) {
   let rootAdded = false;
   for (const l of out.split("\n").filter((x) => /^\s+(miksy root add|miksy sync)/.test(x))) {
-    if (l.includes("miksy root add") && !rootAdded) { expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0); rootAdded = true; }
-    for (const m of l.matchAll(/miksy (sync|clean) "([^"]+)"( --agent \w+)?/g)) expect([0, 3]).toContain(f.run([m[1], m[2], ...(m[3] ? m[3].trim().split(" ") : [])]).code);
+    if (l.includes("miksy root add") && !rootAdded) { expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0); rootAdded = true; }
+    for (const m of l.matchAll(/miksy (sync|clean) "([^"]+)"( --agent \w+)?/g)) expectCodeIn(f.run([m[1], m[2], ...(m[3] ? m[3].trim().split(" ") : [])]), [0, 3]);
   }
 }
 
@@ -55,7 +55,7 @@ test("Б, в workspace: clean без --agent забытой папки → по�
   git(site);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(drive, `${drive}-disk`);
   f.run(["clean", site, "--forget"]);

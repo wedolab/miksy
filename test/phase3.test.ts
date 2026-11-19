@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeAtomic } from "../src/manifest";
-import { cliFixture, CLI, put } from "./helpers";
+import { cliFixture, CLI, put, expectCode } from "./helpers";
 
 const win = process.platform === "win32";
 // Модуль появился в фазе 3: импорт внутри тестов, чтобы на прежнем коде падали только они
@@ -24,11 +24,11 @@ describe("префикс своих skills — настройка конфигу
     f.skill("tool");
     f.skill("acme-tool");
     const a = f.adopt("tool");
-    expect(a.code).toBe(0);
+    expectCode(a, 0);
     expect(a.out).toContain("acme-…");
     expect(a.out).not.toContain("vm-");
     const b = f.adopt("acme-tool");
-    expect(b.code).toBe(0);
+    expectCode(b, 0);
     expect(b.out).not.toContain("совет");
   }, 30000);
 
@@ -36,7 +36,7 @@ describe("префикс своих skills — настройка конфигу
     const f = adoptFixture();
     f.skill("tool");
     const a = f.adopt("tool");
-    expect(a.code).toBe(0);
+    expectCode(a, 0);
     expect(a.out).toContain("(miksy-…)");
     expect(a.out).not.toContain("vm-");
   }, 30000);
@@ -44,7 +44,7 @@ describe("префикс своих skills — настройка конфигу
   test("skill_prefix — строка; иное — ошибка с именем файла", () => {
     const f = adoptFixture("skill_prefix: [a]\n");
     const r = f.run(["explain"]);
-    expect(r.code).toBe(1);
+    expectCode(r, 1);
     expect(r.err).toMatch(/map\.yaml: skill_prefix/);
   }, 30000);
 });
@@ -52,7 +52,7 @@ describe("префикс своих skills — настройка конфигу
 test("шапка сгенерированных файлов: правки — в конфигурации miksy", () => {
   const f = cliFixture({ agents: ["claude", "codex", "opencode", "gemini"] });
   put(`${f.config}/layers/tree/mcp/ctx.yaml`, "name: ctx\ncommand: npx\n");
-  expect(f.run(["sync", `${f.ws}/Org/p1`]).code).toBe(0);
+  expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
   const files = ["CLAUDE.local.md", ".codex/config.toml", ".opencode/miksy.md"];
   for (const file of files) {
     const text = readFileSync(`${f.ws}/Org/p1/${file}`, "utf8");
@@ -122,7 +122,7 @@ test("sync без фиксированной паузы: проверка клю
   const f = cliFixture();
   put(`${f.config}/layers/global/mcp/ctx.yaml`, "name: ctx\ncommand: npx\n");
   const r = f.run(["sync", "--global"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).not.toContain("через 3 с");
   expect(r.out).toContain("все ключи на месте");
 }, 30000);

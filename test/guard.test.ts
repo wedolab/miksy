@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type Real, unsafeSpawn } from "./guard";
-import { put } from "./helpers";
+import { put, expectCode } from "./helpers";
 import { missingDrive } from "./nodrive";
 
 // «Настоящее» окружение и песочница — оба во временном каталоге, но песочница — только safe
@@ -149,7 +149,7 @@ installGuard(${JSON.stringify(w.real)}, ${JSON.stringify(w.safe)});
 Bun.spawnSync([process.execPath, ${JSON.stringify(`${w.realWs}/home/Miksy/miksy/src/cli.ts`)}, "sync", "--all"], { env: { HOME: ${JSON.stringify(w.box.home)}, USERPROFILE: ${JSON.stringify(w.box.home)} } });
 `);
     const r = Bun.spawnSync([process.execPath, script], { stdout: "pipe", stderr: "pipe" });
-    expect(r.exitCode).toBe(97);
+    expectCode(r, 97);
     expect(r.stderr.toString()).toContain("ОСТАНОВЛЕНО");
     expect(existsSync(marker)).toBe(false);
   });

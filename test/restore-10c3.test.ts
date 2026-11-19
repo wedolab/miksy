@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { cliFixture } from "./helpers";
+import { cliFixture, expectCode } from "./helpers";
 import { copyAgentSettings } from "../src/setup";
 import { NOT_RESTORED_FOR_TEST, planRestore } from "../src/restore";
 import { ADAPTERS } from "../src/registry";
@@ -55,14 +55,14 @@ test("копия с рабочим состоянием: состояние не
     ".codex/history.jsonl", ".codex/state_5.sqlite", ".gemini/installation_id", ".gemini/tmp/", ".config/opencode/node_modules/"]));
 
   const dry = f.run(["restore", "--dry-run"]);
-  expect(dry.code).toBe(0);
+  expectCode(dry, 0);
   const vernet = dry.out.slice(0, dry.out.indexOf("Не возвращается"));
   for (const s of [".claude/projects", ".codex/sessions", ".codex/history.jsonl", ".gemini/installation_id", ".claude/todos", "state_5.sqlite"])
     expect(vernet).not.toContain(s);
   expect(dry.out).toContain("Не возвращается — файлы входа и рабочее состояние агентов (история, сессии; старое затёрло бы нынешнее): ");
 
   const r = f.run(["restore", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   for (const s of settings) expect(read(`${h}/${s}`)).toBe(`before ${s}\n`);
   for (const s of STATE) expect(read(`${h}/${s}`)).toBe(`now ${s}\n`);
 });
@@ -80,7 +80,7 @@ test("состояние, которого на месте нет, тоже не
   expect(plan.add.map((i) => i.rel)).toEqual([".claude/agents/a.md"]);
   expect(plan.skipped).toEqual(["notes.log"]);
   const r = f.run(["restore", copy, "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect([existsSync(`${f.home}/.codex/sessions`), existsSync(`${f.home}/.claude/todos`), existsSync(`${f.home}/.gemini/installation_id`)]).toEqual([false, false, false]);
   expect(read(`${f.home}/.claude/agents/a.md`)).toBe("agent\n");
 });

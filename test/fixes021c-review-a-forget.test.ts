@@ -2,7 +2,7 @@
 // Рецензия A круга 7c: A3″ — «забыть» агента вне agents через root remove --forget; проект вне workspace
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -23,7 +23,7 @@ function setup() {
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [x]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(filesIn(site)).toContain(".codex/config.toml");
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   return { f, drive, site };
@@ -39,7 +39,7 @@ test("root remove --forget (корень недоступен) → диск ве
   console.log("DOCTOR\n" + d);
   const c = f.run(["clean", site, "--agent", "codex"]);
   console.log("CLEAN-AGENT\n" + c.out + c.err);
-  expect({ code: c.code, left: filesIn(site).filter((p) => p.startsWith(".codex")) }).toEqual({ code: 0, left: [] });
+  expect({ code: c.code, left: filesIn(site).filter((p) => p.startsWith(".codex")) }, said(c)).toEqual({ code: 0, left: [] });
 }, 240000);
 
 test("root remove --forget → root add → sync --all → root remove с согласием (как велит сообщение) → doctor → команда", () => {

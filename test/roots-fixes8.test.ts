@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ENGINE } from "../src/load";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, read } from "./rootshelp";
 
 const TAG = "v0.1.1";
@@ -27,7 +27,7 @@ type F = ReturnType<typeof cliFixture>;
 // Совет из sync --all и doctor выполняется дословно, после него doctor и sync --all спокойны. Это проблема
 // doctor: единственная — «Проблем: 1», код 1 (проверка основного агента 6z+); после clean — «Всё синхронизировано»
 function followAdvice(f: F, dir: string) {
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   const s = f.run(["sync", "--all", "--yes"]);
   const d = f.run(["doctor"]);
   const problems = d.out.split("Справочно")[0];
@@ -41,14 +41,14 @@ function followAdvice(f: F, dir: string) {
     oldSection: problems.includes("Проект стал корнем"),
     rootRemove: (s.out + d.out).includes("root remove"),
     mistake: (s.out + d.out).includes("по ошибке"),
-  }).toEqual({ sync: true, doctor: 1, count: true, section: true, oldSection: false, rootRemove: false, mistake: false });
+  }, said(d)).toEqual({ sync: true, doctor: 1, count: true, section: true, oldSection: false, rootRemove: false, mistake: false });
   // Совет — дословно
   const c = f.run(advice.split(" ").slice(1).map((x) => x.replace(/^"(.*)"$/, "$1")));
-  expect({ code: c.code, left: [`${dir}/CLAUDE.local.md`, `${dir}/.codex/config.toml`].some((p) => read(p).includes("miksy")) }).toEqual({ code: 0, left: false });
+  expect({ code: c.code, left: [`${dir}/CLAUDE.local.md`, `${dir}/.codex/config.toml`].some((p) => read(p).includes("miksy")) }, said(c)).toEqual({ code: 0, left: false });
   const d2 = f.run(["doctor"]);
-  expect({ code: d2.code, rooted: d2.out.includes("основной корень workspace"), clean: d2.out.includes("Всё синхронизировано.") }).toEqual({ code: 0, rooted: false, clean: true });
+  expect({ code: d2.code, rooted: d2.out.includes("основной корень workspace"), clean: d2.out.includes("Всё синхронизировано.") }, said(d2)).toEqual({ code: 0, rooted: false, clean: true });
   const s2 = f.run(["sync", "--all", "--yes"]);
-  expect({ code: s2.code, warned: s2.out.includes(`${dir} — `) && s2.out.includes("корень workspace") }).toEqual({ code: 0, warned: false });
+  expect({ code: s2.code, warned: s2.out.includes(`${dir} — `) && s2.out.includes("корень workspace") }, said(s2)).toEqual({ code: 0, warned: false });
 }
 
 describe("п. 1 — записанное в основной корень workspace: совет clean, без root remove", () => {
@@ -62,7 +62,7 @@ describe("п. 1 — записанное в основной корень worksp
       return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
     };
     put(`${f.config}/layers/tree/mcp/t.yaml`, "name: t\ncommand: echo\nargs: [x]\n");
-    expect(old(["sync", f.ws]).code).toBe(0);
+    expectCode(old(["sync", f.ws]), 0);
     expect(read(`${f.ws}/.codex/config.toml`)).toContain("miksy");
     expect(old(["sync", "--all", "--yes"]).err).toBe("");
     followAdvice(f, f.ws);
@@ -72,7 +72,7 @@ describe("п. 1 — записанное в основной корень worksp
     const f = cliFixture({ projects: ["W"] });
     const w = `${f.ws}/W`;
     git(w);
-    expect(f.run(["sync", w]).code).toBe(0);
+    expectCode(f.run(["sync", w]), 0);
     expect(read(`${w}/CLAUDE.local.md`)).toContain("# workspace");
     git(`${w}/inner`);
     put(`${f.config}/local/machine.yaml`, `workspace: ${w}\nagents: [claude]\n`);

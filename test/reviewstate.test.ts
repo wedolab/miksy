@@ -5,7 +5,7 @@ import { canonical } from "../src/paths";
 import { emptyState, sha } from "../src/manifest";
 import { ADAPTERS, renderFor } from "../src/registry";
 import { compare } from "../src/sync";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false, true]) test(`R2: ${id} keep own, последний=${last}`, () => {
   const f = cliFixture();
@@ -48,7 +48,7 @@ test("Н3: конфликтный чужой файл не скрывается 
   const f = cliFixture();
   put(`${f.ws}/Org/p1/CLAUDE.local.md`, "<!-- miksy:begin инструкции -->\nmine\n<!-- miksy:end -->\n");
   const r = f.run(["sync", `${f.ws}/Org/p1`]);
-  expect(r.code).toBe(3);
+  expectCode(r, 3);
   expect(readFileSync(`${f.ws}/Org/p1/.git/info/exclude`, "utf8")).not.toContain("/CLAUDE.local.md");
 });
 

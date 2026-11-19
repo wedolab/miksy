@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { ENGINE, mountParent } from "../src/load";
 import { selectProject } from "../src/resolve";
 import type { MiksyMap } from "../src/types";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { readDocs } from "./docs";
 import { git, inProcess, read, yamlRoots } from "./rootshelp";
 
@@ -17,15 +17,15 @@ describe("A4 — «~» в путях команд", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     mkdirSync(`${f.home}/Cloud/Acme`, { recursive: true });
     const a = inProcess(f, ["root", "add", "~/Cloud", "--tree", "Cloud"], f.dir);
-    expect({ code: a.code, err: a.err }).toEqual({ code: 0, err: "" });
+    expect({ code: a.code, err: a.err }, said(a)).toEqual({ code: 0, err: "" });
     expect(read(`${f.config}/local/machine.yaml`)).toContain(`${f.home}/Cloud`);
     put(`${f.config}/local/machine.yaml`, `workspace:\n  - "${f.ws}"\n  - { path: "~/Cloud", tree: Cloud }\nagents: [claude]\n`);
     const r = inProcess(f, ["root", "remove", "~/Cloud"], f.dir);
-    expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain("Cloud");
     // «~\…» — так же
     const b = inProcess(f, ["root", "add", "~\\Cloud", "--tree", "Cloud", "--dry-run"], f.dir);
-    expect({ code: b.code, err: b.err }).toEqual({ code: 0, err: "" });
+    expect({ code: b.code, err: b.err }, said(b)).toEqual({ code: 0, err: "" });
   }, 120000);
 
   test("sync, explain, clean, target, trust — путь с «~»", () => {
@@ -35,18 +35,18 @@ describe("A4 — «~» в путях команд", () => {
     mkdirSync(`${work}/Notes`, { recursive: true });
     put(`${f.config}/local/machine.yaml`, `workspace: ${work}\nagents: [claude]\n`);
     const s = f.run(["sync", "~/work/Org/p2"]);
-    expect({ code: s.code, err: s.err }).toEqual({ code: 0, err: "" });
+    expect({ code: s.code, err: s.err }, said(s)).toEqual({ code: 0, err: "" });
     expect(existsSync(`${p2}/CLAUDE.local.md`)).toBe(true);
     const e = f.run(["explain", "~/work/Org/p2"]);
-    expect({ code: e.code, project: e.out.includes(p2) }).toEqual({ code: 0, project: true });
-    expect(f.run(["trust", "~/work/Org/p2", "--confirm"]).code).toBe(0);
+    expect({ code: e.code, project: e.out.includes(p2) }, said(e)).toEqual({ code: 0, project: true });
+    expectCode(f.run(["trust", "~/work/Org/p2", "--confirm"]), 0);
     const c = f.run(["clean", "~\\work\\Org\\p2"]);
-    expect({ code: c.code, err: c.err, left: existsSync(`${p2}/CLAUDE.local.md`) }).toEqual({ code: 0, err: "", left: false });
+    expect({ code: c.code, err: c.err, left: existsSync(`${p2}/CLAUDE.local.md`) }, said(c)).toEqual({ code: 0, err: "", left: false });
     const t = f.run(["target", "~/work/Notes"]);
-    expect({ code: t.code, err: t.err }).toEqual({ code: 0, err: "" });
+    expect({ code: t.code, err: t.err }, said(t)).toEqual({ code: 0, err: "" });
     expect(read(`${f.config}/layers/tree/Notes/layer.yaml`)).toContain("target: true");
     const rm = f.run(["target", "~/work/Notes", "--remove"]);
-    expect({ code: rm.code, err: rm.err }).toEqual({ code: 0, err: "" });
+    expect({ code: rm.code, err: rm.err }, said(rm)).toEqual({ code: 0, err: "" });
   }, 120000);
 });
 

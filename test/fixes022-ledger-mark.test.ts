@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { packageVersion } from "../src/version";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { inProcess } from "./rootshelp";
 
 const CLI = `${import.meta.dir}/../src/cli.ts`;
@@ -39,9 +39,9 @@ const ledgerPath = (f: F) => `${f.config}/local/state/manifest.json`;
 function prepare(mark: string | undefined): F {
   const f = cliFixture();
   // Команда miksy этой копии уже есть (обычный откат: тот же каталог движка); всё записано
-  expect(run(f, ["setup", "--yes"]).code).toBe(0);
-  expect(run(f, ["sync", "--global"]).code).toBe(0);
-  expect(run(f, ["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(run(f, ["setup", "--yes"]), 0);
+  expectCode(run(f, ["sync", "--global"]), 0);
+  expectCode(run(f, ["sync", "--all", "--yes"]), 0);
   const { version, engine: _, ...rest } = JSON.parse(readFileSync(ledgerPath(f), "utf8"));
   const text = JSON.stringify({ future: { engine: mark ?? "9.9.9", list: [1, "два"] }, version, ...(mark === undefined ? {} : { engine: mark }), ...rest, tail: "x" }, null, 2) + "\n";
   writeFileSync(ledgerPath(f), text);
@@ -96,7 +96,7 @@ test("A5: setup переписывает отметку новее этой ве
 test("A5: sync с изменениями — пишет учёт и свою отметку, как раньше", () => {
   const f = prepare("9.9.9");
   put(`${f.config}/layers/global/instructions/01.md`, "# ещё\n");
-  expect(run(f, ["sync", "--global"]).code).toBe(0);
+  expectCode(run(f, ["sync", "--global"]), 0);
   expect(JSON.parse(read(f)).engine).toBe(VERSION);
   expect(run(f, ["doctor"]).out).not.toMatch(NEWER);
 }, 120000);

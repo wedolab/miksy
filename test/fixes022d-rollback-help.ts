@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { closeCommand, privateLocal } from "../src/secretfiles";
 import { applyRestore, planRestore } from "../src/restore";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
+import { expectCode, said } from "./helpers";
 
 const win = process.platform === "win32";
 const sys = (exe: string) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", exe);
@@ -91,7 +92,7 @@ for (const [tag, variant] of part === 1 ? cases.slice(0, 7) : cases.slice(7))
     };
     const now = runWith(join(import.meta.dir, "..").replaceAll("\\", "/"));
     const old = runWith(oldEngine(tag));
-    expect(now(["setup", "--yes", "--backup"]).code).toBe(0);
+    expectCode(now(["setup", "--yes", "--backup"]), 0);
     now(["sync", "--global"]); now(["sync", "--all", "--yes"]);
     const backups = variant.startsWith("backups") || variant === "local целиком" ? (variant === "local целиком" ? `${vault}/backups` : vault) : `${config}/local/backups`;
     const copy = readdirSync(backups).find((d) => d.startsWith("before-miksy-"))!;
@@ -152,7 +153,7 @@ for (const which of ["secrets", "backups"])
     const step = ps(root, config, [0, 1]);
     const env = { ...process.env, MIKSY_CONFIG: config, HOME: home, USERPROFILE: home };
     const doc = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "src", "cli.ts"), "doctor"], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
-    expect({ code: step.code, out: step.out[1], doctor: /битая ссылка/.test(doc.stdout.toString()) })
+    expect({ code: step.code, out: step.out[1], doctor: /битая ссылка/.test(doc.stdout.toString()) }, said(step))
       .toEqual({ code: 0, out: [`битая ссылка, цели нет: ${nat(gone)}`], doctor: true });
   }, 120000);
 }

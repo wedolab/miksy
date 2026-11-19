@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { put } from "./helpers";
+import { put, said } from "./helpers";
 
 test.skipIf(!!process.env.MIKSY_GUARDENV_NESTED)("GIT_TEMPLATE_DIR машины (шаблон с info/exclude) до тестов не доходит", () => {
   const tpl = mkdtempSync(join(tmpdir(), "gittpl-")).replaceAll("\\", "/");
@@ -15,5 +15,5 @@ test.skipIf(!!process.env.MIKSY_GUARDENV_NESTED)("GIT_TEMPLATE_DIR машины 
     env: { ...process.env, MIKSY_GUARDENV_NESTED: "1", GIT_TEMPLATE_DIR: tpl },
   });
   const out = r.stdout.toString() + r.stderr.toString();
-  expect({ code: r.exitCode, pass: / 1 pass/.test(out), fail: / [1-9]\d* fail/.test(out) }).toEqual({ code: 0, pass: true, fail: false });
+  expect({ code: r.exitCode, pass: / 1 pass/.test(out), fail: / [1-9]\d* fail/.test(out) }, said(r)).toEqual({ code: 0, pass: true, fail: false });
 }, 120000);

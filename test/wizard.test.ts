@@ -10,7 +10,7 @@ import { runCommand } from "../src/commands";
 import { ENGINE, configRoot } from "../src/load";
 import { canonical, inside } from "../src/paths";
 import { layoutWarning, setup, type System } from "../src/setup";
-import { put } from "./helpers";
+import { put, expectCode } from "./helpers";
 import { missingDrive } from "./nodrive";
 
 type Step = { q: RegExp; a: string | (() => string) };
@@ -122,7 +122,7 @@ describe("мастер setup", () => {
       { q: /полный план/, a: "v" },
       { q: /Записать настройки агентам сейчас/, a: "y" },
     ]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     // 1. Конфигурация рядом с движком, git-репо с коммитом
     expect(existsSync(`${f.config}/map.yaml`)).toBe(true);
@@ -185,7 +185,7 @@ describe("мастер setup", () => {
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toContain("Не удалось скачать конфигурацию");
     expect(t).toContain("gh auth login");
@@ -222,7 +222,7 @@ describe("мастер setup", () => {
       { q: /Записать настройки агентам сейчас/, a: "y" },
       { q: /Заменить эти файлы/, a: "y" },
     ]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toMatch(/1\. Конфигурация[\s\S]*✓ есть:/);
     expect(t).toContain("✓ local/machine.yaml уже есть");
@@ -412,7 +412,7 @@ describe("мастер setup", () => {
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toContain(`${f.ws} — уже указан (тот же каталог) — не добавляю`);
     expect(t).toContain("«../x» — не ветка дерева");
@@ -449,7 +449,7 @@ describe("мастер setup", () => {
       { q: /полный план/, a: "" },
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его: miksy root add "${f.ws}" --tree Main. Это — если новый основной другая папка, а прежняя нужна; папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет). \${WORKSPACE} в слоях теперь — ${drive}`);
     expect(f.text()).not.toContain("указан дважды");
     // Проекты drive получали слои layers/tree/Clients/… — и после смены основного тоже
@@ -469,7 +469,7 @@ describe("мастер setup", () => {
       { q: /Создать команду/, a: "y" },
       { q: /полный план/, a: "" }, { q: /Записать настройки агентам сейчас/, a: "n" },
     ]);
-    expect(code).toBe(0);
+    expectCode({ code, out: f.text() }, 0);
     expect(f.text()).toContain(`${f.dir}/bun/bin уже прописан в ~/.zshrc`);
     expect(readFileSync(`${f.home}/.zshrc`, "utf8")).not.toContain("# miksy");
   }, 120000);

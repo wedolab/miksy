@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { closeCommand } from "../src/secretfiles";
-import { CLI } from "./helpers";
+import { CLI, expectCodeIn, said } from "./helpers";
 
 const win = process.platform === "win32";
 const tmp = (p: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p))).replaceAll("\\", "/");
@@ -39,7 +39,7 @@ for (const linked of [true, false])
   for (const kind of ["open", "closed", "broken"] as const)
     test(`A №3: local/backups ${linked ? "— ссылка на закрытую цель" : "обычная"}, originals/C — ссылка на ${kind} цель`, () => {
       const w = world(linked);
-      expect([0, 3]).toContain(w.run(["sync", "--global"]).code);
+      expectCodeIn(w.run(["sync", "--global"]), [0, 3]);
       // Первая часть пути оригиналов: на Windows — диск (C), на macOS и Linux — первый каталог пути домашней папки песочницы
       const link = `${w.config}/local/backups/originals/${win ? "C" : w.root.split("/")[1]}`;
       mkdirSync(dirname(link), { recursive: true });
@@ -57,9 +57,9 @@ for (const linked of [true, false])
         dry: dry.code === 1 && text(dry.out), doctor: text(doc.out),
         first: first.code === 1 && text(first.out) && !/частично/.test(first.out),
         second: text(second.out),
-      }).toEqual(linked
+      }, said(dry, first)).toEqual(linked
         // Ссылка local/backups: в начале не проверяется (решение «б») — отказ на записи, «частично», текст тот же
         ? { dry: false, doctor: false, first: false, second: true }
         : { dry: true, doctor: true, first: true, second: true });
-      if (linked) expect({ code: first.code, text: text(first.out) }).toEqual({ code: 3, text: true });
+      if (linked) expect({ code: first.code, text: text(first.out) }, said(first)).toEqual({ code: 3, text: true });
     }, 300000);

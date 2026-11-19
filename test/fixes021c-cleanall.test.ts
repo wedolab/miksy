@@ -2,7 +2,7 @@
 // остальным — clean --agent. Из out/check021b/miksy2/test/zz-revb-cleanall.test.ts (тест 2) с ожиданиями
 import { expect, test } from "bun:test";
 import { existsSync, renameSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, yamlRoots } from "./rootshelp";
 
 test("B №4: clean --all, codex убран из agents, корень недоступен — обещание = сделанное; codex — clean --agent", () => {
@@ -11,7 +11,7 @@ test("B №4: clean --all, codex убран из agents, корень недос
   git(site);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
   renameSync(drive, `${drive}-disk`);
   const c = f.run(["clean", "--all"]);
@@ -19,10 +19,10 @@ test("B №4: clean --all, codex убран из agents, корень недос
   const cmd = c.out.match(/clean --all не убирает — когда диск вернётся:\n\s+(miksy clean "([^"]+)" --agent codex)/);
   expect(cmd).not.toBeNull();
   renameSync(`${drive}-disk`, drive);
-  expect(f.run(["clean", "--all"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all"]), 0);
   expect(existsSync(`${site}/CLAUDE.local.md`)).toBe(false);
   expect(n).toBe(2); // CLAUDE.local.md и строка .git/info/exclude
   expect(existsSync(`${site}/.codex/config.toml`)).toBe(true);
-  expect(f.run(["clean", cmd![2], "--agent", "codex"]).code).toBe(0);
+  expectCode(f.run(["clean", cmd![2], "--agent", "codex"]), 0);
   expect(existsSync(`${site}/.codex/config.toml`)).toBe(false);
 }, 240000);

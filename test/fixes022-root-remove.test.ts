@@ -3,7 +3,7 @@
 // команды из вывода дословно: файлов miksy не осталось
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, ledger, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -27,7 +27,7 @@ function scenario(agents: string[]) {
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [${agents.join(", ")}]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace(`agents: [${agents.join(", ")}]`, "agents: [claude]"));
   renameSync(drive, `${drive}-disk`);
   return { f, drive, sites };
@@ -60,7 +60,7 @@ test("A4: в числе — только файлы агентов из agents; 
   expect(away).toMatch(/Учёт целей недоступного корня[^\n]*агентами из agents\)[^\n]*записанное только агентами, которых нет в agents \(\d+ файл[^\n]*команды в строке «Учёт агентов, которых нет в agents»/);
   expect(retired(away)).toEqual(want);
   const real = f.run(["root", "remove", drive]);
-  expect({ code: real.code, err: real.err }).toEqual({ code: 0, err: "" });
+  expect({ code: real.code, err: real.err }, said(real)).toEqual({ code: 0, err: "" });
   const left = f.run(["doctor"]).out;
   expect(left).toContain(`Учёт целей вне workspace без каталога (2; ${claudeOnly} файл`);
   expect(left).toMatch(/Учёт целей вне workspace без каталога[^\n]*записанное только агентами, которых нет в agents \(\d+ файл[^\n]*команды в строке «Учёт агентов, которых нет в agents»/);
@@ -77,10 +77,10 @@ test("A4: в числе — только файлы агентов из agents; 
   expect(retired(back)).toEqual(want);
   const listed = real.out.split("\n").filter((l) => sites.includes(l.trim())).map((l) => l.trim());
   expect(listed.sort()).toEqual([...sites].sort());
-  for (const s of listed) expect(f.run(["clean", s]).code).toBe(0);
+  for (const s of listed) expectCode(f.run(["clean", s]), 0);
   for (const c of commands(real.out)) {
     const m = c.match(/^miksy clean "([^"]+)" --agent (\w+)$/)!;
-    expect(f.run(["clean", m[1], "--agent", m[2]]).code).toBe(0);
+    expectCode(f.run(["clean", m[1], "--agent", m[2]]), 0);
   }
   for (const s of sites) expect(filesIn(s)).toEqual([]);
   expect(Object.keys(ledger(f.config).targets).filter((id) => id.includes("/drive/"))).toEqual([]);

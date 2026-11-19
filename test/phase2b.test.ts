@@ -5,7 +5,7 @@ import { emptyState, loadManifest, sha } from "../src/manifest";
 import { pathKey } from "../src/paths";
 import { aclProblem } from "../src/secretfiles";
 import { codex } from "../adapters/codex";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { instructionBlock } from "../src/instructions";
 import { KEEP_RUNS, newBackupRun, backup } from "../src/backup";
 import { TOML_END } from "../src/toml";
@@ -26,10 +26,10 @@ test("2б/1: общий файл инструкций сохраняет чуж�
   const f = cliFixture();
   const path = `${f.home}/.claude/CLAUDE.md`;
   put(path, "Личная память\n");
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   expect(readFileSync(path, "utf8")).toContain("<!-- miksy:begin");
   put(path, readFileSync(path, "utf8") + "Дополнение агента\n");
-  expect(f.run(["clean", "--global"]).code).toBe(0);
+  expectCode(f.run(["clean", "--global"]), 0);
   expect(readFileSync(path, "utf8")).toBe("Личная память\nДополнение агента\n");
 }, 30000);
 
@@ -64,23 +64,23 @@ test("2б/4: захват чужого own-файла сохраняет нер�
   const f = cliFixture({ agents: ["opencode"] });
   const path = `${f.home}/.config/opencode/AGENTS.md`;
   put(path, "Оригинал\n");
-  expect(f.run(["sync", "--global", "--force"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global", "--force"]), 0);
   const st = loadManifest(`${f.config}/local/state/manifest.json`).targets["opencode|global"];
   const original = (st as any).originals?.[pathKey(path)];
   expect(original?.path).toContain("/backups/originals/");
   expect(readFileSync(original.path, "utf8")).toBe("Оригинал\n");
-  expect(f.run(["clean", "--global"]).code).toBe(0);
+  expectCode(f.run(["clean", "--global"]), 0);
   expect(readFileSync(path, "utf8")).toBe("Оригинал\n");
 }, 30000);
 
 test("2б/5: sync добавляет доверие Codex и Claude, clean снимает своё", () => {
   const f = cliFixture({ agents: ["codex", "claude"] });
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const codexFile = `${f.home}/.codex/config.toml`;
   expect(existsSync(codexFile)).toBe(true);
   expect(Object.values((Bun.TOML.parse(readFileSync(codexFile, "utf8")) as any).projects).some((x: any) => x.trust_level === "trusted")).toBe(true);
   expect(Object.values(JSON.parse(readFileSync(`${f.home}/.claude.json`, "utf8")).projects).some((x: any) => x.hasTrustDialogAccepted === true)).toBe(true);
-  expect(f.run(["clean", "--all"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all"]), 0);
   expect(JSON.stringify(Bun.TOML.parse(readFileSync(codexFile, "utf8")))).not.toContain("trusted");
   expect(readFileSync(`${f.home}/.claude.json`, "utf8")).not.toContain("hasTrustDialogAccepted");
 }, 30000);
@@ -89,7 +89,7 @@ test("2б/6: sync закрывает весь local, включая старые
   const f = cliFixture();
   const backup = `${f.config}/local/backups/old/file`;
   put(backup, "искусственные данные");
-  expect(f.run(["sync", "--global"]).code).toBe(0);
+  expectCode(f.run(["sync", "--global"]), 0);
   expect(aclProblem(`${f.config}/local`)).toBeNull();
   expect(aclProblem(backup)).toBeNull();
 }, 30000);
@@ -165,12 +165,12 @@ test("2б/2: миграция старой копии из .agents, обе ко�
 test("2б/2: opencode убирает дубль только после доставки другим адаптером этого запуска", () => {
   const f = cliFixture({ agents: ["opencode", "claude"] }), dir = `${f.ws}/Org/p1`;
   put(`${f.config}/layers/tree/skills/personal/SKILL.md`, "---\nname: personal\ndescription: skill\n---\nbody\n");
-  expect(f.run(["sync", dir, "--agent", "opencode"]).code).toBe(0);
+  expectCode(f.run(["sync", dir, "--agent", "opencode"]), 0);
   expect(existsSync(`${dir}/.opencode/skills/personal/SKILL.md`)).toBe(true);
   const dry = f.run(["sync", dir, "--dry-run"]);
   expect(dry.out).toContain("удалить");
   expect(existsSync(`${dir}/.opencode/skills/personal/SKILL.md`)).toBe(true);
-  expect(f.run(["sync", dir]).code).toBe(0);
+  expectCode(f.run(["sync", dir]), 0);
   expect(existsSync(`${dir}/.opencode/skills/personal/SKILL.md`)).toBe(false);
   expect(existsSync(`${dir}/.claude/skills/personal/SKILL.md`)).toBe(true);
 }, 30000);
@@ -203,9 +203,9 @@ test("2б/3: один потерянный маркер и многостроч�
 test("2б/3: adopt Codex передаёт исходную таблицу под учёт, sync проходит без force", () => {
   const f = cliFixture({ agents: ["codex"] });
   put(`${f.home}/.codex/config.toml`, '[mcp_servers.source]\ncommand="echo"\n');
-  expect(f.run(["adopt", "--global", "source", "--to", "global", "--agent", "codex", "--yes"]).code).toBe(0);
-  expect(f.run(["sync", "--global"]).code).toBe(0);
-  expect(f.run(["clean", "--global"]).code).toBe(0);
+  expectCode(f.run(["adopt", "--global", "source", "--to", "global", "--agent", "codex", "--yes"]), 0);
+  expectCode(f.run(["sync", "--global"]), 0);
+  expectCode(f.run(["clean", "--global"]), 0);
   expect(readFileSync(`${f.home}/.codex/config.toml`, "utf8")).not.toContain("source");
 }, 30000);
 
@@ -233,11 +233,11 @@ test("2б/5: чужое доверие и отказ неизменны; вык�
       put(`${dir}/.codex/config.toml`, '# team\n');
       Bun.spawnSync(["git", "-C", dir, "add", ".codex/config.toml"]);
     }
-    expect(f.run(["sync", dir]).code).toBe(0);
+    expectCode(f.run(["sync", dir]), 0);
     const text = existsSync(file) ? readFileSync(file, "utf8") : "";
     expect(text.includes("trusted")).toBe(["trusted", "untrusted"].includes(kind));
     if (kind !== "trusted") expect(f.run(["doctor"]).out).toContain("Проекты без доверия");
-    expect(f.run(["clean", dir]).code).toBe(0);
+    expectCode(f.run(["clean", dir]), 0);
     expect(existsSync(file) ? readFileSync(file, "utf8") : "").toBe(text);
   }
 }, 120000);

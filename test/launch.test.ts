@@ -9,6 +9,7 @@ import { createLauncher, deliver, DeliveryError } from "../src/launch";
 import { ENGINE } from "../src/load";
 import type { McpServer } from "../src/types";
 import { secretRef } from "../src/vars";
+import { expectCode, expectNotCode } from "./helpers";
 
 const win = process.platform === "win32";
 const os = win ? "windows" : process.platform === "darwin" ? "macos" : "linux";
@@ -107,7 +108,7 @@ describe("обёртка stdio", () => {
     const path = b.launcher.stdio({ name: "lost", command: process.execPath, args: [b.echo], env: { X: secretRef("TOK") } });
     b.materialize();
     const r = runScript(path);
-    expect(r.code).not.toBe(0);
+    expectNotCode(r, 0);
     expect(r.out).toBe("");
     expect(r.err).toContain("нет файла секрета");
     expect(r.err).toContain("TOK");
@@ -141,7 +142,7 @@ describe("helper заголовков", () => {
     const cmd = b.launcher.helper({ name: "h", url: "https://x/mcp", headers: { Authorization: `Bearer ${secretRef("TOK")}`, "X-Static": "a&b %x% !^<>|", "X-Plain": secretRef("TOK") } });
     b.materialize();
     const r = runHelper(cmd);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(JSON.parse(r.out)).toEqual({ Authorization: `Bearer ${SECRETS.TOK}`, "X-Static": "a&b %x% !^<>|", "X-Plain": SECRETS.TOK });
   }, 60000);
 
@@ -151,7 +152,7 @@ describe("helper заголовков", () => {
     const cmd = b.launcher.helper({ name: "h", url: "https://x/mcp", headers: { Authorization: `Bearer ${secretRef("TOK")}` } });
     b.materialize();
     const r = runHelper(cmd);
-    expect(r.code).not.toBe(0);
+    expectNotCode(r, 0);
     expect(r.out.trim()).toBe("");
     expect(r.err).toMatch(/нет файла секрета|secret file missing/);
   }, 60000);

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 import { aclTest } from "./elevated";
 import { badPaths, cli, closeTarget, type Close, nat, ps, psFile, put, read, sddl, sys32, tmp, win } from "./fixes022e-helpers";
+import { expectCode, said } from "./helpers";
 
 const README = readDocs();
 const section = README.slice(README.indexOf("### Windows: откат на 0.2.1, когда в local/ есть ссылки"), README.indexOf("На macOS и Linux прежние версии в ссылки не заходят"));
@@ -47,7 +48,7 @@ function world(o: { backups?: Close; secrets?: Close }) {
   put(`${config}/local/secrets.env`, "A_TOKEN=abcdef123\n");
   const env = { MIKSY_CONFIG: config, HOME: home, USERPROFILE: home, BUN_INSTALL: `${root}/bun` };
   const now = cli(env, root);
-  expect(now(["setup", "--yes", "--backup"]).code).toBe(0);
+  expectCode(now(["setup", "--yes", "--backup"]), 0);
   now(["sync", "--global"]); now(["sync", "--all", "--yes"]);
   return { root, home, config, ws, dot, vb, vs, env, now };
 }
@@ -76,7 +77,7 @@ for (const tag of ["v0.2.1", "v0.2.0"])
     const old = cli(env, root, oldEngine(tag));
     const runs = [["setup", "--yes"], ["sync", "--global"], ["sync", "--all", "--yes"]].map((a) => old(a));
     const after = { env: sddl(`${vault}/secrets.env`), tok: sddl(`${vault}/A_TOKEN`) };
-    expect({ err: r.err, step3: lines(r, 3), codes: runs.map((x) => x.code), template: /создан из шаблона/.test(runs[0].out), same: before.env === after.env && before.tok === after.tok, value: read(`${vault}/secrets.env`) })
+    expect({ err: r.err, step3: lines(r, 3), codes: runs.map((x) => x.code), template: /создан из шаблона/.test(runs[0].out), same: before.env === after.env && before.tok === after.tok, value: read(`${vault}/secrets.env`) }, said(runs))
       .toEqual({ err: "", step3: [], codes: [0, 0, 0], template: false, same: true, value: "A_TOKEN=abcdef123\n" });
   }, 600000);
 
@@ -104,7 +105,7 @@ aclTest(!win || !hasTag("v0.2.1"), "F4: пропустил шаг 1 — шаг 4
   expect({
     cmd: /Закройте папку бэкапов и всё в ней|закройте вручную/.test(doc.out) && !!cmd, fix: fix.exitCode, err: again.err, step3: lines(again, 3),
     n: n.map((r) => [r.code === 3 ? 0 : r.code, notClosed(r.out)]), backups: /не пишет туда|Закройте папку/.test(doc2.out), secret, badB: badPaths(w.vb), badS: badPaths(w.vs),
-  }).toEqual({ cmd: true, fix: 0, err: "", step3: [], n: [[0, []], [0, []]], backups: false, secret: "changed456\n", badB: [], badS: [] });
+  }, said(fix, n)).toEqual({ cmd: true, fix: 0, err: "", step3: [], n: [[0, []], [0, []]], backups: false, secret: "changed456\n", badB: [], badS: [] });
 }, 600000);
 
 // F5: пропущен шаг 2 — шаг 3 показывает ссылки внутри копии «до miksy»; по README — сначала шаг 2, затем проверка снова
@@ -144,5 +145,5 @@ test.skipIf(!win || !hasTag("v0.2.1"))("E2: шаги дважды и полны�
     copy: !!copy, links: copy ? [".agents/skills", ".claude/skills"].map((l) => lstatSync(`${w.vb}/${copy}/${l}`).isSymbolicLink()) : [],
     unsafe: /Небезопасные права|не пишет туда|закройте/.test(doc.out), badB: badPaths(w.vb).length,
     dot: sddl(`${w.dot}/agents-skills/s1/SKILL.md`) === dotAcl && read(`${w.dot}/agents-skills/s1/SKILL.md`) === dotText,
-  }).toEqual({ aerr: "", back: [0, 0, 0], berr: "", again: [0, 0, 0], copy: true, links: [true, true], unsafe: false, badB: 0, dot: true });
+  }, said(back, again)).toEqual({ aerr: "", back: [0, 0, 0], berr: "", again: [0, 0, 0], copy: true, links: [true, true], unsafe: false, badB: 0, dot: true });
 }, 600000);

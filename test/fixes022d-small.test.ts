@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, unlinkSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { planSummary } from "../src/setup";
-import { CLI } from "./helpers";
+import { CLI, expectCodeIn, said } from "./helpers";
 
 const win = process.platform === "win32";
 const tmp = (p: string) => realpathSync.native(mkdtempSync(join(tmpdir(), p))).replaceAll("\\", "/");
@@ -29,7 +29,7 @@ test("A №3: local/backups/originals/C — ссылка на открытую �
   const env = { ...process.env, MIKSY_CONFIG: config, HOME: home, USERPROFILE: home };
   const run = (args: string[]) => { const r = Bun.spawnSync([process.execPath, CLI, ...args], { cwd: root, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" }); return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() }; };
   // Обычная local/backups (закрыта первым запуском), в ней originals/C — ссылка
-  expect([0, 3]).toContain(run(["sync", "--global"]).code); // 3 — конфликт с вашим skill, не отказ
+  expectCodeIn(run(["sync", "--global"]), [0, 3]); // 3 — конфликт с вашим skill, не отказ
   const link = `${config}/local/backups/originals/${win ? "C" : "home"}`;
   mkdirSync(dirname(link), { recursive: true });
   symlinkSync(ext, link, win ? "junction" : "dir");
@@ -39,12 +39,12 @@ test("A №3: local/backups/originals/C — ссылка на открытую �
     code: first.code,
     replace: /originals\/\S+ — ссылка на .*Внутри папки оригиналов miksy не пишет сквозь ссылку, даже если её цель закрыта, — miksy не пишет туда бэкапы.*Замените эту ссылку обычной папкой/.test(first.out),
     close: /Закрыть цель|закрыть цель или/.test(first.out + doc.out),
-  }).toEqual({ code: 1, replace: true, close: false });
+  }, said(first)).toEqual({ code: 1, replace: true, close: false });
   // Замена: ссылку — обычной папкой с содержимым цели
   if (win) Bun.spawnSync(["cmd", "/c", "rmdir", link.replaceAll("/", "\\")]); else unlinkSync(link);
   cpSync(ext, link, { recursive: true });
   const again = run(["sync", "--global", "--force"]);
-  expect({ code: again.code, refused: /не пишет туда бэкапы|ОШИБКА/.test(again.out) }).toEqual({ code: 0, refused: false });
+  expect({ code: again.code, refused: /не пишет туда бэкапы|ОШИБКА/.test(again.out) }, said(again)).toEqual({ code: 0, refused: false });
 }, 300000);
 
 test("A №5: сводка плана при отказе — только строка отказа, один раз", () => {

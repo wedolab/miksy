@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync } from "node:fs"
 import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
 import { setup } from "../src/setup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read, rootsFixture, yamlRoots } from "./rootshelp";
 
 // Мастер в этом процессе: ответы по шаблонам вопросов (по порядку для одного шаблона), остальное — по умолчанию
@@ -46,7 +46,7 @@ const gone = (f: { dir: string; config: string; ws: string }) => {
 test("B №4: корень-ссылка в никуда — target --remove по пути через ссылку (и --dry-run) снимает пометку", () => {
   const f = cliFixture({ projects: ["Org/p1"] });
   const { real, link } = gone(f);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   renameSync(real, `${real}-gone`);
   const dry = inProcess(f, ["target", `${link}/Acme/notes`, "--remove", "--dry-run"]);
   expect(dry.err).toBe("");
@@ -60,7 +60,7 @@ test("B №4: корень-ссылка в никуда — target --remove по
 test("B №4: target <путь в недоступном корне-ссылке> --remove: пометка снята; подсказка clean, после возвращения диска записанное убрано", () => {
   const f = cliFixture({ projects: ["Org/p1"] });
   const { real, link } = gone(f);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(existsSync(`${real}/Acme/notes/CLAUDE.local.md`)).toBe(true);
   renameSync(real, `${real}-gone`);
   const r = inProcess(f, ["target", `${link}/Acme/notes`, "--remove"]);
@@ -83,7 +83,7 @@ test("B №6: setup --force — подсказка, выполненная в п
   put(`${f.config}/layers/tree/Org/instructions/10-org.md`, "# org rule\n");
   put(`${f.config}/layers/tree/Org/mcp/orgtool.yaml`, "name: orgtool\ncommand: echo\nargs: [o]\n");
   put(`${f.config}/layers/tree/Clients/instructions/20-clients.md`, "# clients rule\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const s = inSetup(f, true, [[/Корень workspace/, [drive]], [/Есть ещё папки/, [null]]]);
   expect(s.err).toBe("");
   const line = s.out.split("\n").find((l) => l.includes("Вернуть его"))!;

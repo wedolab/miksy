@@ -3,7 +3,7 @@
 // рецензента out/check021/miksy2/test/zz-check021b-forget.test.ts с верными ожиданиями
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, read, yamlRoots } from "./rootshelp";
 
 const ALL = ["claude", "codex", "opencode", "antigravity"];
@@ -33,7 +33,7 @@ function fixture(agents = ALL) {
 
 test("B №5: агент убран из agents: clean недоступной папки без --forget — в числе только агенты из agents, остальным — clean --agent; повторы доводят до пустой папки", () => {
   const f = fixture(["claude", "codex"]);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const codexFiles = filesIn(f.site).filter((p) => p.startsWith(".codex") || p.startsWith(".agents"));
   expect(codexFiles.length).toBeGreaterThan(0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
@@ -48,20 +48,20 @@ test("B №5: агент убран из agents: clean недоступной п
   renameSync(`${f.drive}-disk`, f.drive);
   const before = filesIn(f.site);
   const again = f.run(["clean", f.site]);
-  expect(again.code).toBe(0);
+  expectCode(again, 0);
   const left = filesIn(f.site);
   // Повторный clean убрал обещанное (claude), файлы codex — на месте
   expect(left.sort()).toEqual(codexFiles.sort());
   expect(before.length - left.length).toBeLessThanOrEqual(promised);
   const cmd = c.out.match(/miksy clean "([^"]+)" --agent codex/)!;
   const byAgent = f.run(["clean", cmd[1], "--agent", "codex"]);
-  expect(byAgent.code).toBe(0);
+  expectCode(byAgent, 0);
   expect(filesIn(f.site)).toEqual([]);
 }, 180000);
 
 test("B №5: только агент вне agents записал в недоступную папку — текст без «повторите clean», с clean --agent; --forget забывает и его учёт", () => {
   const f = fixture(["claude", "codex"]);
-  expect(f.run(["sync", "--all", "--yes", "--agent", "codex"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes", "--agent", "codex"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(f.drive, `${f.drive}-disk`);
   const c = f.run(["clean", f.site]);

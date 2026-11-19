@@ -9,7 +9,7 @@ import { fromNative } from "../src/adopt";
 import { parseRoots } from "../src/load";
 import { driveRoot, trimSlash } from "../src/paths";
 import { expandPath } from "../src/setup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { missingDrive } from "./nodrive";
 import { git, inProcess, ledger, read, rootsFixture, yamlRoots } from "./rootshelp";
 
@@ -56,7 +56,7 @@ describe("R2: doctor при недоступном корне", () => {
     put(`${drive}/Acme/site/opencode.json`, "{}\n");
     put(`${f.config}/layers/tree/mcp/ws.yaml`, "name: ws\ncommand: echo\nargs: [x]\n");
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [opencode]\n`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(f.run(["doctor"]).out).not.toContain("Ключи пропали");
     unplug(drive);
     const d = f.run(["doctor"]);
@@ -69,7 +69,7 @@ describe("A.2: clean каталога, до которого не дотянут
   // Проект archive/Acme/app записан (CLAUDE.local.md, ключи в ~/.claude.json, блок .git/info/exclude), диск отключён
   const unplugged = () => {
     const f = rootsFixture();
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const app = `${f.archive}/Acme/app`;
     const projects = () => JSON.parse(read(`${f.home}/.claude.json`)).projects ?? {};
     expect(projects()[app].mcpServers.ws).toBeDefined();
@@ -81,7 +81,7 @@ describe("A.2: clean каталога, до которого не дотянут
   test("без терминала и без --forget: ключи в домашних конфигах убраны, учёт файлов на диске остался; диск вернулся — clean убирает их", () => {
     const f = unplugged();
     const r = f.run(["clean", f.app]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain(`На недоступном диске осталось записанное miksy — 2 файла в ${f.app}: подключите диск и повторите miksy clean "${f.app}"; данных больше нет — miksy clean "${f.app}" --forget.`);
     expect(f.projects()[f.app]?.mcpServers?.ws).toBeUndefined();
     const [[, st]] = f.mine();
@@ -91,7 +91,7 @@ describe("A.2: clean каталога, до которого не дотянут
     expect(f.run(["doctor"]).out).toContain(`Учёт целей недоступного корня (1) не проверяется — подключите диск: ${f.app}. Убрать записанное туда (2 файла): диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`);
     plugBack(f.archive);
     expect(read(`${f.app}/CLAUDE.local.md`)).toContain("# workspace");
-    expect(f.run(["clean", f.app]).code).toBe(0);
+    expectCode(f.run(["clean", f.app]), 0);
     expect(read(`${f.app}/CLAUDE.local.md`)).toBe("");
     expect(f.mine()).toEqual([]);
     expect(status(f.app)).toBe("");
@@ -100,7 +100,7 @@ describe("A.2: clean каталога, до которого не дотянут
   test("в терминале — вопрос (по умолчанию «нет»); «да» и --forget забывают целиком; диск нашёлся — sync узнаёт блок miksy и берёт его обратно сам (6v)", () => {
     const f = unplugged();
     const no = inProcess(f, ["clean", f.app], f.dir, [false]);
-    expect(no.code).toBe(0);
+    expectCode(no, 0);
     expect(no.questions).toEqual([`Каталога ${f.app} нет: диск не подключён или данных больше нет? Забыть записанное туда (2 файла)?`]);
     expect(f.mine().length).toBe(1);
     const yes = inProcess(f, ["clean", f.app], f.dir, [true]);
@@ -108,7 +108,7 @@ describe("A.2: clean каталога, до которого не дотянут
     expect(f.mine()).toEqual([]);
     plugBack(f.archive);
     const sync = f.run(["sync", f.app]);
-    expect(sync.code).toBe(0);
+    expectCode(sync, 0);
     expect(sync.out).toContain("взять под учёт — блок miksy, которого не было в учёте");
     // Сгенерированный файл не открыт git: строка его в блоке exclude miksy осталась
     expect(read(`${f.app}/.git/info/exclude`)).toContain("/CLAUDE.local.md");
@@ -120,7 +120,7 @@ describe("A.2: clean каталога, до которого не дотянут
   test("--forget без терминала; каталог удалён при доступном корне — забывается без вопроса", () => {
     const f = unplugged();
     const r = f.run(["clean", f.app, "--forget"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(r.out).toContain("забыто");
     expect(f.mine()).toEqual([]);
     // Доступный корень, каталога проекта нет — данных точно нет: без вопроса. (Корень, в котором после
@@ -150,18 +150,18 @@ describe("A.2: clean каталога, до которого не дотянут
     // clean без --forget — тоже не забывает
     expect(f.run(["clean", f.app]).out).toContain("На недоступном диске осталось записанное miksy");
     expect(f.mine().length).toBe(1);
-    expect(f.run(["clean", f.app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", f.app, "--forget"]), 0);
     expect(f.mine()).toEqual([]);
   }, 120000);
 
   test("root remove --forget недоступного корня без терминала — достижимое убрано, учёт забыт", () => {
     const f = unplugged();
     const r = f.run(["root", "remove", f.archive, "--forget"]);
-    expect(r.code).toBe(0);
+    expectCode(r, 0);
     expect(f.mine()).toEqual([]);
     expect(f.projects()[f.app]?.mcpServers?.ws).toBeUndefined();
-    expect(f.run(["root", "remove", f.books, "--forget", "--dry-run"]).code).toBe(0);
-    expect(f.run(["root", "add", f.books, "--forget"]).code).toBe(2);
+    expectCode(f.run(["root", "remove", f.books, "--forget", "--dry-run"]), 0);
+    expectCode(f.run(["root", "add", f.books, "--forget"]), 2);
   }, 120000);
 });
 
@@ -170,11 +170,11 @@ describe("A.3: root remove — один корень без ветки запи�
     const f = cliFixture({ projects: ["Org/p1"] });
     mkdirSync(`${f.dir}/drive`);
     put(`${f.config}/local/machine.yaml`, `# машина\nworkspace:\n  - "${f.ws}"  # основной\n  - { path: "${f.dir}/drive", tree: Clients }\nagents: [claude]\n`);
-    expect(f.run(["root", "remove", `${f.dir}/drive`]).code).toBe(0);
+    expectCode(f.run(["root", "remove", `${f.dir}/drive`]), 0);
     expect(read(`${f.config}/local/machine.yaml`)).toBe(`# машина\nworkspace: "${f.ws}"  # основной\nagents: [claude]\n`);
     // С веткой у основного — остаётся списком
     put(`${f.config}/local/machine.yaml`, `workspace:\n  - { path: "${f.ws}", tree: Main }\n  - { path: "${f.dir}/drive", tree: Clients }\nagents: [claude]\n`);
-    expect(f.run(["root", "remove", `${f.dir}/drive`]).code).toBe(0);
+    expectCode(f.run(["root", "remove", `${f.dir}/drive`]), 0);
     expect((Bun.YAML.parse(read(`${f.config}/local/machine.yaml`)) as { workspace: unknown }).workspace).toEqual([{ path: f.ws, tree: "Main" }]);
   }, 60000);
 });
@@ -207,7 +207,7 @@ describe("R7 и подсказки sync без пути", () => {
     expect(inProcess(g, ["projects"]).out).not.toContain("local/backups");
     for (const args of [["sync", "--dry-run"], ["sync", "--out", `${f.dir}/box`, "--dry-run"], ["explain"]]) {
       const r = inProcess(g, args, backup);
-      expect(r.code).toBe(-1);
+      expectCode(r, -1);
       expect(r.err).toContain(`${backup} — служебный каталог miksy`);
     }
     expect(inProcess(g, ["sync", backup, "--dry-run"], f.dir).err).toBe("");
@@ -216,7 +216,7 @@ describe("R7 и подсказки sync без пути", () => {
   test("каталог, в котором лежит корень, — не советует root add . (корнем стал бы весь каталог)", () => {
     const f = cliFixture({ projects: ["Org/p1"] });
     const r = f.run(["sync", "--dry-run"], { cwd: f.dir });
-    expect(r.code).toBe(2);
+    expectCode(r, 2);
     expect(r.err).toContain(`в нём лежит корень workspace ${f.ws} — перейдите в каталог проекта внутри него`);
     expect(r.err).not.toContain("root add");
     mkdirSync(`${f.dir}/elsewhere`);
@@ -235,15 +235,15 @@ describe("A.1 и R9: ветка корня внутри чужого места 
     put(`${f.config}/layers/tree/Org/mcp/org.yaml`, "name: org\ncommand: echo\nargs: [org]\n");
     put(`${f.config}/layers/tree/Org/instructions/10-org.md`, "# org\n");
     const add = f.run(["root", "add", `${f.dir}/drive`, "--tree", "Org/Sub"]);
-    expect(add.code).toBe(0);
+    expectCode(add, 0);
     const note = `корень ${f.dir}/drive: ветка layers/tree/Org/Sub лежит внутри места Org (там же: ${f.ws}/Org — папка корня ${f.ws}) — его проекты получают и слои layers/tree/Org (правила 10-org.md; MCP org). Не нужно — вынесите ветку из Org (например, tree: Org-Sub), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
     expect(add.out).toContain(`справка: ${note}`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
+    expectCode(f.run(["sync", "--global"]), 0);
     expect(Object.keys(JSON.parse(read(`${f.home}/.claude.json`)).projects[`${f.dir}/drive/site`].mcpServers)).toContain("org");
     const d = f.run(["doctor"]);
     expect(d.out).toContain(`Ветки корней внутри чужих мест (1) — не ошибка, но проекты этих корней получают слои этих мест:\n  ${note}`);
-    expect(d.code).toBe(0);
+    expectCode(d, 0);
     expect(f.run(["explain", `${f.dir}/drive/site`]).out).toContain("Ветка корня");
     // Вложенный корень на своём месте (ws/Org/Deep, tree Org/Deep) — не справка
     git(`${f.ws}/Org/Deep/x`);
@@ -257,11 +257,11 @@ describe("рецензия 6u", () => {
   const forgotten = (agent: string) => {
     const f = rootsFixture([agent]);
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, "---\nname: sk\ndescription: d\n---\nbody\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const app = `${f.archive}/Acme/app`;
     expect(status(app)).toBe("");
     unplug(f.archive);
-    expect(f.run(["clean", app, "--forget"]).code).toBe(0);
+    expectCode(f.run(["clean", app, "--forget"]), 0);
     plugBack(f.archive);
     return { ...f, app };
   };
@@ -274,11 +274,11 @@ describe("рецензия 6u", () => {
       const s = f.run(["sync", f.app]);
       expect(s.out).not.toContain("ОШИБКА");
       // 6v: совпадающие с выводом файлы miksy — обратно под учёт без --force
-      expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), known: s.out.includes("которого не было в учёте") }).toEqual({ code: 0, conflict: false, known: true });
+      expect({ code: s.code, conflict: s.out.includes("КОНФЛИКТ"), known: s.out.includes("которого не было в учёте") }, said(s)).toEqual({ code: 0, conflict: false, known: true });
       expect(status(f.app)).toBe("");
       expect(f.run(["sync", f.app]).out).toContain("изменений нет");
-      expect(f.run(["sync", f.app, "--force"]).code).toBe(0);
-      expect(f.run(["clean", f.app]).code).toBe(0);
+      expectCode(f.run(["sync", f.app, "--force"]), 0);
+      expectCode(f.run(["clean", f.app]), 0);
       expect({ left: leftovers(f.app), git: status(f.app) }).toEqual({ left: [], git: "" });
     }, 120000);
 
@@ -289,20 +289,20 @@ describe("рецензия 6u", () => {
     git(`${mnt}/solo`);
     put(`${f.config}/layers/tree/Data/G/layer.yaml`, "target: true\n");
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: mnt, tree: "Data" }])}agents: [claude]\n`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const keys = () => Object.keys(ledger(f.config).targets).filter((k) => k.includes("/mnt/"));
     expect(keys().length).toBe(2);
     renameSync(mnt, `${f.dir}/disk`);
     mkdirSync(mnt);
     const no = inProcess(f, ["root", "remove", mnt], f.dir, [false]);
-    expect(no.code).toBe(1);
+    expectCode(no, 1);
     expect(no.out).toContain(`Корень ${mnt} недоступен и лежит внутри корня ${f.ws}`);
     expect(no.out).toContain("Корень не убран");
     expect(read(`${f.config}/local/machine.yaml`)).toContain(mnt);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(keys().length).toBe(2);
-    expect(f.run(["root", "remove", mnt]).code).toBe(1);
-    expect(f.run(["root", "remove", mnt, "--forget"]).code).toBe(0);
+    expectCode(f.run(["root", "remove", mnt]), 1);
+    expectCode(f.run(["root", "remove", mnt, "--forget"]), 0);
     expect(keys()).toEqual([]);
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain(mnt);
   }, 120000);
@@ -310,7 +310,7 @@ describe("рецензия 6u", () => {
   test.skipIf(!win)("буква диска без косой (X:) в sync, clean и explain — корень диска, а не текущий каталог", () => {
     const f = cliFixture({ projects: ["Org/p1"] });
     const p1 = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", p1]).code).toBe(0);
+    expectCode(f.run(["sync", p1]), 0);
     const drive = f.dir.slice(0, 2);
     const c = inProcess(f, ["clean", drive, "--dry-run"], p1);
     expect(c.out).not.toContain("CLAUDE.local.md");

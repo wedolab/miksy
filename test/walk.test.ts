@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { canonical } from "../src/paths";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const win = process.platform === "win32";
 const dirLink = win ? "junction" : "dir";
@@ -40,21 +40,21 @@ test("С11: config/local — ссылка: репо в бэкапах не ст�
   symlinkSync(storage, `${f.config}/local`, dirLink);
   Bun.spawnSync(["git", "init", "--quiet", `${storage}/backups/old/repo`]);
   const r = f.run(["projects"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(r.out).toContain("Org/p1");
   expect(r.out).not.toContain("backups");
 });
 
 test("С15: битая ссылка .opencode одной цели — её конфликт, а не падение sync --all", () => {
   const f = cliFixture({ agents: ["opencode"], projects: ["Org/p1", "Org/p2"] });
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const p1 = `${f.ws}/Org/p1`;
   rmSync(`${p1}/.opencode`, { recursive: true, force: true });
   symlinkSync(`${p1}/missing`, `${p1}/.opencode`, dirLink);
   put(`${f.config}/layers/tree/instructions/01.md`, "# новое правило\n");
   const r = f.run(["sync", "--all", "--dry-run"]);
   expect(r.err).not.toContain("Ошибка");
-  expect(r.code).toBe(3);
+  expectCode(r, 3);
   expect(r.out).toContain("Org/p2");
 }, 60000);
 
@@ -76,7 +76,7 @@ test("С12: цель, где всё — конфликты, после sync не
   put(`${f.config}/layers/tree/mcp/s.yaml`, "name: s\ncommand: echo\n");
   put(`${p}/opencode.json`, '{"model": "x/y"}\n');
   Bun.spawnSync(["git", "-C", p, "add", "opencode.json"]);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(3);
+  expectCode(f.run(["sync", "--all", "--yes"]), 3);
   const doctor = f.run(["doctor"]);
   expect(doctor.out).not.toContain("Конфликты первого sync");
   expect(doctor.out).not.toMatch(/opencode\.json: права/);

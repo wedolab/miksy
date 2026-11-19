@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
 import { apply, plan } from "../src/apply";
 import { emptyState, loadManifest } from "../src/manifest";
 import { ADAPTERS, renderFor } from "../src/registry";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 
 const dirLink = process.platform === "win32" ? "junction" : "dir";
 const none = { layers: [], instructions: [], skills: [], notes: [], mcp: [] };
@@ -68,7 +68,7 @@ test("С7: второй владелец одного канонического
   mkdirSync(`${dir}/.claude`);
   symlinkSync(`${dir}/.agents/skills`, `${dir}/.claude/skills`, dirLink);
   const r = f.run(["sync", dir]);
-  expect(r.code).toBe(3);
+  expectCode(r, 3);
   expect(r.out).toContain("уже принадлежит цели");
   const owners = Object.entries(loadManifest(`${f.config}/local/state/manifest.json`).targets)
     .filter(([, st]) => Object.keys(st.files).some((p) => p.endsWith("/.agents/skills/my-mine/SKILL.md")));
@@ -101,8 +101,8 @@ test("С8: exclude каталогом не скрывает чужой конф�
   const actions = plan(result, f.target, f.machine, emptyState(), false, "antigravity");
   expect(actions.some((a) => a.kind === "conflict" && a.abs.endsWith("rules/AGENTS.md"))).toBe(true);
   apply(actions, emptyState());
-  expect(f.git("check-ignore", "-q", ".agents/plugins/miksy/plugin.json").exitCode).toBe(0);
-  expect(f.git("check-ignore", "-q", ".agents/plugins/miksy/rules/AGENTS.md").exitCode).toBe(1);
+  expectCode(f.git("check-ignore", "-q", ".agents/plugins/miksy/plugin.json"), 0);
+  expectCode(f.git("check-ignore", "-q", ".agents/plugins/miksy/rules/AGENTS.md"), 1);
 });
 
 test("С22: личный skill не кладётся в каталог skills, который версионирует команда", () => {

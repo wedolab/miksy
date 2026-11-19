@@ -13,7 +13,7 @@ import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
 import { privateLocal } from "../src/secretfiles";
 import { finishUpdate } from "../src/update";
-import { CLI } from "./helpers";
+import { CLI, expectCode, said } from "./helpers";
 import { foreignForBuiltinAdmin, openToOthers } from "./openacl";
 
 const win = process.platform === "win32";
@@ -112,7 +112,7 @@ describe("C10: local/backups — ссылка с открытой или нес�
           vault: walk(w.vault),
           // Файлы агентов не тронуты
           mine: [read(`${w.home}/.claude/CLAUDE.md`), read(`${w.home}/.claude/skills/gs/SKILL.md`).includes("MY NOTES")],
-        }).toEqual({
+        }, said(dry, sync, clean, rootDry, rootAdd, setupYes, wz)).toEqual({
           doctor: true, dry: [1, true], sync: [1, true], clean: 1, root: [1, 1, true], setup: [1, true], wizard: [true, true, 0], update: true,
           vault: vaultBefore, mine: ["# my rules\n", true],
         });
@@ -124,10 +124,10 @@ describe("C10: local/backups — ссылка с открытой или нес�
           const r = win
             ? Bun.spawnSync(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd.replace(/^\(PowerShell\) /, "")], { stdout: "pipe", stderr: "pipe" })
             : Bun.spawnSync(["sh", "-c", cmd], { stdout: "pipe", stderr: "pipe" });
-          expect(r.exitCode).toBe(0);
+          expectCode(r, 0);
         }
         const again = w.run(["sync", "--global", "--force"]);
-        expect({ code: again.code, refused: /не пишет туда бэкапы/.test(again.out), doctor: /все команды, которые пишут .*откажут/.test(w.run(["doctor"]).out) }).toEqual({ code: 0, refused: false, doctor: false });
+        expect({ code: again.code, refused: /не пишет туда бэкапы/.test(again.out), doctor: /все команды, которые пишут .*откажут/.test(w.run(["doctor"]).out) }, said(again)).toEqual({ code: 0, refused: false, doctor: false });
       }, 300000);
 
   // Цель закрыта — всё пишется, как раньше: бэкапы, оригинал, копия «до miksy»
@@ -144,7 +144,7 @@ describe("C10: local/backups — ссылка с открытой или нес�
           codes: [sync.code, clean.code],
           refused: /не пишет туда бэкапы/.test(sync.out + clean.out),
           wrote: where === "originals" ? inVault.some((p) => /\/skills\/gs\/SKILL\.md$/.test(p)) : inVault.some((p) => /CLAUDE\.md$/.test(p)),
-        }).toEqual({ doctor: false, codes: [0, 0], refused: false, wrote: true });
+        }, said(sync, clean, inVault)).toEqual({ doctor: false, codes: [0, 0], refused: false, wrote: true });
       }, 300000);
 
   // Ссылка глубже по пути записи (папка запуска — ссылка, сделал пользователь): запасной замок в backup()
@@ -190,12 +190,12 @@ test.skipIf(!win)("Windows: цель local/backups закрыта, папка or
   const dry = w.run(["sync", "--global", "--force", "--dry-run"]);
   const sync = w.run(["sync", "--global", "--force"]);
   const doc = w.run(["doctor"]);
-  expect({ dry: dry.code, sync: sync.code, text: /originals: .*miksy не пишет туда бэкапы.*Закройте папку бэкапов и всё в ней \(PowerShell\): /.test(sync.out), doctor: /откажут/.test(doc.out), vault: walk(w.vault) })
+  expect({ dry: dry.code, sync: sync.code, text: /originals: .*miksy не пишет туда бэкапы.*Закройте папку бэкапов и всё в ней \(PowerShell\): /.test(sync.out), doctor: /откажут/.test(doc.out), vault: walk(w.vault) }, said(dry, sync))
     .toEqual({ dry: 1, sync: 1, text: true, doctor: true, vault: before });
   const cmd = sync.out.match(/Закройте папку бэкапов и всё в ней \(PowerShell\): (.+)$/m)![1].trim();
-  expect(runCloseCmd(cmd).exitCode).toBe(0);
+  expectCode(runCloseCmd(cmd), 0);
   const again = w.run(["sync", "--global", "--force"]);
-  expect({ code: again.code, original: walk(`${w.vault}/originals`).some((p) => /SKILL\.md$/.test(p)) }).toEqual({ code: 0, original: true });
+  expect({ code: again.code, original: walk(`${w.vault}/originals`).some((p) => /SKILL\.md$/.test(p)) }, said(again)).toEqual({ code: 0, original: true });
 }, 300000);
 
 test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("ссылка глубже: local/backups/originals/C — на открытую цель: --dry-run и запуск — отказ, за ссылкой ничего", () => {
@@ -209,7 +209,7 @@ test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("ссылка глубж�
   link(win ? "junction" : "dir", deep, `${w.config}/local/backups/originals/C`);
   const dry = w.run(["sync", "--global", "--force", "--dry-run"]);
   const sync = w.run(["sync", "--global", "--force"]);
-  expect({ dry: dry.code, sync: sync.code, refused: /originals\/C — ссылка на .*miksy не пишет туда бэкапы/.test(sync.out), deep: walk(deep) }).toEqual({ dry: 1, sync: 1, refused: true, deep: [] });
+  expect({ dry: dry.code, sync: sync.code, refused: /originals\/C — ссылка на .*miksy не пишет туда бэкапы/.test(sync.out), deep: walk(deep) }, said(dry, sync)).toEqual({ dry: 1, sync: 1, refused: true, deep: [] });
 }, 300000);
 
 test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("trust, target, adopt — отказ в начале, до записи; adopt --dry-run — код 1", () => {
@@ -225,7 +225,7 @@ test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("trust, target, adopt —
     refused: [trust.out, target.out, adoptDry.out, adopt.out].every((o) => /miksy не пишет туда бэкапы/.test(o)),
     trustJson: read(trustFile) === trustBefore,
     layer: existsSync(`${w.config}/layers/tree/Org/layer.yaml`),
-  }).toEqual({ codes: [1, 1, 1, 1], refused: true, trustJson: true, layer: false });
+  }, said(trust, target, adoptDry, adopt)).toEqual({ codes: [1, 1, 1, 1], refused: true, trustJson: true, layer: false });
 }, 300000);
 
 // Повторная проверка 1 круга 8c, п. 3: macOS, Linux — папка 0755 за ссылкой на закрытую цель (700) другим недоступна:
@@ -235,7 +235,7 @@ test.skipIf(win)("macOS, Linux: originals 0755 за закрытой целью 
   mkdirSync(`${w.vault}/originals`, { recursive: true });
   openDir(`${w.vault}/originals`);
   const sync = w.run(["sync", "--global", "--force"]);
-  expect({ code: sync.code, refused: /не пишет туда бэкапы/.test(sync.out) }).toEqual({ code: 0, refused: false });
+  expect({ code: sync.code, refused: /не пишет туда бэкапы/.test(sync.out) }, said(sync)).toEqual({ code: 0, refused: false });
 }, 300000);
 
 test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("doctor: строка отказа local/backups кончается готовой командой", () => {

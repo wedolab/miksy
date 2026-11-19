@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLI } from "./helpers";
+import { CLI, said } from "./helpers";
 import { hasTag, oldEngine } from "./fixes021b-helpers";
 
 const win = process.platform === "win32";
@@ -51,7 +51,7 @@ test.skipIf(!win)("0.2.2 (снимок): ~/.claude/CLAUDE.md — ссылка н
   const eng = join(import.meta.dir, "..").replaceAll("\\", "/");
   const s = run(eng, o, ["setup", "--yes", "--backup"]);
   const outs = [run(eng, o, ["sync", "--global"]), run(eng, o, ["doctor"]), run(eng, o, ["sync", "--global"])].map((r) => r.out + r.err);
-  expect({ setup: s.code, warned: outs.map((t) => /закройте вручную/.test(t)) }).toEqual({ setup: 0, warned: [false, false, false] });
+  expect({ setup: s.code, warned: outs.map((t) => /закройте вручную/.test(t)) }, said(s, outs)).toEqual({ setup: 0, warned: [false, false, false] });
 }, 120000);
 
 for (const [label, engine] of [["0.2.2 (снимок)", join(import.meta.dir, "..")]] as const) // вариант v0.2.1 убран: там ошибка есть, он падает (проверено, out/8b-progress.md)
@@ -73,5 +73,5 @@ for (const [label, engine] of [["0.2.2 (снимок)", join(import.meta.dir, ".
         sync: [g.code, g.err], all: [a.code, a.err], clean: [c.code, c.err], setupAgain: [s2.code, s2.err],
         doctor: (d.out.match(/local\/[^\n]*не закрыт[^\n]*|Небезопасные права[^\n]*/g) ?? []).join(" | "),
         dotAcl: aclAfter === aclBefore,
-      }).toEqual({ setup: 0, copy: true, sync: [0, ""], all: [0, ""], clean: [0, ""], setupAgain: [0, ""], doctor: "", dotAcl: true });
+      }, said(s, g, a, c, s2)).toEqual({ setup: 0, copy: true, sync: [0, ""], all: [0, ""], clean: [0, ""], setupAgain: [0, ""], doctor: "", dotAcl: true });
     }, 300000);

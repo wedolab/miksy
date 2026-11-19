@@ -5,7 +5,7 @@
 //   с возвратом корня (root add) первой строкой, а не голым sync для папки, которую этот же запуск убирает из workspace.
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, inProcess, yamlRoots } from "./rootshelp";
 
 const files = (d: string, base = d): string[] => existsSync(d) ? readdirSync(d, { withFileTypes: true }).flatMap((e) => e.name === ".git" ? [] : e.isDirectory() ? files(`${d}/${e.name}`, base) : [`${d}/${e.name}`.slice(base.length + 1)]) : [];
@@ -18,7 +18,7 @@ function world() {
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: s\n---\nx\n");
   put(`${f.config}/layers/tree/Clients/mcp/tool.yaml`, "name: tool\ncommand: echo\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   // codex убран из agents
   const m = `${f.config}/local/machine.yaml`;
   writeFileSync(m, readFileSync(m, "utf8").replace("agents: [claude, codex]", "agents: [claude]"));
@@ -33,7 +33,7 @@ test("A4: root remove доступного корня — команда для 
   expect(line).toBe(`miksy clean "${site}" --agent codex`);
   expect(r.out).toContain("Записанное агентами, которых нет в agents, clean без --agent не убирает");
   const c = f.run(["clean", site, "--agent", "codex"]);
-  expect({ code: c.code, left: files(site) }).toEqual({ code: 0, left: [] });
+  expect({ code: c.code, left: files(site) }, said(c)).toEqual({ code: 0, left: [] });
 }, 300000);
 
 test("A4: root remove --dry-run и без терминала — та же команда", () => {
@@ -45,9 +45,9 @@ test("A4: root remove --dry-run и без терминала — та же ко�
 test("A3: «забыть» → диск вернулся → root add → root remove «да»: подсказка о забытом codex — с root add первой строкой", () => {
   const { f, drive, site } = world();
   renameSync(drive, `${drive}.off`);
-  expect(inProcess(f, ["root", "remove", drive, "--forget"], f.dir, null).code).toBe(0);
+  expectCode(inProcess(f, ["root", "remove", drive, "--forget"], f.dir, null), 0);
   renameSync(`${drive}.off`, drive);
-  expect(inProcess(f, ["root", "add", drive, "--tree", "Clients"], f.dir, [true]).code).toBe(0);
+  expectCode(inProcess(f, ["root", "add", drive, "--tree", "Clients"], f.dir, [true]), 0);
   const r = inProcess(f, ["root", "remove", drive], f.dir, [true]);
   const lines = r.out.split("\n");
   const sync = lines.findIndex((l) => l.includes(`miksy sync "${site}" --agent codex`));

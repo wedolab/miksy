@@ -3,7 +3,7 @@
 // команду root add с --tree, которая работает и без терминала
 import { expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
-import { cliFixture } from "./helpers";
+import { cliFixture, said } from "./helpers";
 import { git, read } from "./rootshelp";
 
 test("п. 9: sync в git-репо вне workspace — подсказка root add с --tree; выполненная дословно без терминала, она добавляет корень", () => {
@@ -15,6 +15,6 @@ test("п. 9: sync в git-репо вне workspace — подсказка root a
   const cmd = s.err.match(/miksy root add "([^"]+)" --tree (\S+)/);
   expect(cmd?.[1]).toBe(`${f.dir}/other`);
   const r = f.run(["root", "add", cmd![1], "--tree", cmd![2]]);
-  expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+  expect({ code: r.code, err: r.err }, said(r)).toEqual({ code: 0, err: "" });
   expect(read(`${f.config}/local/machine.yaml`)).toContain(`${f.dir}/other`);
 }, 120000);

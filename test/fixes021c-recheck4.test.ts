@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7c — повторная проверка 4 (out/review021j/miksy/test/zzrev021j.test.ts): отметка «забыт» только у агента вне agents
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 import { claudeJson, userTrusts, trusted } from "./fixes021b-helpers";
 
@@ -25,7 +25,7 @@ function base(agents: string[]) {
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
   put(`${f.config}/layers/tree/Clients/mcp/m1.yaml`, "name: m1\ncommand: echo\nargs: [hi]\n");
   const s0 = inProcess(f, ["sync", "--all", "--yes"], f.dir, null);
-  expect(s0.code).toBe(0);
+  expectCode(s0, 0);
   return { f, drive, site };
 }
 

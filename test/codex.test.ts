@@ -8,6 +8,7 @@ import { currentGlobal, currentProject } from "../adapters/codex/current";
 import type { Machine, Resolved } from "../src/types";
 import { apply, plan } from "../src/apply";
 import { emptyState, sha } from "../src/manifest";
+import { expectCode } from "./helpers";
 
 const temp = mkdtempSync(join(tmpdir(), "codex-test-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
@@ -94,15 +95,15 @@ describe("codex", () => {
 
   test("tracked config: warning и отсутствие записи; untracked own: sync/exclude/clean", () => {
     const { cfg, machine, project } = fixture();
-    expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "init", "--quiet", project]), 0);
     const target = { scope: "project" as const, dir: project, rel: "project" };
     const path = join(project, ".codex/config.toml");
     writeFileSync(path, 'developer_instructions="team"\n');
-    expect(Bun.spawnSync(["git", "-C", project, "add", "--", ".codex/config.toml"]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "-C", project, "add", "--", ".codex/config.toml"]), 0);
     const skipped = codex.render(cfg, target, machine);
     expect(skipped.files.some((f) => f.path === ".codex/config.toml")).toBe(false);
     expect(skipped.warnings.join("\n")).toContain("отслеживается git");
-    expect(Bun.spawnSync(["git", "-C", project, "rm", "--cached", "--", ".codex/config.toml"]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "-C", project, "rm", "--cached", "--", ".codex/config.toml"]), 0);
     const wanted = codex.render(cfg, target, machine);
     expect(plan(wanted, target, machine, emptyState(), false).some((a) => a.kind === "conflict")).toBe(true);
     rmSync(path);
@@ -116,11 +117,11 @@ describe("codex", () => {
 
   test("tracked skill защищён от sync --force и clean", () => {
     const { cfg, machine, project } = fixture();
-    expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "init", "--quiet", project]), 0);
     const path = ".agents/skills/s/SKILL.md";
     mkdirSync(join(project, ".agents/skills/s"), { recursive: true });
     writeFileSync(join(project, path), "team skill");
-    expect(Bun.spawnSync(["git", "-C", project, "add", "--", path]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "-C", project, "add", "--", path]), 0);
     const target = { scope: "project" as const, dir: project, rel: "project" };
     const result = codex.render(cfg, target, machine);
     const actions = plan(result, target, machine, emptyState(), true);
@@ -148,7 +149,7 @@ describe("codex", () => {
     const actions = plan(generated, target, machine, emptyState(), false);
     expect(actions.some((a) => a.kind === "exclude")).toBe(true);
     apply(actions, emptyState());
-    expect(Bun.spawnSync(["git", "-C", worktree, "check-ignore", "--quiet", ".codex/config.toml"]).exitCode).toBe(0);
+    expectCode(Bun.spawnSync(["git", "-C", worktree, "check-ignore", "--quiet", ".codex/config.toml"]), 0);
   });
 });
 
@@ -190,13 +191,13 @@ describe("codex: Skill.patch и бинарные ресурсы", () => {
 
 test("codex team import: native legacy skills are not duplicated, patched names are rendered", () => {
   const { project, machine } = fixture();
-  expect(Bun.spawnSync(["git", "init", "--quiet", project]).exitCode).toBe(0);
+  expectCode(Bun.spawnSync(["git", "init", "--quiet", project]), 0);
   for (const [path, name] of [[".codex/skills/seen", "seen"], [".agents/rename", "Other_Name"]]) {
     mkdirSync(join(project, path), { recursive: true });
     writeFileSync(join(project, path, "SKILL.md"), "---\nname: " + name + "\ndescription: Test skill\n---\n");
   }
-  expect(Bun.spawnSync(["git", "-C", project, "add", "--", ".codex/skills", ".agents/rename"]).exitCode).toBe(0);
-  expect(Bun.spawnSync(["git", "-C", project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "team"]).exitCode).toBe(0);
+  expectCode(Bun.spawnSync(["git", "-C", project, "add", "--", ".codex/skills", ".agents/rename"]), 0);
+  expectCode(Bun.spawnSync(["git", "-C", project, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "team"]), 0);
   const base: Resolved = { layers: [], instructions: [], skills: [], mcp: [], notes: [], importSkills: { item: "all", layer: "test" } };
   const imported = withTeamSkills(base, project, "codex", { codex: codex.skillDirs! });
   expect(imported.cfg.skills.map(s => s.item.name)).toEqual(["other-name"]);

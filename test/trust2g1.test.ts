@@ -4,7 +4,7 @@
 // Claude о headersHelper — по итогу плана доверия; doctor — подкаталоги групп без git.
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { editTrustToml } from "../src/trust";
 
 const claudeProjects = (home: string) => (existsSync(`${home}/.claude.json`) ? JSON.parse(readFileSync(`${home}/.claude.json`, "utf8")).projects ?? {} : {});
@@ -23,7 +23,7 @@ test("клонированный репо с хуками команды: дов
   const f = cliFixture({ agents: ["claude", "codex"] });
   commitSettings(`${f.ws}/Org/p1`);
   const r = f.run(["sync", "--all", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(claudeTrusted(f.home)).toBe(false);
   // Codex хуки Claude не выполняет: его доверие ставится как обычно
   expect(codexTrusted(f.home)).toBe(true);
@@ -32,13 +32,13 @@ test("клонированный репо с хуками команды: дов
   expect(r.out).toContain("Bash(*)");
   expect(r.out).toContain("не подтверждай доверие сам");
   const d = f.run(["doctor"]);
-  expect(d.code).toBe(1);
+  expectCode(d, 1);
   expect(d.out).toContain("Нужно решение пользователя о доверии");
 }, 60000);
 
 test("доверие, поставленное miksy, снимается, когда в проекте появились исполняемые настройки без решения", () => {
   const f = cliFixture({ agents: ["claude"] });
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(claudeTrusted(f.home)).toBe(true);
   commitSettings(`${f.ws}/Org/p1`);
   const r = f.run(["sync", "--all", "--yes"]);
@@ -49,11 +49,11 @@ test("доверие, поставленное miksy, снимается, ког
 test("miksy trust: без терминала — только с --confirm/--deny и проектом; ответ запоминается и привязан к содержимому настроек", () => {
   const f = cliFixture({ agents: ["claude"] });
   commitSettings(`${f.ws}/Org/p1`);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-  expect(f.run(["trust"]).code).toBe(2);
-  expect(f.run(["trust", `${f.ws}/Org/p1`]).code).toBe(2);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
+  expectCode(f.run(["trust"]), 2);
+  expectCode(f.run(["trust", `${f.ws}/Org/p1`]), 2);
   const ok = f.run(["trust", `${f.ws}/Org/p1`, "--confirm"]);
-  expect(ok.code).toBe(0);
+  expectCode(ok, 0);
   expect(ok.out).toContain(HOOK);
   expect(claudeTrusted(f.home)).toBe(true);
   expect(JSON.parse(readFileSync(`${f.config}/local/trust.json`, "utf8")).decisions).toBeTruthy();
@@ -72,7 +72,7 @@ test("miksy trust: без терминала — только с --confirm/--den
 test("miksy trust --deny: доверие не ставится и не предлагается; отказ — в справке doctor", () => {
   const f = cliFixture({ agents: ["claude"] });
   commitSettings(`${f.ws}/Org/p1`);
-  expect(f.run(["trust", `${f.ws}/Org/p1`, "--deny"]).code).toBe(0);
+  expectCode(f.run(["trust", `${f.ws}/Org/p1`, "--deny"]), 0);
   const r = f.run(["sync", "--all", "--yes"]);
   expect(r.out).not.toContain("Нужно решение пользователя");
   expect(claudeTrusted(f.home)).toBe(false);
@@ -86,7 +86,7 @@ test("trust: true в слое организации разрешает дове
   commitSettings(`${f.ws}/Org/p1`);
   put(`${f.config}/layers/tree/Org/layer.yaml`, "trust: { claude: true }\n");
   const r = f.run(["sync", "--all", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(claudeTrusted(f.home)).toBe(true);
   expect(r.out).not.toContain("Нужно решение пользователя");
 }, 60000);
@@ -95,7 +95,7 @@ test("false в machine.yaml окончателен: trust: true в слое ег
   const f = cliFixture({ agents: ["claude", "codex"] });
   writeFileSync(`${f.config}/local/machine.yaml`, readFileSync(`${f.config}/local/machine.yaml`, "utf8") + "trust: { claude: false, codex: false }\n");
   put(`${f.config}/layers/tree/Org/layer.yaml`, "trust: { claude: true, codex: true }\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(claudeTrusted(f.home)).toBe(false);
   expect(codexTrusted(f.home)).toBe(false);
 }, 60000);
@@ -103,11 +103,11 @@ test("false в machine.yaml окончателен: trust: true в слое ег
 test("Codex: конфиг проекта стал командным — доверие, поставленное miksy, снимается", () => {
   const f = cliFixture({ agents: ["codex"] });
   const p = `${f.ws}/Org/p1`;
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(codexTrusted(f.home)).toBe(true);
   // Команда закоммитила свой .codex/config.toml (miksy свой больше не пишет)
-  expect(f.run(["clean", "--all"]).code).toBe(0);
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["clean", "--all"]), 0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${p}/.codex/config.toml`, `[mcp_servers.team]\ncommand = "team-server"\n`);
   writeFileSync(`${p}/.git/info/exclude`, "");
   git(p, "add", "-f", ".codex/config.toml");
@@ -135,7 +135,7 @@ test("Claude: предупреждение о headersHelper согласован
   // Запись проекта, которую Claude создаёт сам (вопрос о доверии не задавался)
   put(`${f.home}/.claude.json`, JSON.stringify({ projects: { [`${f.ws}/Org/p1`]: { hasTrustDialogAccepted: false } } }));
   const r = f.run(["sync", "--all", "--yes"]);
-  expect(r.code).toBe(0);
+  expectCode(r, 0);
   expect(claudeTrusted(f.home)).toBe(true);
   expect(r.out).not.toContain("headersHelper (remote) не выполнится");
   // Запрет в слое — доверия нет, предупреждение есть
@@ -149,7 +149,7 @@ test("doctor: исполняемые настройки в подкаталог�
   put(`${f.config}/layers/tree/Org/layer.yaml`, "target: true\n");
   put(`${f.config}/layers/tree/Org/instructions/00.md`, "# org\n");
   put(`${f.ws}/Org/downloads/tool/.claude/settings.json`, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "evil-tool" }] }] } }));
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const d = f.run(["doctor"]);
   expect(d.out).toContain("Исполняемые настройки в подкаталогах групп без git");
   expect(d.out).toContain("evil-tool");

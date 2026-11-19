@@ -4,7 +4,7 @@
 // Тесты рецензентов: out/reviewer-tests/check6x-miksy/test/zz-review-trustpaths.test.ts (clean → sync, root remove →
 // root add), out/reviewer-tests/check6z-miksy/test/zz-ra-deny.test.ts
 import { describe, expect, test } from "bun:test";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode } from "./helpers";
 import { git, inProcess, ledger, read } from "./rootshelp";
 
 const gitc = (dir: string, ...args: string[]) => Bun.spawnSync(["git", "-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", ...args]);
@@ -29,17 +29,17 @@ describe("A1 — после clean ответы пользователя в ок�
   test("clean → sync: доверие ставил miksy, пользователь отвечал Claude «больше не спрашивать» — после clean и sync вопроса нет", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const app = `${f.ws}/Org/p1`;
-    expect(f.run(["sync", app]).code).toBe(0);
+    expectCode(f.run(["sync", app]), 0);
     expect(trusted(f.home, app)).toBe(true);
     allowInClaude(app);
     expect(swing(f.run(["sync", app]))).toEqual(STEADY);
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["clean", app]), 0);
     // Учёт помнит только отметку о доверии: записей цели нет
     expect(Object.keys(ledger(f.config).targets).some((id) => id.toLowerCase().endsWith(app.toLowerCase()))).toBe(false);
     const s = f.run(["sync", app]);
     expect({ ...swing(s), trusted: trusted(f.home, app) }).toEqual({ ...STEADY, trusted: true });
     // Повторный clean → sync — так же (отметка ставится снова)
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["clean", app]), 0);
     expect({ ...swing(f.run(["sync", app])), trusted: trusted(f.home, app) }).toEqual({ ...STEADY, trusted: true });
   }, 120000);
 
@@ -47,14 +47,14 @@ describe("A1 — после clean ответы пользователя в ок�
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const drive = `${f.dir}/drive`, site = `${drive}/Acme/site`;
     git(site);
-    expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
+    expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(trusted(f.home, site)).toBe(true);
     allowInClaude(site);
     expect(swing(f.run(["sync", "--all", "--yes"]))).toEqual(STEADY);
     const rm = inProcess(f, ["root", "remove", drive], f.dir, [true]);
     expect(rm.err).toBe("");
-    expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
+    expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
     const s = f.run(["sync", "--all", "--yes"]);
     expect({ ...swing(s), trusted: trusted(f.home, site) }).toEqual({ ...STEADY, trusted: true });
   }, 120000);
@@ -64,7 +64,7 @@ describe("A1 — после clean ответы пользователя в ок�
     const app = `${f.ws}/Org/p1`;
     f.run(["sync", app]);
     allowInClaude(app);
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["clean", app]), 0);
     put(`${app}/.claude/settings.json`, JSON.stringify(HOOK("team-hook.sh")));
     gitc(app, "add", ".claude/settings.json");
     gitc(app, "commit", "-qm", "hook");
@@ -85,12 +85,12 @@ describe("A1 — после clean ответы пользователя в ок�
     expect(asked(f.run(["sync", "--all", "--yes"]))).toBe(false);
     expect(trusted(f.home, grp)).toBe(true);
     allowInClaude(grp);
-    expect(f.run(["clean", grp]).code).toBe(0);
+    expectCode(f.run(["clean", grp]), 0);
     const s = f.run(["sync", "--all", "--yes"]);
     expect({ ...swing(s), trusted: trusted(f.home, grp) }).toEqual({ ...STEADY, trusted: true });
     // Коллега дописал хук в тот же файл; clean → sync: вопрос о хуке, ответы Claude — не в нём
     put(`${grp}/.claude/settings.local.json`, JSON.stringify({ ...local(grp), ...HOOK("colleague.sh") }, null, 2));
-    expect(f.run(["clean", grp]).code).toBe(0);
+    expectCode(f.run(["clean", grp]), 0);
     const q = f.run(["sync", "--all", "--yes"]);
     expect({ ask: asked(q), hook: q.out.includes("colleague.sh"), allow: q.out.includes("разрешено без вопроса"), trusted: trusted(f.home, grp) })
       .toEqual({ ask: true, hook: true, allow: false, trusted: false });
@@ -102,7 +102,7 @@ describe("A1 — после clean ответы пользователя в ок�
     team(app);
     expect(inProcess(f, ["sync", app], f.dir, ["n"]).questions.length).toBe(1);
     expect(trusted(f.home, app)).toBe(false);
-    expect(f.run(["clean", app]).code).toBe(0);
+    expectCode(f.run(["clean", app]), 0);
     expect((ledger(f.config) as { trustedBefore?: Record<string, string> }).trustedBefore ?? {}).toEqual({});
     const s = f.run(["sync", app]);
     expect({ ask: asked(s), trusted: trusted(f.home, app) }).toEqual({ ask: false, trusted: false });
@@ -130,7 +130,7 @@ describe("A2 — «нет» доверию Claude отзывает одобре�
 
   test("после --deny пользователь сам доверился в Claude — sync серверы не одобряет; miksy trust <проект> спрашивает о них заново, «да» — одобряет", () => {
     const { f, p } = setup();
-    expect(f.run(["trust", p, "--deny"]).code).toBe(0);
+    expectCode(f.run(["trust", p, "--deny"]), 0);
     expect(read(`${p}/.claude/settings.local.json`)).not.toContain("team");
     acceptInClaude(f.home, p);
     const s = f.run(["sync", p]);
@@ -163,7 +163,7 @@ describe("A3 — trust --confirm при trust: false называет запре
     put(`${f.config}/layers/tree/Org/layer.yaml`, "trust: { claude: false }\n");
     f.run(["sync", app]);
     const c = f.run(["trust", app, "--confirm"]);
-    expect(c.code).toBe(0);
+    expectCode(c, 0);
     expect(c.out).toContain("записано в local/trust.json");
     expect(c.out).toMatch(/trust: \{ claude: false \} в слое Org/);
     expect(c.out).toContain("доверие поставит следующий miksy sync после снятия запрета");

@@ -1,7 +1,7 @@
 // Выпуск 0.2.1, круг 7c — повторная проверка правок по рецензии A, п. 1 (из out/review021g/miksy/test/zzrevA021g-outside.test.ts)
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, expectCode, expectCodeIn } from "./helpers";
 import { git, inProcess, ledger, read, yamlRoots } from "./rootshelp";
 
 const filesIn = (dir: string, base = dir, out: string[] = []): string[] => {
@@ -22,7 +22,7 @@ function setup() {
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(drive, `${drive}-disk`);
   const g = inProcess(f, ["root", "remove", drive, "--forget"], f.dir, null);
@@ -37,13 +37,13 @@ for (const agent of [null, "codex"] as const)
     const { f, site } = setup();
     const drive = site.slice(0, site.indexOf("/Acme/site"));
     const c = f.run(["clean", site, ...(agent ? ["--agent", agent] : [])]);
-    expect(c.code).toBe(0);
+    expectCode(c, 0);
     expect(c.out.split("\n").filter((l) => /^\s+miksy root add /.test(l)).length).toBe(1);
     const line = c.out.split("\n").filter((l) => /^\s+miksy sync /.test(l)).join("\n");
-    expect(f.run(["root", "add", drive, "--tree", "Clients"]).code).toBe(0);
+    expectCode(f.run(["root", "add", drive, "--tree", "Clients"]), 0);
     for (const m of line.matchAll(/miksy (sync|clean) "([^"]+)"( --agent \w+)?/g)) {
       const r = f.run([m[1], m[2], ...(m[3] ? m[3].trim().split(" ") : [])]);
-      expect([0, 3]).toContain(r.code);
+      expectCodeIn(r, [0, 3]);
     }
     const left = filesIn(site).filter((p) => (agent ? p.startsWith(".codex") || p.startsWith(".agents") : p.startsWith(".claude") || p === "CLAUDE.local.md"));
     expect(left).toEqual([]);
@@ -57,7 +57,7 @@ test("в workspace: clean --agent codex → подсказка sync/clean --agen
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude, codex]\n`);
   put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients\n");
   put(`${f.config}/layers/tree/Clients/skills/s1/SKILL.md`, "---\nname: s1\ndescription: d\n---\nbody\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  expectCode(f.run(["sync", "--all", "--yes"]), 0);
   put(`${f.config}/local/machine.yaml`, read(`${f.config}/local/machine.yaml`).replace("agents: [claude, codex]", "agents: [claude]"));
   renameSync(drive, `${drive}-disk`);
   f.run(["clean", site, "--forget"]);
