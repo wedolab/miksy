@@ -2,10 +2,10 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, gitInit, put } from "./helpers";
 
 export const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
-export const git = (dir: string) => { mkdirSync(dir, { recursive: true }); Bun.spawnSync(["git", "init", "-q", dir]); };
+export const git = (dir: string) => { mkdirSync(dir, { recursive: true }); gitInit(dir); };
 export const yamlRoots = (items: (string | { path: string; tree?: string })[]) =>
   `workspace:\n${items.map((r) => (typeof r === "string" ? `  - "${r}"` : `  - { path: "${r.path}"${r.tree ? `, tree: "${r.tree}"` : ""} }`)).join("\n")}\n`;
 

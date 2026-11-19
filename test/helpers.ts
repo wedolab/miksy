@@ -24,7 +24,7 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
   put(`${config}/local/machine.yaml`, `workspace: ${ws}\nagents: [${(opts.agents ?? ["claude"]).join(", ")}]\n`);
   for (const p of opts.projects ?? ["Org/p1"]) {
     mkdirSync(`${ws}/${p}`, { recursive: true });
-    Bun.spawnSync(["git", "init", "--quiet", `${ws}/${p}`]);
+    gitInit(`${ws}/${p}`);
   }
   const run = (args: string[], o: { cwd?: string; stdin?: string } = {}) => {
     const r = Bun.spawnSync([process.execPath, CLI, ...args], {
@@ -34,7 +34,12 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
       stdout: "pipe",
       stderr: "pipe",
     });
-    return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+    const res = { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
+    // На CI (GitHub задаёт CI=true) — вывод команды с кодом 3 (конфликт или ошибка цели) в лог: редкие «3 вместо 0» на
+    // macOS не воспроизводятся на стенде (круг 10d-4); локально — тишина. Тесты, где 3 ожидаем, тоже печатают — это шум
+    if (process.env.CI && res.code === 3)
+      process.stderr.write(`\n[miksy code 3] miksy ${args.join(" ")} (cwd ${o.cwd ?? dir})\n--- stdout\n${res.out}\n--- stderr\n${res.err}\n--- end\n`);
+    return res;
   };
   return { dir, config, home, ws, run };
 }
@@ -61,3 +66,10 @@ export const agentHomeFiles = (home: string) => AGENT_HOME.flatMap((d) => {
   const p = `${home}/${d}`;
   return !existsSync(p) ? [] : statSync(p).isDirectory() ? textFiles(p) : [p];
 });
+
+// git init для заготовки теста: сбой — сразу ошибка с причиной, а не проект без .git и загадочный код 3 позже
+// (круг 10d-4: редкие «3 вместо 0» на macOS GitHub)
+export function gitInit(dir: string) {
+  const r = Bun.spawnSync(["git", "init", "--quiet", dir], { stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) throw new Error(`git init ${dir}: код ${r.exitCode}, ${r.stderr.toString().trim()}`);
+}
