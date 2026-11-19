@@ -4,7 +4,7 @@ import type { RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
 import { fold, pathKey, slash } from "./paths";
 import { headerMark, miksyOpencodeJson } from "./marks";
-import { GitError, gitEnv, protectedBy, trackedPaths } from "./git";
+import { GitError, gitSpawn, gitWhy, protectedBy, trackedPaths } from "./git";
 import { backup, originalBackup, runDir } from "./backup";
 import { blockHash, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
@@ -61,13 +61,12 @@ function excludeFile(dir: string): { path: string; shared: boolean; root: string
   const git = join(dir, ".git");
   if (!existsSync(git)) return null;
   if (lstatSync(git).isDirectory()) return { path: join(git, "info", "exclude").replaceAll("\\", "/"), shared: false, root: canonical(git) };
-  const r = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "info/exclude", "--git-dir", "--git-common-dir"], {
-    stdout: "pipe",
-    stderr: "pipe",
-    env: gitEnv(),
-  });
-  if (r.exitCode !== 0) throw new GitError(`git exclude для ${dir}: ${r.stderr.toString().trim() || `код ${r.exitCode}`}`);
-  const [path, gitDir, common] = r.stdout.toString().trim().split(/\r?\n/).map((p) => resolve(dir, p).replaceAll("\\", "/"));
+  const r = gitSpawn(["-C", dir, "rev-parse", "--git-path", "info/exclude", "--git-dir", "--git-common-dir"], { needOut: true });
+  if (r.code !== 0) throw new GitError(`git exclude для ${dir}: ${gitWhy(r.err, r.code)}`);
+  const lines = r.out.trim().split(/\r?\n/).filter(Boolean);
+  // Три пути — или сбой: пустая строка дала бы resolve(dir, "") — сам каталог проекта вместо файла exclude (10d-6)
+  if (lines.length !== 3) throw new GitError(`git exclude для ${dir}: git ответил не тремя путями (${lines.length}, код ${r.code})`);
+  const [path, gitDir, common] = lines.map((p) => resolve(dir, p).replaceAll("\\", "/"));
   return { path, shared: canonical(gitDir) !== canonical(common), root: canonical(common) };
 }
 

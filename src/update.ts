@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Ask } from "./ask";
 import { entriesBetween, entryText, hasSection, isEmpty, parseChangelog, type Entry } from "./changelog";
 import { doctor } from "./doctor";
-import { gitEnv } from "./git";
+import { gitEnv, gitSpawn } from "./git";
 import { ENGINE, loadMachine } from "./load";
 import { quoteArg, slash } from "./paths";
 import { agentsFor } from "./registry";
@@ -40,8 +40,12 @@ function gitIn(engine: string, interactive: boolean): Git {
     const env: Record<string, string | undefined> = { ...gitEnv() };
     if (net && !interactive) Object.assign(env, { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" });
     try {
-      const r = Bun.spawnSync(["git", "-C", engine, ...args], { stdout: "pipe", stderr: "pipe", env, ...(net && { timeout: 180_000 }) });
-      return { code: r.exitCode ?? -1, out: r.stdout.toString().trim(), err: r.stderr.toString().trim() };
+      // Эти команды при успехе всегда печатают — пустой ответ повторяется один раз (gitSpawn, круг 10d-6)
+      const needOut = ["rev-parse", "symbolic-ref", "config", "show", "remote", "describe"].includes(args[0]);
+      // Меняют репо или ходят в сеть — без повтора (gitSpawn): checkout -b второй раз — «branch already exists»
+      const readOnly = !["checkout", "merge", "fetch"].includes(args[0]);
+      const r = gitSpawn(["-C", engine, ...args], { needOut, readOnly, env, ...(net && { timeout: 180_000 }) });
+      return { code: r.code ?? -1, out: r.out.trim(), err: r.err.trim() };
     } catch (e) {
       return { code: -1, out: "", err: (e as Error).message };
     }
@@ -158,6 +162,8 @@ export function update(o: UpdateOptions): number {
   const top = g(["rev-parse", "--show-toplevel"]);
   if (top.code !== 0 && !/not a git repository/i.test(top.err))
     throw new UpdateRefused(`git в каталоге движка не работает: ${lastLine(top.err) || `код ${top.code}`}`);
+  // Успех без пути (и после повтора) — ответ git не дошёл, а не «движок не git-клон» (круг 10d-6)
+  if (top.code === 0 && !top.out) throw new UpdateRefused("git в каталоге движка не работает: git ничего не ответил (код 0). Повторите miksy update");
   if (!engineRepo(engine))
     throw new UpdateRefused(`движок ${slash(engine)} — не git-клон, обновить его командой нельзя. Скачайте движок заново (git clone -b ${STABLE} …, README, «Установка»), затем miksy setup`);
   const branch = g(["symbolic-ref", "--short", "-q", "HEAD"]).out;

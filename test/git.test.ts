@@ -93,3 +93,86 @@ describe("git: глобальные файлы в dotfiles-репо", () => {
     expect(actions.map((a) => a.kind)).toEqual(["write"]);
   });
 });
+
+// Круг 10d-6: причина сбоя git в тексте ошибки — первая строка stderr (суть), последняя — если другая, код; пусто — сказано
+describe("git: причина сбоя в тексте ошибки", () => {
+  test("первая и последняя строки stderr, код; пустой stderr — «git ничего не написал»", async () => {
+    const { gitWhy } = await import("../src/git");
+    expect(gitWhy("fatal: not a git repository (or any of the parent directories): .git\n", 128)).toBe("fatal: not a git repository (or any of the parent directories): .git (код 128)");
+    expect(gitWhy("warning: x\r\nhint: y\nfatal: index file corrupt\n", 128)).toBe("warning: x … fatal: index file corrupt (код 128)");
+    expect(gitWhy("", 128)).toBe("код 128, git ничего не написал");
+    expect(gitWhy("  \n", null)).toBe("код null, git ничего не написал");
+  });
+});
+
+// Круг 10d-6: ответ git не дошёл (на macOS GitHub — «код 0, пустой stdout» и «код 128, пустой stderr») — ровно один
+// повтор; пустой и после повтора — понятная ошибка, а не «корень репо = текущий каталог»; обычный ответ — без повтора
+describe("git: потерянный ответ — один повтор", () => {
+  const real = (argv: string[], opts: { env: Record<string, string | undefined> }) => Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe", env: opts.env });
+  const empty = (code: number) => ({ exitCode: code, stdout: Buffer.from(""), stderr: Buffer.from("") });
+  // Подмена: первые answers вызовов — заданные ответы, дальше — настоящий git; calls — сколько раз запускали
+  const fake = async (answers: ReturnType<typeof empty>[]) => {
+    const g = await import("../src/git");
+    const state = { calls: 0 };
+    g.setGitSpawnForTest((argv, opts) => (state.calls++ < answers.length ? answers[state.calls - 1] : real(argv, opts)));
+    return { g, state };
+  };
+  const repo = () => { const d = mkdtempSync(join(tmpdir(), "git-lost-")).replaceAll("\\", "/"); git(d, "init", "--quiet"); return d; };
+
+  test("код 0 и пустой stdout → повтор → путь репо", async () => {
+    const d = repo();
+    const { g, state } = await fake([empty(0)]);
+    try {
+      const top = g.repoOf(d);
+      expect({ top: !!top && top.replaceAll("\\", "/").toLowerCase().endsWith(d.split("/").pop()!.toLowerCase()), calls: state.calls }).toEqual({ top: true, calls: 2 });
+    } finally { g.setGitSpawnForTest(null); }
+  });
+
+  test("код 128 и пустой stderr → повтор → обычный ответ «не репо»", async () => {
+    const d = mkdtempSync(join(tmpdir(), "git-lost-plain-")).replaceAll("\\", "/");
+    const { g, state } = await fake([empty(128)]);
+    try { expect({ top: g.repoOf(d), calls: state.calls }).toEqual({ top: null, calls: 2 }); } finally { g.setGitSpawnForTest(null); }
+  });
+
+  test("два пустых ответа подряд — понятная ошибка, а не корень = текущий каталог", async () => {
+    const d = repo();
+    const { g, state } = await fake([empty(0), empty(0)]);
+    try {
+      expect(() => g.repoOf(d)).toThrow("git ничего не ответил (код 0)");
+      expect(state.calls).toBe(2);
+    } finally { g.setGitSpawnForTest(null); }
+    const { g: g3, state: s3 } = await fake([empty(128), empty(128)]);
+    try {
+      expect(() => g3.repoOf(d)).toThrow("код 128, git ничего не написал");
+      expect(s3.calls).toBe(2);
+    } finally { g3.setGitSpawnForTest(null); }
+  });
+
+  test("git убит или вышел по тайм-ауту (код null) и команды, меняющие репо, — без повтора", async () => {
+    const d = repo();
+    const killed = { exitCode: null, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    const { g, state } = await fake([killed, killed]);
+    try {
+      expect(g.gitSpawn(["-C", d, "fetch", "origin"], { timeout: 1000 }).code).toBeNull();
+      expect(state.calls).toBe(1);
+      expect(() => g.repoOf(d)).toThrow("git rev-parse");
+      expect(state.calls).toBe(2);
+    } finally { g.setGitSpawnForTest(null); }
+    const { g: g2, state: s2 } = await fake([empty(1), empty(1)]);
+    try {
+      expect(g2.gitSpawn(["-C", d, "checkout", "-q", "-b", "x"], { readOnly: false }).code).toBe(1);
+      expect(s2.calls).toBe(1);
+    } finally { g2.setGitSpawnForTest(null); }
+  });
+
+  test("обычный «not a git repository» и путь репо — без повтора", async () => {
+    const plain = mkdtempSync(join(tmpdir(), "git-plain-")).replaceAll("\\", "/");
+    const { g, state } = await fake([]);
+    try {
+      expect(g.repoOf(plain)).toBeNull();
+      expect(state.calls).toBe(1);
+      g.repoOf(repo());
+      expect(state.calls).toBe(2);
+    } finally { g.setGitSpawnForTest(null); }
+  });
+});

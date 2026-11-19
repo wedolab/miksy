@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ENGINE } from "./load";
-import { gitEnv } from "./git";
+import { gitSpawn } from "./git";
 import { samePath } from "./paths";
 import { compareVersions, SEMVER } from "./changelog";
 
@@ -21,10 +21,12 @@ export function packageVersion(engine = ENGINE): string {
 // Номер X.Y.Z из строки версии («0.1.0-5-gabc» → «0.1.0»); нет — null
 export const baseVersion = (v: string): string | null => /^v?(\d+\.\d+\.\d+)/.exec(v)?.[1] ?? null;
 
+// rev-parse и describe при успехе всегда печатают — пустой ответ повторяется один раз (gitSpawn, круг 10d-6); status
+// --porcelain пустым бывает законно
 const git = (dir: string, args: string[]) => {
   try {
-    const r = Bun.spawnSync(["git", "-C", dir, ...args], { stdout: "pipe", stderr: "pipe", env: gitEnv() });
-    return { code: r.exitCode, out: r.stdout.toString().trim() };
+    const r = gitSpawn(["-C", dir, ...args], { needOut: args[0] === "rev-parse" || args[0] === "describe" });
+    return { code: r.code, out: r.out.trim() };
   } catch { return { code: -1, out: "" }; }
 };
 

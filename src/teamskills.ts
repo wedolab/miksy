@@ -1,4 +1,4 @@
-import { gitCaching, gitEnv, gitMemo } from "./git";
+import { gitCaching, gitEnv, gitMemo, gitSpawn, gitWhy } from "./git";
 // Командные skills в репо проекта: поиск, склейка копий, проверка формы.
 // Только чтение — файлы команды miksy не меняет.
 import { createHash } from "node:crypto";
@@ -124,8 +124,9 @@ function scan(
             candidates.push({ skillDir: `${file}/${e.name}`, skillMd: join(target, e.name, "SKILL.md"), symlink: true, asFile });
       } else {
         // Куда указывает ссылка — из самого git-объекта
-        const blob = Bun.spawnSync(["git", "-C", dir, "cat-file", "-p", `:${file}`], { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
-        const to = blob.exitCode === 0 ? blob.stdout.toString().trim() : target;
+        // Цель ссылки при успехе непуста — пустой ответ повторяется один раз (gitSpawn, круг 10d-6)
+        const blob = gitSpawn(["-C", dir, "cat-file", "-p", `:${file}`], { needOut: true });
+        const to = blob.code === 0 && blob.out.trim() ? blob.out.trim() : target;
         candidates.push({ skillDir: file, skillMd: join(target, "SKILL.md"), symlink: true, broken: to });
       }
       continue;
@@ -243,9 +244,10 @@ function blobs(dir: string, shas: string[]): Map<string, Buffer> {
 function blobsQuery(dir: string, shas: string[]): Map<string, Buffer> {
   const out = new Map<string, Buffer>();
   if (!shas.length) return out;
-  const r = Bun.spawnSync(["git", "-C", dir, "cat-file", "--batch"], { stdin: Buffer.from([...new Set(shas)].join("\n") + "\n"), env: gitEnv(), stdout: "pipe", stderr: "ignore" });
-  if (r.exitCode !== 0) throw new Error("git cat-file не прочитал объекты");
-  const buf = Buffer.from(r.stdout);
+  // На каждый объект git печатает строку — пустой ответ повторяется один раз; пустой и после повтора — ошибка (10d-6)
+  const r = gitSpawn(["-C", dir, "cat-file", "--batch"], { stdin: Buffer.from([...new Set(shas)].join("\n") + "\n"), needOut: true });
+  if (r.code !== 0 || !r.bytes.length) throw new Error(`git cat-file не прочитал объекты: ${gitWhy(r.err, r.code)}`);
+  const buf = r.bytes;
   for (let i = 0; i < buf.length; ) {
     const nl = buf.indexOf(10, i);
     const [sha, type, size] = buf.subarray(i, nl).toString().split(" ");

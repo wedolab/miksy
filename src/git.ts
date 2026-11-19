@@ -13,15 +13,47 @@ import { canonical, fold, inside, slash } from "./paths";
 const REPO_ENV = /^GIT_(DIR|WORK_TREE|INDEX_FILE|INDEX_VERSION|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR|NAMESPACE|PREFIX|CEILING_DIRECTORIES|DISCOVERY_ACROSS_FILESYSTEM|(LITERAL|GLOB|NOGLOB|ICASE)_PATHSPECS)$/i;
 export const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !REPO_ENV.test(k))), LC_ALL: "C", LANGUAGE: "C" });
 
+// Причина сбоя git для текста ошибки: первая строка stderr (обычно «fatal: …» — суть), последняя — если другая, и код;
+// пусто — так и сказано (круг 10d-6: на macOS GitHub пойман код 128 без единой строки). В stderr git — пути, не секреты
+export function gitWhy(err: string, code: number | null): string {
+  const lines = err.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return `код ${code}, git ничего не написал`;
+  const last = lines[lines.length - 1];
+  return `${lines[0]}${lines.length > 1 && last !== lines[0] ? ` … ${last}` : ""} (код ${code})`;
+}
+
+// Запуск git — один на всю программу (git.ts, apply.ts, version.ts, update.ts). Пустой ответ там, где git обязан
+// ответить, — ровно один повтор, без пауз (круг 10d-6: на macOS GitHub пойманы «код 0, пустой stdout» и «код 128,
+// пустой stderr» — ответ git не дошёл; пустой путь становился текущим каталогом, пустая ошибка — «сбоем git»):
+// - код ≠ 0 и stderr пуст (git при отказе пишет причину; молчат только режимы -q — им лишний запуск не вредит);
+// - код 0 и stdout пуст, если needOut (rev-parse, describe и т. п. при успехе всегда печатают).
+// Не повторяется: код null (git убит или вышел по тайм-ауту — повтор удвоил бы ожидание, у update до 6 минут) и
+// readOnly: false — команды, которые меняют репо (checkout, merge, fetch в update): повтор после частичного успеха дал
+// бы чужую ошибку («branch already exists») вместо настоящей. Второй ответ — как есть: что с ним делать, решает
+// вызывающий (пустой путь — ошибка, а не значение)
+export type GitResult = { code: number | null; out: string; err: string; bytes: Buffer };
+type Spawn = (argv: string[], opts: { env: Record<string, string | undefined>; timeout?: number; stdin?: Buffer }) => { exitCode: number | null; stdout: Buffer; stderr: Buffer };
+const realSpawn: Spawn = (argv, opts) => Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe", ...opts });
+let spawnGit: Spawn = realSpawn;
+// Только для тестов: подменить запуск git (null — настоящий)
+export function setGitSpawnForTest(fn: Spawn | null) { spawnGit = fn ?? realSpawn; }
+
+export function gitSpawn(args: string[], o: { needOut?: boolean; readOnly?: boolean; env?: Record<string, string | undefined>; timeout?: number; stdin?: Buffer } = {}): GitResult {
+  const once = (): GitResult => {
+    const r = spawnGit(["git", ...args], { env: o.env ?? gitEnv(), ...(o.timeout && { timeout: o.timeout }), ...(o.stdin && { stdin: o.stdin }) });
+    return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString(), bytes: Buffer.from(r.stdout) };
+  };
+  const r = once();
+  if (r.code === null || o.readOnly === false) return r;
+  const lost = (r.code !== 0 && !r.err.trim()) || (r.code === 0 && !!o.needOut && !r.out.trim());
+  return lost ? once() : r;
+}
+
 // Сообщения git — на английском, чтобы отличать «не репо» от сбоя
-function run(dir: string, args: string[]) {
+function run(dir: string, args: string[], needOut = false) {
   try {
-    const r = Bun.spawnSync(["git", "-C", dir, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: gitEnv(),
-    });
-    return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString().trim() };
+    const r = gitSpawn(["-C", dir, ...args], { needOut });
+    return { code: r.code, out: r.out, err: r.err.trim() };
   } catch (e) {
     throw new GitError(`git не запускается: ${(e as Error).message}`);
   }
@@ -66,11 +98,13 @@ export function repoOf(dir: string): string | null {
         return up;
       }
     }
-  const r = run(d, ["rev-parse", "--show-toplevel"]);
+  const r = run(d, ["rev-parse", "--show-toplevel"], true);
   let top: string | null | GitError;
-  if (r.code === 0) top = canonical(r.out.trim());
+  // Код 0 без пути (и после повтора) — сбой, а не «корень = текущий каталог» (canonical("") — это cwd; круг 10d-6)
+  if (r.code === 0 && !r.out.trim()) top = new GitError(`git rev-parse в ${slash(d)}: git ничего не ответил (код 0)`);
+  else if (r.code === 0) top = canonical(r.out.trim());
   else if (/not a git repository/i.test(r.err)) top = null;
-  else top = new GitError(`git rev-parse в ${slash(d)}: ${r.err.split("\n").pop() || `код ${r.code}`}`);
+  else top = new GitError(`git rev-parse в ${slash(d)}: ${gitWhy(r.err, r.code)}`);
   if (cache) {
     cache.repo.set(key, top);
     // Каталоги между d и корнем репо дают тот же ответ: git ищет ближайший .git вверх, и между d и
@@ -95,7 +129,7 @@ function indexOf(dir: string): Index {
   if (hit) return hit;
   const r = run(dir, ["ls-files", "-z"]);
   if (r.code !== 0) {
-    const e = new GitError(`git ls-files в ${slash(dir)}: ${r.err.split("\n").pop() || `код ${r.code}`}`);
+    const e = new GitError(`git ls-files в ${slash(dir)}: ${gitWhy(r.err, r.code)}`);
     cache!.index.set(key, e);
     throw e;
   }
@@ -137,7 +171,7 @@ export function trackedPaths(dir: string, paths: string[]): string[] {
     });
   }
   const r = run(dir, ["ls-files", "-s", "-z", "--", ...paths.map((p) => `:(icase,literal)${slash(p)}`)]);
-  if (r.code !== 0) throw new GitError(`git ls-files в ${slash(dir)}: ${r.err.split("\n").pop() || `код ${r.code}`}`);
+  if (r.code !== 0) throw new GitError(`git ls-files в ${slash(dir)}: ${gitWhy(r.err, r.code)}`);
   const listed = r.out.split("\0").filter(Boolean).map((p) => p.slice(p.indexOf("\t") + 1));
   return paths.filter((p) => {
     const q = slash(p);
