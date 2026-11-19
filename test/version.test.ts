@@ -88,7 +88,7 @@ describe("совместимость: учёт записан более нов�
     // Поле неверного типа — как нет поля, учёт не «повреждён»
     writeFileSync(path, JSON.stringify({ ...m, engine: 5 }));
     expect(f.run(["doctor"]).out).not.toContain("учёт повреждён");
-  }, 30000);
+  }, 60000);
 });
 
 describe("совместимость: неизвестные ключи map.yaml и layer.yaml", () => {

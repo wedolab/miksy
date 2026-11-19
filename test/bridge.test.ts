@@ -238,5 +238,5 @@ describe("мост: ответ на каждый запрос", () => {
       const quit = await run(path, [init], { kill: 15000 });
       expect(quit.hung).toBe(false);
     } finally { server.stop(true); }
-  }, 40000);
+  }, 90000);
 });

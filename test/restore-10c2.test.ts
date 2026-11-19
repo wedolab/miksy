@@ -38,7 +38,7 @@ test.skipIf(!win)("С1: Windows — команда из подсказки сн�
   expect(r.exitCode).toBe(0);
   writeFileSync(t, "y"); // пометка снята — запись проходит
   expect(read(t)).toBe("y");
-});
+}, 30000);
 
 test("С2: затираемое за ссылкой пользователя — обычным файлом; ссылок в before-restore нет; doctor о before-restore молчит", () => {
   if (!canLink) return;

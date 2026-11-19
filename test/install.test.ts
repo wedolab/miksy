@@ -84,7 +84,7 @@ EOF
     expect(again.code).toBe(0);
     expect(again.out).not.toContain("Куда скачать");
     expect(again.out).toContain("✓ git, Bun 1.3.14");
-  }, 60000);
+  }, 120000);
 
   // Терминал — через script (псевдотерминал): bash 4+ читает ответ с построчным редактированием, путь по
   // умолчанию уже в строке — «X» дописывается к нему. Без bash 4+ (macOS /bin/bash 3.2) или script — пропуск
@@ -149,7 +149,7 @@ EOF
     copyFileSync(join(ROOT, "install.sh"), `${plain.dl}/install.sh`);
     expect(run(plain, `${plain.dl}/install.sh`, "y\n\n").out).not.toContain("ветка stable");
     expect(Bun.spawnSync(["git", "-C", `${plain.home}/Projects/miksy`, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim()).not.toBe("stable");
-  }, 60000);
+  }, 120000);
 
   test("отказ от установки Bun — выход без изменений; ошибка клона — подсказка про доступ", () => {
     const f = sandbox();

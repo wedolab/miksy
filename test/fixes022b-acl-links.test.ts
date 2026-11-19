@@ -119,7 +119,7 @@ describe("C1: правило на путях таблицы (checkLocalAccess, p
           // ссылка цела
           linkStays: lstatSync(`${local}/${pl.at}`).isSymbolicLink(),
         }).toEqual({ shownBefore: [true, true], behindLink: [], fixed: true, openAfter: [], dotSame: dotBefore, warned: pl.warns, linkStays: true });
-      }, 60000);
+      }, 120000);
 
   // Только ссылка, открытых файлов нет: local/ «закрыт», ничего не меняется
   for (const k of KINDS)

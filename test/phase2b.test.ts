@@ -240,7 +240,7 @@ test("2б/5: чужое доверие и отказ неизменны; вык�
     expect(f.run(["clean", dir]).code).toBe(0);
     expect(existsSync(file) ? readFileSync(file, "utf8") : "").toBe(text);
   }
-}, 30000);
+}, 120000);
 
 test("2б/5: trust сохраняет поля проекта без LF, удаляет только своё поле", () => {
   const f = blockFixture(), dir = `${f.ws}/Org/p1`;

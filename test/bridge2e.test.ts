@@ -163,7 +163,7 @@ describe("Г4: мост — уведомления и восстановлени
       expect(three?.msg.result?.tools?.[0]?.name).toBe("ok_tool");
       expect(inits).toBe(3);
     } finally { server.stop(true); }
-  }, 40000);
+  }, 90000);
 });
 
 describe("Г5: мост — маскировка без порчи JSON-RPC", () => {

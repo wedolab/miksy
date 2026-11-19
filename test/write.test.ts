@@ -78,7 +78,7 @@ describe("writeAtomic", () => {
     }
     expect(readFileSync(`${d}/c.json`, "utf8")).toBe("old");
     expect(readdirSync(d)).toEqual(["c.json"]);
-  }, 20000);
+  }, 40000);
 
   test.skipIf(!win)("блокировка снята за время повторов — запись удаётся", async () => {
     const d = dir();

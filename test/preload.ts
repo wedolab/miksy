@@ -1,7 +1,12 @@
 // Песочница для bun test: конфигурация miksy, домашний каталог и tmp — во временном каталоге,
 // который удаляется после всех тестов. Ни один тест не должен видеть настоящие ~ и miksy-config.
 import { homeDir, canonical, inside } from "../src/paths";
-import { afterAll } from "bun:test";
+import { afterAll, setDefaultTimeout } from "bun:test";
+
+// Тайм-аут теста по умолчанию — 30 с вместо 5 с Bun: под --parallel тесты идут в 2–3 раза дольше, а на машинах GitHub
+// Windows — ещё в ~3,5 раза (запуск PowerShell, cmd, CLI); тест на 0,7 с здесь упал там по 5 с (круг 10d-2). Явный
+// тайм-аут теста — как прежде, важнее этого
+setDefaultTimeout(30000);
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";

@@ -24,7 +24,7 @@ describe("CLI: sync --all показывает цели и спрашивает 
     expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
     expect(projects.every((p) => existsSync(`${f.ws}/${p}/CLAUDE.local.md`))).toBe(true);
     expect(f.run(["sync", "--all"]).code).toBe(0);
-  }, 30000);
+  }, 60000);
 
   test("workspace — домашний каталог: без --yes — отказ до обхода", () => {
     const f = cliFixture();
