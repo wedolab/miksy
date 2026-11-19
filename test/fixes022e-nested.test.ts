@@ -23,7 +23,7 @@ function base() {
   put(`${f.config}/layers/tree/Code/instructions/30.md`, "# code rule\n");
   put(`${f.config}/layers/tree/Code/Acme/instructions/31.md`, "# acme rule\n");
   put(`${f.config}/layers/tree/Code/mcp/tool.yaml`, "name: tool\ncommand: echo\nargs: [\"${WORKSPACE}/x\"]\n");
-  expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+  { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
   const before = { p1: rules(`${ws}/Org/p1/CLAUDE.local.md`), site: rules(`${ws}/Inner/Acme/site/CLAUDE.local.md`), layers: layers(f, `${ws}/Inner/Acme/site`) };
   mkdirSync(`${f.dir}/disk2`, { recursive: true });
   return { f, ws, ws2, before };

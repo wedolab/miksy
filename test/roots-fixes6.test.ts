@@ -409,13 +409,13 @@ describe("рецензия круга 6y", () => {
     const f = cliFixture({ agents: ["claude"], projects: ["Org/p1"] });
     const grp = sharedGroup(f);
     allowInClaude(`${grp}/mine`);
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
-    expect(f.run(["sync", "--global"]).code).toBe(0);
+    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
+    { const r = f.run(["sync", "--global"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
     expect(f.run(["doctor"]).out.includes("Исполняемые настройки в подкаталогах групп без git")).toBe(false);
     put(`${grp}/sub/.claude/settings.local.json`, JSON.stringify(hook("colleague.sh"), null, 2));
     expect(f.run(["doctor"]).out.includes("colleague.sh")).toBe(true);
     put(`${f.config}/layers/tree/Shared/layer.yaml`, "target: true\ntrust: { claude: false }\n");
-    expect(f.run(["sync", "--all", "--yes"]).code).toBe(0);
+    { const r = f.run(["sync", "--all", "--yes"]); expect({ code: r.code, out: r.code ? r.out + r.err : "" }).toEqual({ code: 0, out: "" }); }
     const d = f.run(["doctor"]);
     expect(d.out.includes("Исполняемые настройки в подкаталогах групп без git")).toBe(false);
   }, 120000);
