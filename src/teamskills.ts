@@ -1,4 +1,4 @@
-import { gitCaching, gitEnv, gitMemo, gitSpawn, gitWhy, indexModes } from "./git";
+import { gitCaching, gitMemo, gitSpawn, gitWhy, indexModes } from "./git";
 // Командные skills в репо проекта: поиск, склейка копий, проверка формы.
 // Только чтение — файлы команды miksy не меняет.
 import { createHash } from "node:crypto";
@@ -85,10 +85,12 @@ function trackedFiles(dir: string): Map<string, boolean> {
     for (const [p, mode] of modes) if (ROOTS.some((r) => p === r || p.startsWith(r + "/"))) out.set(p, mode === "120000");
     return out;
   }
-  const r = Bun.spawnSync(["git", "-C", dir, "ls-files", "-s", "-z", "--", ...ROOTS], { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
+  // Через gitSpawn: потерянный ответ (код ≠ 0 без строки ошибки; Bun < 1.4.3) — повтор. Пустой вывод законен (файлов в
+  // агентных каталогах нет) — needOut не ставится (круг 10m)
+  const r = gitSpawn(["-C", dir, "ls-files", "-s", "-z", "--", ...ROOTS], { readOnly: true });
   const out = new Map<string, boolean>();
-  if (r.exitCode !== 0) return out;
-  for (const entry of r.stdout.toString().split("\0")) {
+  if (r.code !== 0) return out;
+  for (const entry of r.out.split("\0")) {
     const m = entry.match(/^(\d+) \S+ \d+\t(.+)$/);
     if (m) out.set(m[2], m[1] === "120000");
   }
@@ -229,9 +231,10 @@ function lsTree(dir: string, paths: string[]): TreeEntry[] | null {
 }
 
 function lsTreeQuery(dir: string, paths: string[]): TreeEntry[] | null {
-  const r = Bun.spawnSync(["git", "--literal-pathspecs", "-C", dir, "ls-tree", "-r", "-z", "HEAD", "--", ...paths], { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
-  if (r.exitCode !== 0) return null;
-  return r.stdout.toString().split("\0").filter(Boolean).flatMap((e) => {
+  // Как trackedFiles: gitSpawn, пустое дерево законно — без needOut
+  const r = gitSpawn(["--literal-pathspecs", "-C", dir, "ls-tree", "-r", "-z", "HEAD", "--", ...paths], { readOnly: true });
+  if (r.code !== 0) return null;
+  return r.out.split("\0").filter(Boolean).flatMap((e) => {
     const m = e.match(/^(\d+) (\w+) ([0-9a-f]+)\t(.+)$/s);
     return m ? [{ mode: m[1], type: m[2], sha: m[3], path: m[4] }] : [];
   });
@@ -276,10 +279,11 @@ function checkoutCrlf(dir: string, paths: string[]): Set<string> {
 }
 
 function crlfQuery(dir: string, paths: string[]): Set<string> {
-  const r = Bun.spawnSync(["git", "--literal-pathspecs", "-C", dir, "ls-files", "--eol", "-z", "--", ...paths], { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
-  if (r.exitCode !== 0) return new Set();
+  // Как trackedFiles: gitSpawn, пустой список законен — без needOut
+  const r = gitSpawn(["--literal-pathspecs", "-C", dir, "ls-files", "--eol", "-z", "--", ...paths], { readOnly: true });
+  if (r.code !== 0) return new Set();
   const out = new Set<string>();
-  for (const e of r.stdout.toString().split("\0")) {
+  for (const e of r.out.split("\0")) {
     const m = e.match(/^i\/(\S*)\s+w\/(\S*)\s+attr\/[^\t]*\t(.+)$/s);
     if (m && m[1] === "lf" && m[2] === "crlf") out.add(m[3]);
   }
