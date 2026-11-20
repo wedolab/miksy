@@ -45,13 +45,15 @@ console.log(JSON.stringify({ argv: process.argv.slice(2), env: Object.fromEntrie
 const runScript = (path: string, env: Record<string, string> = {}, stdin?: string) => {
   const r = Bun.spawnSync(win ? ["cmd.exe", "/d", "/c", path] : [path], {
     env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe", stdin: stdin === undefined ? "ignore" : Buffer.from(stdin), timeout: 60000,
+    // Своя скрытая консоль: обёртка делает chcp 65001 и не возвращает страницу — общая консоль прогона не меняется (круг 10n)
+    windowsHide: true,
   });
   return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
 };
 
 // Строка-команда helper-а — так, как её выполняет агент: shell (Claude: shell: true; Codex: sh -c / cmd /C)
 const runHelper = (cmd: string) => {
-  const r = spawnSync(cmd, { shell: true, encoding: "utf8", timeout: 60000 });
+  const r = spawnSync(cmd, { shell: true, encoding: "utf8", timeout: 60000, windowsHide: true });
   return { code: r.status, out: r.stdout, err: r.stderr };
 };
 
@@ -244,7 +246,7 @@ describe("мост stdio ↔ HTTP", () => {
       b.materialize();
       const content = (b.launcher.files()[0] as { content: string }).content;
       expect(content).not.toContain(SECRETS.TOK);
-      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true }); // своя скрытая консоль: chcp обёртки (круг 10n)
       p.stdin.write(rpc);
       p.stdin.end();
       const out = await new Response(p.stdout).text();
@@ -267,7 +269,7 @@ describe("мост stdio ↔ HTTP", () => {
     try {
       const path = b.launcher.bridge({ name: "remote", url: stub.url, headers: { Authorization: `Bearer ${secretRef("TOK")}` } });
       b.materialize();
-      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true }); // своя скрытая консоль: chcp обёртки (круг 10n)
       p.stdin.write(rpc);
       p.stdin.end();
       const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
@@ -294,7 +296,7 @@ describe("мост stdio ↔ HTTP", () => {
     try {
       const path = b.launcher.bridge({ name: "q", url: `http://127.0.0.1:${server.port}/mcp?key=${secretRef("TOK")}` });
       b.materialize();
-      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path] : [path], { stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true }); // своя скрытая консоль: chcp обёртки (круг 10n)
       p.stdin.write(rpc.split("\n")[0] + "\n");
       p.stdin.end();
       const out = await new Response(p.stdout).text();

@@ -703,12 +703,13 @@ export function setup(o: SetupOptions): number {
       const hit = from === "" ? dirs(kept!).map((d) => ({ d, r: branchRoots.find((r) => fold(d) === fold(r.tree.split("/")[0])) })).find((x) => x.r) : undefined;
       const branchHit = hit?.d;
       const branchOf = hit?.r ? `${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} (layers/tree/${hit.r.tree})` : "";
+      const branchWho = hit?.r ? (hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`) : "";
       const back = (tangled || mainIn) && from
         ? "Вернуть его — docs/roots.md, «Сменить основной корень»: переносить эту ветку miksy не подсказывает — переименование задело бы слои нового основного, предка ветки или других корней."
         : same.length
-          ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — у нового основного ${same.length === 1 ? "есть папка" : "есть папки"} с тем же именем (${same.join(", ")}), перенос layers/tree/<папка> снял бы слои и с ${same.length === 1 ? "её" : "их"} проектов. Если ${copied}`
+          ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — у нового основного ${same.length === 1 ? "есть папка" : "есть папки"} с тем же именем (${same.join(", ")}), и если переложить layers/tree/<папка> под ветку прежнего, проекты ${same.length === 1 ? "этой папки" : "этих папок"} нового основного потеряют правила, MCP и skills из этих слоёв. Если ${copied}`
           : branchHit
-            ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — его папка ${branchHit} совпадает с веткой ${branchOf}, перенос layers/tree/${branchHit} снял бы его слои. Если ${copied}`
+            ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — его папка ${branchHit} совпадает с веткой ${branchOf}: layers/tree/${branchHit} — слои и той ветки, и если их переложить, проекты ${branchWho} потеряют правила, MCP и skills из них. Если ${copied}`
             : `Вернуть его: ${backHint(raw, from)} Это — если новый основной другая папка, а прежняя нужна; ${copied}`;
       return `прежний основной ${kept} из workspace уходит${mainIn ? ` (кроме проектов внутри нового основного: они остаются в workspace, ${below({ path: main!, tree: mainTree })})` : ""}: ${mainIn ? "остальные его проекты" : "его проекты"}${nested.length ? ` (кроме ${one ? "вложенного корня" : "вложенных корней"} — ниже)` : ""} miksy больше не обновляет.${nestedText} ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
     };

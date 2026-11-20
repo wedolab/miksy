@@ -121,7 +121,7 @@ for (const clash of [true, false])
     const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
     expect({
       recipe: line.includes("Вернуть его: 1) "),
-      named: line.includes("у нового основного есть папка с тем же именем (Org), перенос layers/tree/<папка> снял бы слои и с её проектов"),
+      named: line.includes("у нового основного есть папка с тем же именем (Org), и если переложить layers/tree/<папка> под ветку прежнего, проекты этой папки нового основного потеряют правила, MCP и skills из этих слоёв"),
       copy: line.includes('в новой копии файлы miksy с путями (например, .codex/config.toml с ${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет)'),
     }).toEqual(clash ? { recipe: false, named: true, copy: true } : { recipe: true, named: false, copy: true });
   }, 240000);

@@ -51,6 +51,8 @@ const sse = (...msgs: unknown[]) => msgs.map((m) => `event: message\ndata: ${JSO
 async function run(path: string, msgs: unknown[], o: { open?: number; kill?: number; cwd?: string; env?: Record<string, string>; args?: string[] } = {}) {
   const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path, ...(o.args ?? [])] : [path, ...(o.args ?? [])], {
     stdin: "pipe", stdout: "pipe", stderr: "pipe", cwd: o.cwd, env: { ...process.env, ...o.env },
+    // Своя скрытая консоль: обёртка делает chcp 65001 — общая консоль прогона не меняется (круг 10n)
+    windowsHide: true,
   });
   p.stdin.write(msgs.map((m) => JSON.stringify(m)).join("\n") + "\n");
   await p.stdin.flush();

@@ -45,7 +45,8 @@ const event = (m: unknown) => enc.encode(`event: message\ndata: ${JSON.stringify
 
 // Сессия агента: сообщения можно слать с паузами; lines — всё, что мост написал в stdout (по мере прихода)
 function agent(path: string, args: string[] = []) {
-  const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path, ...args] : [path, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  // Своя скрытая консоль: обёртка делает chcp 65001 — общая консоль прогона не меняется (круг 10n)
+  const p = Bun.spawn(win ? ["cmd.exe", "/d", "/c", path, ...args] : [path, ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
   const lines: { at: number; msg: any }[] = [];
   const started = Date.now();
   const reading = (async () => {

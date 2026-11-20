@@ -387,6 +387,13 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (unmounted.length) info.push(`Части дерева слоёв, которых нет на этой машине (над ними нет корня workspace — для других машин): ${unmounted.join(", ")}`);
   const env = environment({ env: process.env, home: machine.home, os: machine.os, bun: stableBun(process.execPath), agents: adapters.map((a) => a.id), engine: ENGINE, config: configRoot() });
   if (env.length) info.push(`Окружение (${env.length}) — только сведения, miksy здесь ничего не меняет:`, ...env.map((l) => "  " + l));
+  // Windows: команда miksy — miksy.cmd, а cmd раскрывает %ИМЯ% существующей переменной даже в кавычках — путь корня или
+  // проекта с такой парой в команде miksy (в cmd и в PowerShell) дойдёт искажённым (круг 10n). Одиночный % и %ИМЯ%
+  // несуществующей переменной cmd оставляет как есть — о них молчим
+  const percent = process.platform === "win32"
+    ? [...new Set([...roots.map((r) => slash(r.path)), ...[...groups, ...projects].map((p) => slash(p.abs))])].filter((p) => cmdExpands(p)).sort()
+    : [];
+  if (percent.length) info.push(`Пути с %ИМЯ% переменной окружения (${percent.length}) — команда miksy с таким путём получит его искажённым: miksy — это miksy.cmd, а cmd подставляет значение переменной даже в кавычках (и из PowerShell). Переименуйте папку или запускайте miksy через Bun напрямую: bun "${slash(ENGINE)}/src/cli.ts" <команда>:`, ...percent.map((p) => "  " + p));
   const plain = plainDirs(roots, groups, targets);
   if (plain.length) info.push(`Каталоги без git на уровне проектов (${plain.length}) — настроек не получат: git init в каталоге или miksy target <путь>:`,
     ...(verbose ? plain : plain.slice(0, 15)).map((d) => "  " + d), ...(!verbose && plain.length > 15 ? [`  … ещё ${plain.length - 15} (--verbose)`] : []));
@@ -456,4 +463,19 @@ function valuesIn(path: string, secrets: Record<string, string>, fileText: Map<s
   const text = fileText.get(path);
   if (!text) return [];
   return Object.entries(secrets).filter(([, v]) => v.length >= 8 && (text.includes(v) || text.includes(JSON.stringify(v).slice(1, -1)))).map(([n]) => n);
+}
+
+// Раскроет ли cmd в строке пару %ИМЯ%: как разбирает cmd — от % до следующего %; имя есть в окружении (без учёта
+// регистра; %ИМЯ:…% — подстрока и замена — тоже по имени до двоеточия) — раскроет. Нет — первый % остаётся, разбор
+// продолжается со второго (круг 10n)
+export function cmdExpands(s: string, env: Record<string, string | undefined> = process.env): boolean {
+  const names = new Set(Object.keys(env).filter((k) => env[k] !== undefined).map((k) => k.toLowerCase()));
+  for (let i = s.indexOf("%"); i >= 0; ) {
+    const j = s.indexOf("%", i + 1);
+    if (j < 0) return false;
+    const name = s.slice(i + 1, j).split(":")[0].toLowerCase();
+    if (name && names.has(name)) return true;
+    i = j;
+  }
+  return false;
 }

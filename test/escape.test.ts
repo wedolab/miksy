@@ -102,9 +102,10 @@ describe("обёртки: комментарий sh и отложенное ра
     const path = b.launcher.stdio({ name: "s", command: process.execPath, args: [echo, "a!b!c", `x!${secretRef("TOK")}`], env: { A: `!PATH! ${secretRef("TOK")}` } });
     const helper = b.launcher.helper({ name: "h", url: "u", headers: { A: `!x! ${secretRef("TOK")}` } });
     b.materialize();
-    const r = Bun.spawnSync(["cmd.exe", "/V:ON", "/d", "/c", path], { stdout: "pipe", stderr: "pipe" });
+    // Своя скрытая консоль: обёртка делает chcp 65001 — общая консоль прогона не меняется (круг 10n)
+    const r = Bun.spawnSync(["cmd.exe", "/V:ON", "/d", "/c", path], { stdout: "pipe", stderr: "pipe", windowsHide: true });
     expect(JSON.parse(r.stdout.toString())).toEqual({ argv: ["a!b!c", `x!${TOK}`], A: `!PATH! ${TOK}` });
-    const h = spawnSync("cmd.exe", ["/V:ON", "/Q", "/D", "/C", `"${helper}"`], { encoding: "utf8", windowsVerbatimArguments: true });
+    const h = spawnSync("cmd.exe", ["/V:ON", "/Q", "/D", "/C", `"${helper}"`], { encoding: "utf8", windowsVerbatimArguments: true, windowsHide: true });
     expect(JSON.parse(h.stdout.trim())).toEqual({ A: `!x! ${TOK}` });
   }, 30000);
 });

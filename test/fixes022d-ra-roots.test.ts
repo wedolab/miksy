@@ -138,8 +138,8 @@ test("B №5: скопировали — clean в прежней копии, syn
 }, 300000);
 
 // B №4: основным стал дополнительный корень со СВОЕЙ веткой (Clients), у него тоже папка Org. Его проекты берут слои из
-// layers/tree/Clients/…, а не из layers/tree/Org — перенос layers/tree/Org их не задевает. Утверждение «перенос снял бы слои
-// и с её проектов» — верно ли? Проверка: рецепт backHint (как печатался до 8d) дословно → слои drive/Org/x не меняются
+// layers/tree/Clients/…, а не из layers/tree/Org — перенос layers/tree/Org их не задевает. Утверждение «проекты этой папки нового
+// основного потеряют правила» (прежде — «перенос снял бы слои и с её проектов») — верно ли? Проверка: рецепт backHint (как печатался до 8d) дословно → слои drive/Org/x не меняются
 test("B №4: новый основной — бывший дополнительный корень с веткой; та же папка Org", () => {
   const f = cliFixture({ projects: [] });
   const ws = `${f.dir}/ws`, drive = `${f.dir}/drive`;
@@ -158,7 +158,7 @@ test("B №4: новый основной — бывший дополнител�
   const add = f.run(["root", "add", ws, "--tree", tree, "--yes"]);
   f.run(["sync", "--all"]);
   const after = { p1: layers(f, `${ws}/Org/p1`), x: layers(f, `${drive}/Org/x`) };
-  expect({ claim: /снял бы слои и с её проектов/.test(line), xUnchanged: after.x === before.x }).toEqual({ claim: false, xUnchanged: true });
+  expect({ claim: /проекты этой папки нового основного потеряют правила/.test(line), xUnchanged: after.x === before.x }).toEqual({ claim: false, xUnchanged: true });
 }, 300000);
 
 // Повторная проверка 1 круга 8d, новая находка: подсказка clean дословно в терминале — root add спрашивает «Записать
