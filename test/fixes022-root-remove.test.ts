@@ -73,7 +73,7 @@ test("A4: в числе — только файлы агентов из agents; 
   renameSync(`${drive}-disk`, drive);
   // Диск на месте, корня в workspace нет: «Цели учёта вне workspace» — clean и clean --agent агентам вне agents (C9)
   const back = f.run(["doctor"]).out;
-  expect(back).toContain("Цели учёта вне workspace (2) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь> (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»):");
+  expect(back).toContain("Цели учёта вне workspace (2) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь> (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»). В том числе доверие Claude к папкам");
   expect(retired(back)).toEqual(want);
   const listed = real.out.split("\n").filter((l) => sites.includes(l.trim())).map((l) => l.trim());
   expect(listed.sort()).toEqual([...sites].sort());

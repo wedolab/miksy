@@ -157,11 +157,14 @@ export function applyMoves(m: Manifest, moves: Move[], roots: Move[] = []): Mani
   // Отметки «проект забыт» переезжают вместе с каталогом (родитель переехал)
   const forgotten = m.forgotten && Object.fromEntries(Object.entries(m.forgotten).map(([id, v]) => [target(id), v]));
   // Отметки «доверие ставил miksy» после clean — тоже (проверка 7a выпуска 0.2.1, A №1)
-  const trustedBefore = m.trustedBefore && Object.fromEntries(Object.entries(m.trustedBefore).map(([id, v]) => {
+  const before = (id: string) => {
     const to = target(id);
-    return [to !== id ? to : `${id.slice(0, id.indexOf("|") + 1)}${followParent(dirOf(id), moves, roots)}`, v];
-  }));
-  return normalizeManifest({ ...m, ...(forgotten && { forgotten }), ...(trustedBefore && { trustedBefore }) }, entries);
+    return to !== id ? to : `${id.slice(0, id.indexOf("|") + 1)}${followParent(dirOf(id), moves, roots)}`;
+  };
+  const trustedBefore = m.trustedBefore && Object.fromEntries(Object.entries(m.trustedBefore).map(([id, v]) => [before(id), v]));
+  // Отпечаток папки к отметке — с ней же (переименование номер папки не меняет; круг 10l)
+  const trustedFolder = m.trustedFolder && Object.fromEntries(Object.entries(m.trustedFolder).map(([id, v]) => [before(id), v]));
+  return normalizeManifest({ ...m, ...(forgotten && { forgotten }), ...(trustedBefore && { trustedBefore }), ...(trustedFolder && { trustedFolder }) }, entries);
 }
 
 export const HOW: Record<Move["how"], string> = {

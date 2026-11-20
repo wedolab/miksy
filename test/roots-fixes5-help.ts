@@ -340,7 +340,11 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     expectCode(f.run(["clean", app, "--forget", "--dry-run"]), 0);
     expect(marks(f.config)).toEqual({});
     expectCode(f.run(["clean", app, "--forget"]), 0);
-    expect(marks(f.config)).toEqual({ [id("claude", app)]: { trusted: true }, [id("codex", app)]: {} });
+    // Отпечаток папки (номер на диске и время создания, круг 10l) — не файл и не хеш; ФС без номеров — его нет
+    const m = marks(f.config) as Record<string, { trusted?: true; folder?: string }>;
+    expect(m[id("claude", app)].folder ?? "1:1").toMatch(/^\d+:\d+$/);
+    delete m[id("claude", app)].folder;
+    expect(m).toEqual({ [id("claude", app)]: { trusted: true }, [id("codex", app)]: {} });
     expect(targetsUnder(f.config, "/Acme/app")).toEqual([]);
     // Диск так и не вернулся — отметка остаётся
     f.run(["sync", "--all", "--yes"]);

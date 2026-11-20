@@ -19,7 +19,7 @@ import { environment } from "./environ";
 import { stableBun } from "./launch";
 import { deliveredSkillNames, deliveryOrder } from "./registry";
 import { files } from "./plural";
-import { AGENT_NOTE, AGENT_TITLE, inheritedExec, type PendingTrust, pendingText, trustPlan, trustState } from "./trust";
+import { AGENT_NOTE, AGENT_TITLE, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
 
 type Finding = { agent: string; target: string; detail: string };
 // Добавка агента в обход слоёв: что поднимать (miksy adopt) — глобальное или проект (dir, rel)
@@ -97,9 +97,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
         rendered = renderFor(adapter, t, machine, secrets, prev, [...(delivered.get(targetKey(t)) ?? []), ...others], rulesDelivered(adapter));
         // Для доверия — с отметкой «доверие ставил miksy» после clean (как у sync)
         const before = trustState(manifest, id) ?? emptyState();
-        actions = plan(rendered.result, t.target, machine, before, false, adapter.id, otherOwners(manifest, id), manifest.forgotten?.[id]);
+        actions = plan(rendered.result, t.target, machine, before, false, adapter.id, otherOwners(manifest, id), trustMark(manifest, id));
         delivered.set(targetKey(t), [...(delivered.get(targetKey(t)) ?? []), ...deliveredSkillNames(rendered.result, actions, t.target)]);
-        for (const detail of trustPlan(rendered.result, t.target, machine, before, actions, adapter.id, undefined, undefined, manifest.forgotten?.[id]).missing) trust.push({ ...where, detail });
+        for (const detail of trustPlan(rendered.result, t.target, machine, before, actions, adapter.id, undefined, undefined, trustMark(manifest, id)).missing) trust.push({ ...where, detail });
         const p = rendered.result.trustPending;
         if (p) (p.declined ? declined : pendingTrust).push(p);
         for (const detail of literalHints(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id)) literals.push({ ...where, detail });
@@ -219,6 +219,20 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   // Без агентов вне agents — текст как в 0.2.1
   const ownFiles = (dirs: Set<string>) => `${files(filesIn(dirs))}${othersIn(dirs) ? " агентами из agents" : ""}`;
   const bothWays = `диск вернётся — miksy clean "<путь>"; данных больше нет — miksy clean "<путь>" --forget`;
+  // Доверие агента к папке, которое поставил miksy (запись доверия в учёте цели), держится, пока его не снимет clean:
+  // агент без вопроса выполняет настройки папки, а miksy ею больше не управляет (круг 10l). clean снимает его и без диска.
+  // Только агенты из agents: доверие агента вне agents снимает clean --agent (строка «Учёт агентов, которых нет в agents»)
+  const trustNote = (dirs: Set<string>) => {
+    const hits = new Map<string, Set<string>>();
+    for (const [id, st] of Object.entries(manifest.targets)) {
+      const dir = id.slice(id.indexOf("|") + 1), agent = id.slice(0, id.indexOf("|"));
+      if (enabled.has(agent) && Object.keys(st.trust ?? {}).length && [...dirs].some((d) => fold(d) === fold(dir))) (hits.get(dir) ?? hits.set(dir, new Set()).get(dir)!).add(AGENT_TITLE[agent as keyof typeof AGENT_TITLE] ?? agent);
+    }
+    if (!hits.size) return "";
+    const who = [...new Set([...hits.values()].flatMap((s) => [...s]))].join(" и ");
+    const one = hits.size === 1;
+    return `В том числе доверие ${who} к ${one ? "папке" : "папкам"} ${[...hits.keys()].join(", ")}: агент без вопроса выполняет ${one ? "её" : "их"} настройки (хуки, серверы MCP проекта), а miksy ${one ? "ею" : "ими"} больше не управляет — снять: miksy clean "<путь>" (работает и без диска)`;
+  };
 
   // Цели учёта, чей каталог теперь сам корень workspace: записанное туда действует и не обновляется
   const rootedAll: Finding[] = rootedTargets(manifest, machine).map((d) => ({ agent: "—", target: d, detail: rootedText(d, machine).slice(d.length + 3) }));
@@ -347,8 +361,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (nested.length) info.push(`Вложенные корни (${nested.length}):`, ...nested.map((n) => "  " + n));
   const branches = branchNotes(machine);
   if (branches.length) info.push(`Ветки корней внутри чужих мест (${branches.length}) — не ошибка, но проекты этих корней получают слои этих мест:`, ...branches.map((n) => "  " + n));
-  if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>${othersNote(new Set(outside)) ? ` (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»)` : ""}:`, ...outside.map((d) => "  " + d));
-  if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${ownFiles(awayTargets)}): ${bothWays}${othersNote(awayTargets)}`);
+  if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>${othersNote(new Set(outside)) ? ` (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»)` : ""}${trustNote(new Set(outside)) ? `. ${trustNote(new Set(outside))}` : ""}:`, ...outside.map((d) => "  " + d));
+  if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${ownFiles(awayTargets)}): ${bothWays}${othersNote(awayTargets)}${trustNote(awayTargets) ? `. ${trustNote(awayTargets)}` : ""}`);
   // Учёт агентов, которых убрали из agents без clean: записанное им действует у агента, sync его не обновляет
   // (выпуск 0.2.1, A14). Команда — та, что действительно убирает (clean с --agent берёт и агента вне agents)
   // И отметки «проект забыт» таких агентов, если папка на месте: clean --agent узнает их файлы и уберёт (проверка 7b, B №1)
@@ -360,7 +374,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   // — miksy не знает, подключать сам не будет; подсказка, как подключить (круг 10i). Без agents в machine.yaml — все агенты
   const outsideAgents = machine.agents ? detectAgents(machine.home, which).inPath.filter((a) => !enabled.has(a) && !retired.some(([r]) => r === a)) : [];
   if (outsideAgents.length) info.push(`Найдены агенты вне agents (local/machine.yaml): ${outsideAgents.join(", ")} — miksy ${outsideAgents.length === 1 ? "его" : "их"} не настраивает. ${connectHint(outsideAgents.length)}`);
-  if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}`);
+  if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}${trustNote(leftTargets) ? `. ${trustNote(leftTargets)}` : ""}`);
   // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
   const legacy = legacyAgentNames();
   if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: gemini теперь antigravity (Antigravity — агент, Gemini — модель):`, ...legacy.map((l) => "  " + l));

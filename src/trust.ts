@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Action } from "./apply";
 import type { RenderResult, Target } from "./adapter";
 import type { Machine } from "./types";
 import type { ForgottenMark, Manifest, TargetState } from "./manifest";
-import { emptyState, sha, writeAtomic } from "./manifest";
+import { emptyState, isReplaced, markReplaced, sha, writeAtomic } from "./manifest";
+export { isReplaced };
 import { canonical, fold, pathKey, quoteArg, slash } from "./paths";
 import { protectedBy, trackedPaths } from "./git";
 import { escapes } from "./bounds";
@@ -150,17 +151,59 @@ export const ownFiles = (prev: TargetState, dir: string, dialog = false): OwnFil
   approvals: prev.approvals?.[pathKey(join(dir, ".claude/settings.local.json"))] ?? [],
   dialog,
 });
+// Отпечаток самой папки (круг 10l): номер на диске (ino) и время создания (до миллисекунды: округление наносекунд у
+// разных версий Bun и копировщиков времени разное, а ino и время до миллисекунды папки и так различают). Переименование и запись внутрь его не меняют;
+// «удалить и положить на то же место другую» — меняет (ext4 отдаёт новой папке тот же ino, время создания — новое).
+// Чужая копия на месте папки, которой доверие ставил miksy, — не повод считать ответы в её окне Claude вашими. dev не
+// входит: он меняется при перемонтировании (Linux: btrfs, съёмные диски) и ничего не добавляет к ino + времени создания.
+// undefined — неизвестен: папки нет, ФС не отдаёт номер или время создания (ino 0; Linux без btime) — тогда как раньше.
+// ФС с неустойчивым номером (FAT/exFAT на Windows меняет его при переименовании; сетевые — как ответит сервер) дают
+// «другую папку» лишний раз — это вопрос о доверии, не молчаливое доверие
+export function folderId(dir: string): string | undefined {
+  try {
+    const s = statSync(dir, { bigint: true });
+    return s.isDirectory() && s.ino > 0n && s.birthtimeNs > 0n ? `${s.ino}:${s.birthtimeNs / 1000000n}` : undefined;
+  } catch { return undefined; }
+}
+// На месте папки другая: отпечаток записан, нынешний известен и не тот
+export const folderReplaced = (recorded: string | undefined, dir: string) => {
+  if (!recorded) return false;
+  const now = folderId(dir);
+  return now !== undefined && now !== recorded;
+};
+
 // Доверие этой цели ставил miksy: стоит сейчас (учёт доверия), стояло раньше (TargetState.everTrusted: снято, пока
-// исполняемые настройки команды ждут решения пользователя, и т. п.) или стояло до «забыть» (отметка «проект забыт»)
+// исполняемые настройки команды ждут решения пользователя, и т. п.) или стояло до «забыть» (отметка «проект забыт»).
+// Папку с тех пор подменили — нет (круг 10l)
 export const trustedByMiksy = (prev: TargetState, mark?: ForgottenMark) =>
-  Object.keys(prev.trust ?? {}).length > 0 || prev.everTrusted === true || mark?.trusted === true;
+  !isReplaced(prev) && (Object.keys(prev.trust ?? {}).length > 0 || prev.everTrusted === true || mark?.trusted === true);
+// Отметка «проект забыт» для решений о доверии: папку с «забыть» подменили — без «доверие ставил miksy»
+export function trustMark(m: Manifest, id: string): ForgottenMark | undefined {
+  const mark = m.forgotten?.[id];
+  if (!mark?.trusted || !folderReplaced(mark.folder, id.slice(id.indexOf("|") + 1))) return mark;
+  const { trusted: _, ...rest } = mark;
+  return rest;
+}
 // Ответы пользователя в окне Claude («да, больше не спрашивать», одобрения серверов .mcp.json) — его, если доверие
 // ставил miksy (trustedByMiksy), в слое trust: true для Claude или пользователь уже сказал «да» на вопрос miksy о
 // доверии Claude этому проекту (даже если с тех пор команда что-то поменяла — тогда в вопросе только её изменения).
 // Иначе (папку скопировали у кого-то, она общая с коллегой) — они в вопросе. Отпечаток решения от этого не зависит:
 // ответов Claude в нём нет никогда (executableSettings)
 export const dialogOwn = (prev: TargetState, dir: string, layer: boolean, mark?: ForgottenMark) =>
-  trustedByMiksy(prev, mark) || layer || loadDecisions()[pathKey(dir)]?.claude?.answer === "yes";
+  trustedByMiksy(prev, mark) || layer || yesHere(loadDecisions()[pathKey(dir)]?.claude, dir, isReplaced(prev));
+// Решение о доверии Claude — о другой папке: отпечаток при ответе не тот; отпечатка нет (решение 0.3.4 и раньше), а учёт
+// видит подмену (replaced: trustState) — тоже не эта папка
+const staleDecision = (d: Decision, dir: string, replaced: boolean) => (d.folder ? folderReplaced(d.folder, dir) : replaced);
+// «Да» доверию Claude в этой папке
+const yesHere = (d: Decision | undefined, dir: string, replaced: boolean) => d?.answer === "yes" && !staleDecision(d, dir, replaced);
+// Решения папки без решения о доверии Claude, принятого для другой папки на этом месте (её подменили; круг 10l): отпечаток
+// решения — от настроек команды, ответов в окне Claude в нём нет, и «да» той папки одобрило бы чужую копию того же репо.
+// Вопрос — заново. Одобрение серверов .mcp.json (mcpjson) — о содержимом серверов команды, остаётся
+function decisionsHere<T extends { claude?: Decision }>(d: T | undefined, dir: string, replaced: boolean): T | undefined {
+  if (!d?.claude || !staleDecision(d.claude, dir, replaced)) return d;
+  const { claude: _, ...rest } = d;
+  return rest as T;
+}
 
 // Заголовок ответов в окне Claude в вопросе о доверии (когда они не свои пользователя: доверие ставил не miksy, «да»
 // не было, — папку скопировали, она общая с коллегой или это первая запись miksy)
@@ -201,12 +244,23 @@ export const ownApprovals = (st: TargetState | undefined, dir: string): string[]
   st?.approvals?.[pathKey(join(dir, ".claude/settings.local.json"))] ?? [];
 // Учёт цели для решения о доверии: с отметкой «доверие ставил miksy» после clean (Manifest.trustedBefore) — если
 // ответы в окне Claude с момента clean не менялись (отпечаток тот же). Изменились — они в вопросе, как в 0.2.0
+// Папку с тех пор подменили (отпечаток папки — TargetState.folder, у отметки — Manifest.trustedFolder; круг 10l) —
+// ответы не ваши: учёт без everTrusted и dialog, с меткой подмены (trustedByMiksy — нет)
 export function trustState(m: Manifest, id: string): TargetState | undefined {
   const st = m.targets[id];
+  const dir = id.slice(id.indexOf("|") + 1);
+  // Отпечаток — учёта цели, отметки после clean или отметки «проект забыт» (у цели без учёта — метка на пустом учёте:
+  // решения прежней версии без отпечатка к ней тоже не применяются)
+  const recorded = st?.folder ?? m.trustedFolder?.[id] ?? m.forgotten?.[id]?.folder;
+  if (dir !== "global" && folderReplaced(recorded, dir)) {
+    const { everTrusted: _e, dialog: _d, ...rest } = st ?? emptyState();
+    return markReplaced(rest as TargetState);
+  }
   const print = m.trustedBefore?.[id];
   if (print === undefined || st?.everTrusted) return st;
-  const dir = id.slice(id.indexOf("|") + 1);
-  return print === dialogPrint(dir, ownApprovals(st, dir)) ? { ...(st ?? emptyState()), everTrusted: true } : st;
+  if (print !== dialogPrint(dir, ownApprovals(st, dir)) || folderReplaced(m.trustedFolder?.[id], dir)) return st;
+  const folder = m.trustedFolder?.[id];
+  return { ...(st ?? emptyState()), everTrusted: true, ...(folder && !st?.folder && { folder }) };
 }
 
 // Отслеживается ли файл командой: по индексу, а через ссылку (каталог-симлинк, файл-ссылка) — общей
@@ -293,7 +347,9 @@ export function mcpJsonServers(dir: string, git: boolean): { names: string[]; li
 // alone — «да» серверам .mcp.json на отдельный вопрос о них (пишет 0.2.1): действует и при «нет» доверию Claude
 // (пользователь доверился проекту сам в окне Claude). Пара «нет» + «да» серверам без отметки — от 0.2.0 (там «нет»
 // не отзывало прежнее «да» серверам): серверы она не одобряет, miksy спросит (выпуск 0.2.1, проверка 7a, A №2)
-type Decision = { answer: "yes" | "no"; fingerprint: string; date: string; alone?: true };
+// folder — отпечаток папки при ответе (folderId; круг 10l): «да» доверию Claude делает ответы в окне Claude вашими только
+// в той же папке. Нет — решение прежней версии или ФС без номеров: как раньше
+type Decision = { answer: "yes" | "no"; fingerprint: string; date: string; alone?: true; folder?: string };
 type Decisions = Record<string, { rel?: string } & Partial<Record<DecisionKind, Decision>>>;
 const decisionsPath = () => join(configRoot(), "local", "trust.json").replaceAll("\\", "/");
 // Переехавшие каталоги (src/relocate.ts): решение прежнего пути — решение нового (отпечаток — от
@@ -331,7 +387,8 @@ export function saveDecision(p: PendingTrust, answer: "yes" | "no") {
   const entry = (all[pathKey(p.dir)] ??= {});
   entry.rel = p.rel;
   const date = new Date().toISOString().slice(0, 10);
-  entry[p.agent] = { answer, fingerprint: p.fingerprint, date, ...(p.agent === "mcpjson" && answer === "yes" && { alone: true as const }) };
+  const folder = folderId(p.dir);
+  entry[p.agent] = { answer, fingerprint: p.fingerprint, date, ...(p.agent === "mcpjson" && answer === "yes" && { alone: true as const }), ...(folder && { folder }) };
   // «Да» доверию Claude видело и серверы .mcp.json (они в списке) — одобряет и их. «Нет» отзывает и прежнее «да»
   // серверам: иначе, доверься пользователь проекту сам в окне Claude, sync одобрил бы их по старому «да» (выпуск 0.2.1,
   // A2); серверы в списке — «нет» и им (вопроса о них нет, пересмотреть — miksy trust <проект>)
@@ -469,8 +526,8 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const st = { ...prev, files: { ...prev.files, ...known }, approvals: { ...prev.approvals, ...(approvals.length > 0 && { [pathKey(local)]: approvals }) } };
       const see = (dialog: boolean) => (clean || off ? null : executableSettings(target.dir, !!target.git, a, { ...ownFiles(st, target.dir, dialog), written }));
       let exec = see(ownDialog);
-      const decisions = exec ? loadDecisions()[pathKey(target.dir)] : undefined;
-      if (exec && a === "claude" && !ownDialog && decisions?.claude?.answer === "yes") exec = see(true);
+      const decisions = exec ? decisionsHere(loadDecisions()[pathKey(target.dir)], target.dir, isReplaced(prev)) : undefined;
+      if (exec && a === "claude" && !ownDialog && yesHere(decisions?.claude, target.dir, isReplaced(prev))) exec = see(true);
       const decision = decisions?.[a];
       // «Да» прежнего расчёта (с ответами Claude в отпечатке) — принимается и переносится на новый
       const old = !!exec?.legacy && decision?.answer === "yes" && decision.fingerprint === exec.legacy;

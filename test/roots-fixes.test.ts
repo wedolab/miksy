@@ -222,7 +222,7 @@ describe("A.6: miksy root add / remove", () => {
     expect(existsSync(`${f.books}/novel/CLAUDE.local.md`)).toBe(true);
     expect(read(`${f.config}/local/machine.yaml`)).not.toContain(f.books);
     // doctor — справочно; sync --all его не трогает; clean <путь> — убирает по учёту
-    expect(f.run(["doctor"]).out).toContain(`Цели учёта вне workspace (1) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>:\n  ${f.books}/novel`);
+    expect(f.run(["doctor"]).out).toContain(`Цели учёта вне workspace (1) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>. В том числе доверие Claude к папке ${f.books}/novel: агент без вопроса выполняет её настройки (хуки, серверы MCP проекта), а miksy ею больше не управляет — снять: miksy clean "<путь>" (работает и без диска):\n  ${f.books}/novel`);
     expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expect(existsSync(`${f.books}/novel/CLAUDE.local.md`)).toBe(true);
     expectCode(f.run(["clean", `${f.books}/novel`]), 0);

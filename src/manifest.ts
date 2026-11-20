@@ -36,6 +36,10 @@ export interface TargetState {
   // папки, — пока доверие ставил miksy. clean недоступной папки (ответов на диске не прочитать) делает из него отметку
   // Manifest.trustedBefore: на её месте чужая копия — вопрос, как в 0.2.0 (проверка 7b, A №1). Поля нет — один вопрос
   dialog?: string;
+  // Отпечаток папки цели (trust.ts: folderId — номер на диске и время создания), снятый вместе с dialog: на месте
+  // папки другая (удалили и положили чужую копию) — «доверие ставил miksy» ответы в окне Claude вашими не делает
+  // (круг 10l). Поля нет — учёт прежней версии или ФС без номеров: как раньше
+  folder?: string;
 }
 
 // Отметка «проект забыт» (clean --forget, root remove --forget, «да» на вопрос «забыть?»): учёт этой машины помнит
@@ -43,7 +47,8 @@ export interface TargetState {
 // проектах miksy убирает свои файлы без учёта, которые больше не пишет (apply.ts: «больше не нужен» по уликам):
 // в общей облачной папке у каждой машины свой учёт, и файл miksy другой машины выглядит так же. Снимает первый
 // sync или clean, дошедший до проекта (не --dry-run)
-export type ForgottenMark = { trusted?: true };
+// folder — отпечаток папки (TargetState.folder) на момент «забыть»: подменили — доверие не «своё» (круг 10l)
+export type ForgottenMark = { trusted?: true; folder?: string };
 
 export interface Manifest {
   version: 1;
@@ -65,6 +70,9 @@ export interface Manifest {
   // Снимает sync, записавший цель снова (отметка переходит в TargetState.everTrusted); переезжает с каталогом
   // (relocate.ts: applyMoves). Поля нет — учёт до 0.2.1 (0.2.0 его отбросит)
   trustedBefore?: Record<string, string>;
+  // Отпечаток папки (TargetState.folder) к отметке trustedBefore — тот же ключ: папку после clean подменили — отметка не
+  // действует (круг 10l). Ключа нет — как раньше
+  trustedFolder?: Record<string, string>;
 }
 
 export const manifestPath = () => join(configRoot(), "local", "state", "manifest.json");
@@ -92,6 +100,7 @@ export function splitState(st: TargetState, dir: string): { near: TargetState; f
   if (st.group) near.group = far.group = true;
   if (st.everTrusted) near.everTrusted = true;
   if (st.dialog) near.dialog = st.dialog;
+  if (st.folder) near.folder = st.folder;
   return { near, far };
 }
 // Сколько путей учёта лежит внутри каталога (файлы, блоки, слияния, exclude, одобрения)
@@ -105,6 +114,7 @@ export function joinStates(a: TargetState, b: TargetState): TargetState {
   if (b.group) out.group = true;
   if (b.everTrusted) out.everTrusted = true;
   if (b.dialog) out.dialog ??= b.dialog;
+  if (b.folder) out.folder ??= b.folder;
   return out;
 }
 
@@ -133,6 +143,7 @@ function validState(state: unknown): state is TargetState {
   if (state.group !== undefined && state.group !== true) return false;
   if (state.everTrusted !== undefined && state.everTrusted !== true) return false;
   if (state.dialog !== undefined && typeof state.dialog !== "string") return false;
+  if (state.folder !== undefined && typeof state.folder !== "string") return false;
   if (state.blocks !== undefined && (!record(state.blocks) || !Object.values(state.blocks).every((v) => typeof v === "string"))) return false;
   if (state.originals !== undefined && (!record(state.originals) || !Object.values(state.originals).every((v) => record(v) && typeof v.path === "string" && typeof v.hash === "string"))) return false;
   for (const t of Object.values(state.toml ?? {})) if (t.definitions !== undefined && (!record(t.definitions) || !Object.values(t.definitions).every((v) => typeof v === "string"))) return false;
@@ -146,10 +157,11 @@ export function loadManifest(path = manifestPath()): Manifest {
     m = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : { version: 1, targets: {} };
     if (m?.version !== 1 || !m.targets || typeof m.targets !== "object" || Array.isArray(m.targets)) throw new Error();
     if (m.secretFiles !== undefined && !names(m.secretFiles)) throw new Error();
-    if (m.forgotten !== undefined && (!record(m.forgotten) || !Object.entries(m.forgotten).every(([id, v]) => id.includes("|") && record(v) && [undefined, true].includes(v.trusted)))) throw new Error();
+    if (m.forgotten !== undefined && (!record(m.forgotten) || !Object.entries(m.forgotten).every(([id, v]) => id.includes("|") && record(v) && [undefined, true].includes(v.trusted) && (v.folder === undefined || typeof v.folder === "string")))) throw new Error();
     // Список — форма невыпущенного снимка 0.2.1 (без отпечатков): отметки нет, учёт не повреждён (рецензия 7b A, п. 3)
     if (names(m.trustedBefore)) delete m.trustedBefore;
     if (m.trustedBefore !== undefined && (!record(m.trustedBefore) || !Object.entries(m.trustedBefore).every(([id, v]) => id.includes("|") && typeof v === "string"))) throw new Error();
+    if (m.trustedFolder !== undefined && (!record(m.trustedFolder) || !Object.values(m.trustedFolder).every((v) => typeof v === "string"))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
       if (!id.includes("|") || !validState(state)) throw new Error();
     }
@@ -181,15 +193,22 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
   for (const [id, v] of Object.entries(m.forgotten ?? {})) {
     const split = id.indexOf("|");
     const key = `${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`;
-    forgotten[key] = { ...(forgotten[key]?.trusted || v.trusted ? { trusted: true as const } : {}) };
+    const folder = forgotten[key]?.folder ?? v.folder;
+    forgotten[key] = { ...(forgotten[key]?.trusted || v.trusted ? { trusted: true as const } : {}), ...(folder && { folder }) };
   }
   const before: Record<string, string> = {};
+  const folders: Record<string, string> = {};
   for (const [id, v] of Object.entries(m.trustedBefore ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
     const split = id.indexOf("|");
-    before[`${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`] = v;
+    const key = `${agentId(id.slice(0, split))}|${pathKey(id.slice(split + 1))}`;
+    before[key] = v;
+    // Отпечаток папки — только у действующей отметки
+    const folder = m.trustedFolder?.[id];
+    if (typeof folder === "string") folders[key] = folder;
   }
   return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
-    ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }) };
+    ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }),
+    ...(Object.keys(folders).length > 0 && { trustedFolder: folders }) };
 }
 
 // Хеш записи, для которой при миграции нашлись разные значения и ни одно не совпало с диском:
@@ -197,8 +216,16 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
 export const UNKNOWN_HASH = "unknown";
 
 // Миграция в памяти: dry-run не переписывает ни учёт, ни файлы цели.
+// Учёт цели, чью папку подменили (trust.ts: trustState; круг 10l): записи доверия в нём остаются (снять поставленное
+// miksy может только он), но «доверие ставил miksy» больше не значит, что ответы в окне Claude — ваши. Метка — символ:
+// в учёт (JSON) не попадает; копии и canonicalState её сохраняют
+const REPLACED = Symbol("папка подменена");
+export const markReplaced = (st: TargetState): TargetState => Object.assign(st, { [REPLACED]: true });
+export const isReplaced = (st: TargetState | undefined) => !!st && (st as { [REPLACED]?: true })[REPLACED] === true;
+
 export function canonicalState(state: TargetState): TargetState {
-  return mergeStates(emptyState(), state);
+  const out = mergeStates(emptyState(), state);
+  return isReplaced(state) ? markReplaced(out) : out;
 }
 
 // Добавляет записи from в into (уже канонический). Одно отображение старый→новый (pathKey) для
@@ -226,6 +253,7 @@ function mergeStates(into: TargetState, from: TargetState): TargetState {
   if (from.group) into.group = true;
   if (from.everTrusted) into.everTrusted = true;
   if (from.dialog) into.dialog ??= from.dialog;
+  if (from.folder) into.folder ??= from.folder;
   return into;
 }
 
