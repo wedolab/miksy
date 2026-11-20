@@ -61,7 +61,7 @@ miksy агентов не ставит. Команды — из официаль
 | [Antigravity](https://antigravity.google/docs/getting-started) (CLI `agy`) | `irm https://antigravity.google/cli/install.ps1 \| iex` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | запустите `agy` — вход в Google в браузере |
 
 IDE Antigravity — [antigravity.google/download](https://antigravity.google/download). Поставили агента после
-miksy — запустите `miksy setup` ещё раз: он предложит добавить агента.
+miksy — запустите `miksy setup` ещё раз в терминале: он спросит, подключить ли агента.
 
 Antigravity в редакторе Zed — своей записью `agy acp`, не расширением из каталога Zed: [antigravity.md](antigravity.md).
 

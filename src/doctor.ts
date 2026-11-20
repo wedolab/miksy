@@ -10,6 +10,7 @@ import { emptyState, ManifestError, type Manifest, otherOwners, splitState, stra
 import type { Move } from "./relocate";
 import { fold, pathKey, quoteArg, slash } from "./paths";
 import { foreignMcp, foreignSkills } from "./foreign";
+import { connectHint, detectAgents } from "./agentid";
 import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
 import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
@@ -34,7 +35,7 @@ const MANUAL = /изменён вручную|управляемый блок и
 const GLOBAL_SKILL_DIRS = [".claude/skills", ".agents/skills", ".config/opencode/skills", ".gemini/config/skills"];
 
 // bunVersion — версия Bun для предупреждения о старом Bun (тест подменяет)
-export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, bunVersion: string = Bun.version): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
+export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, bunVersion: string = Bun.version, which: (cmd: string) => string | null = (c) => Bun.which(c)): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
   const secrets = loadSecrets();
   const skippedDirs: string[] = [];
   const projects = allProjects(machine, undefined, (w) => skippedDirs.push(w));
@@ -355,6 +356,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
     .map((id) => [id.slice(0, id.indexOf("|")), id.slice(id.indexOf("|") + 1)]).filter(([a]) => !enabled.has(a)).map((x) => [x.join("|"), x])).values()];
   if (retired.length) info.push(`Учёт агентов, которых нет в agents (${retired.length}) — miksy записывал им настройки, агента убрали из local/machine.yaml без clean: записанное действует, но не обновляется. Убрать (или верните агента в agents):`,
     ...retired.map(([a, d]) => `  miksy clean ${d === "global" ? "--global" : `${quoteArg(d)}`} --agent ${a}`));
+  // Агенты в PATH, которых нет в agents и нет в учёте (у агентов с учётом — строка выше): новый или убранный пользователем
+  // — miksy не знает, подключать сам не будет; подсказка, как подключить (круг 10i). Без agents в machine.yaml — все агенты
+  const outsideAgents = machine.agents ? detectAgents(machine.home, which).inPath.filter((a) => !enabled.has(a) && !retired.some(([r]) => r === a)) : [];
+  if (outsideAgents.length) info.push(`Найдены агенты вне agents (local/machine.yaml): ${outsideAgents.join(", ")} — miksy ${outsideAgents.length === 1 ? "его" : "их"} не настраивает. ${connectHint(outsideAgents.length)}`);
   if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}`);
   // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
   const legacy = legacyAgentNames();

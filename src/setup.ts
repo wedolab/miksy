@@ -10,7 +10,8 @@ import { basename, delimiter, dirname, join, posix, relative, win32 } from "node
 import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
 import { locate, machineRoots, type Root, rootKey, suggestTree, treeAbove, treeJoin } from "./roots";
-import { agentId } from "./agentid";
+import { AGENT_COMMANDS, agentId, detectAgents, notConnectedText } from "./agentid";
+export { detectAgents };
 import { backup } from "./backup";
 import { loadManifest, writeAtomic } from "./manifest";
 import type { Ask } from "./ask";
@@ -23,33 +24,6 @@ import { environment } from "./environ";
 import { ADAPTERS, agentsFor, allTargets, globalTarget, listGroups } from "./registry";
 import type { McpServer, Os, Tool } from "./types";
 import { count } from "./plural";
-
-// Как найти агента: команда в PATH
-const AGENT_COMMANDS: Record<string, string[]> = {
-  claude: ["claude"],
-  codex: ["codex"],
-  opencode: ["opencode"],
-  antigravity: ["agy", "antigravity"],
-};
-
-// Каталоги настроек агента в домашнем каталоге: агент бывает только в редакторе (Zed), без команды в PATH
-const AGENT_DIRS: Record<string, string[]> = {
-  claude: [".claude"],
-  codex: [".codex"],
-  opencode: [".config/opencode"],
-  antigravity: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"],
-};
-
-// Какие агенты есть на машине: команда в PATH или (отдельно) только каталог настроек
-export function detectAgents(home: string, which: (cmd: string) => string | null = (c) => Bun.which(c)) {
-  const inPath: string[] = [], dirOnly: { id: string; dir: string }[] = [];
-  for (const [id, cmds] of Object.entries(AGENT_COMMANDS)) {
-    if (cmds.some((c) => which(c))) { inPath.push(id); continue; }
-    const dir = AGENT_DIRS[id].map((d) => join(home, d)).find((d) => existsSync(d));
-    if (dir) dirOnly.push({ id, dir: slash(dir) });
-  }
-  return { inPath, dirOnly };
-}
 
 // Машинные переменные (пути к программам): как найти и как установить, если нет. Встроен только
 // PYTHON; свои — tools в map.yaml конфигурации (перекрывают встроенное)
@@ -490,6 +464,7 @@ export type SetupOptions = {
   sys?: Partial<System>;
   log?: (s?: string) => void;
   hints?: boolean; // false — без «Дальше: …» в конце (miksy update после обновления движка печатает свои шаги)
+  agentAsk?: Ask | null; // при ask = null — вопрос «Подключить?» о найденных агентах вне agents (miksy update в терминале)
 };
 
 // Решения мастера, которые не нужно спрашивать снова: добавки агентов, оставленные у агента
@@ -777,7 +752,8 @@ export function setup(o: SetupOptions): number {
     return false;
   }).map((d) => d.id);
   const found = Object.keys(AGENT_COMMANDS).filter((id) => detected.inPath.includes(id) || viaDir.includes(id));
-  const agents = keptAgents ?? found;
+  // machine.yaml есть и не перезаписывается — агенты из него: найденных вне agents подключает только «да» (ниже)
+  const agents = keptAgents ?? listedIds ?? found;
   const newAgents = keptAgents ? found.filter((a) => !keptAgents.includes(a)) : [];
   const vars: Record<string, string> = { ...previous?.vars };
   const machineVars = current && current.vars && typeof current.vars === "object" ? Object.keys(current.vars) : [];
@@ -807,7 +783,7 @@ export function setup(o: SetupOptions): number {
     for (const r of inFile.slice(1)) log(`  ещё корень: ${r}`);
   } else log(workspace ? `Workspace: ${workspace}${existsSync(workspace) ? "" : unreachable(workspace) ? `  (сейчас недоступен — ${unreachable(workspace)}; создаваться не будет, miksy пропустит его, пока он не появится)` : "  (каталога ещё нет — будет создан)"}` : "Workspace: не выбран — local/machine.yaml не будет записан");
   if (!inFile.length && workspace) for (const r of extra) log(`  ещё корень: ${r.path}${r.tree ? ` → layers/tree/${r.tree}` : ""}${existsSync(r.path) ? "" : "  (каталога сейчас нет — пропускается, пока не появится)"}`);
-  log(`Агенты: ${agents.length ? agents.join(", ") : "не найдено ни одного (claude, codex, opencode, agy)"}${keptAgents ? " (из текущего local/machine.yaml)" : ""}`);
+  log(`Агенты: ${agents.length ? agents.join(", ") : "не найдено ни одного (claude, codex, opencode, agy)"}${keptAgents || listedIds ? " (из текущего local/machine.yaml)" : ""}`);
   const absent = Object.keys(AGENT_COMMANDS).filter((a) => !agents.includes(a) && !known.includes(a) && !found.includes(a));
   if (ask && absent.length) log(`  не найдены: ${absent.join(", ")} — miksy их не ставит; как поставить — docs/install.md, «Установка агентов». Поставите — запустите setup снова`);
   if (newAgents.length) log(`  найдены ещё: ${newAgents.join(", ")} — не добавлены; нужны — допишите в agents в local/machine.yaml`);
@@ -835,17 +811,35 @@ export function setup(o: SetupOptions): number {
   if (!workspace) {
     log("\n• local/machine.yaml не записан: workspace не выбран (запустите setup в терминале или пропишите workspace вручную)");
   } else if (hadMachine && !o.force) {
-    // Новые агенты и найденные программы дописываются, остальное в файле не меняется
+    // Найденные программы дописываются, остальное в файле не меняется. Агент, найденный на машине, но не из agents, —
+    // новый или убранный пользователем: различить нельзя (после clean --agent учёт о нём пуст), поэтому дописывается
+    // только после «да» в терминале — вопрос о каждом; без терминала (--yes, update из скрипта) — подсказка (круг 10i).
+    // Умолчание «да» — агенту без учёта (скорее новый), «нет» — агенту с учётом (его убрали из agents без clean)
     const added = listedIds ? found.filter((a) => !listedIds.includes(a)) : [];
     const text = readFileSync(machinePath, "utf8");
     const line = /^agents:[ \t]*\[[^\]\r\n]*\][ \t]*$/m;
     const newVars = Object.entries(vars).filter(([k]) => !machineVars.includes(k));
-    if (added.length && !line.test(text))
-      log(`\n• найдены новые агенты: ${added.join(", ")} — в local/machine.yaml agents записан не одной строкой; допишите их сами`);
-    else if (added.length && agree(`Добавить в local/machine.yaml новых агентов: ${added.join(", ")}?`, true)) {
-      backup(machinePath, config);
-      writeAtomic(machinePath, text.replace(line, `agents: [${[...listed!, ...added].join(", ")}]`));
-      log(`✓ в local/machine.yaml добавлены агенты: ${added.join(", ")} — дальше: miksy sync --global и miksy sync --all`);
+    const agentAsk = ask ?? o.agentAsk ?? null;
+    if (added.length && !agentAsk) log(`\n• ${notConnectedText(added)}`);
+    else if (added.length && !line.test(text))
+      log(`\n• найдены агенты вне agents: ${added.join(", ")} — в local/machine.yaml agents записан не одной строкой; нужны — допишите их сами`);
+    else if (added.length) {
+      let recorded = new Set<string>();
+      try {
+        const m = loadManifest(join(config, "local", "state", "manifest.json"));
+        recorded = new Set([...Object.keys(m.targets), ...Object.keys(m.forgotten ?? {})].map((id) => agentId(id.slice(0, id.indexOf("|")))));
+      } catch { /* учёта нет или не читается — агенты как новые */ }
+      // Каталог без команды в PATH — уже спрошено выше («настраивать этого агента?»)
+      const yes = added.filter((a) => viaDir.includes(a) || agentAsk!.yes(recorded.has(a)
+        ? `Найден агент ${a}: раньше miksy писал ему настройки, его убрали из agents (local/machine.yaml). Подключить снова?`
+        : `Найден агент ${a}. Подключить?`, !recorded.has(a)));
+      const no = added.filter((a) => !yes.includes(a));
+      if (yes.length) {
+        backup(machinePath, config);
+        writeAtomic(machinePath, text.replace(line, `agents: [${[...listed!, ...yes].join(", ")}]`));
+        log(`✓ в local/machine.yaml добавлены агенты: ${yes.join(", ")} — дальше: miksy sync --global и miksy sync --all`);
+      }
+      if (no.length) log(`  не подключены: ${no.join(", ")} — miksy их не настраивает; передумаете — miksy setup ещё раз (спросит) или допишите в agents в local/machine.yaml`);
     } else if (ask) log(`✓ local/machine.yaml уже есть — не трогаю (переспросить workspace и агентов: setup --force)`);
     else log(`\n• local/machine.yaml уже есть — не трогаю (перезаписать: setup --force). Найдено сейчас:\n${yaml.replace(/^/gm, "    ")}`);
     for (const [k, v] of newVars) addVar(machinePath, config, k, v, log);
@@ -935,7 +929,7 @@ export function setup(o: SetupOptions): number {
   const wrote = planAndWrite();
   // 10. Проверка
   step(10, "Проверка", "что разошлось со слоями после записи (miksy doctor).");
-  const d = doctor(agentsFor(loadMachine(config)), loadMachine(config), false);
+  const d = doctor(agentsFor(loadMachine(config)), loadMachine(config), false, undefined, (c) => sys.which(c));
   for (const l of d.text.split("\n")) if (l && !l.startsWith(" ")) log(`  ${l}`);
   if (d.problems) log(`  подробно: ${cmd} doctor`);
   log(`\n${wrote ? "Готово." : "Настройки агентам не записаны — позже: " + cmd + " sync --global и " + cmd + " sync --all."}`);
@@ -1111,7 +1105,7 @@ export function setup(o: SetupOptions): number {
 
   function adoptStep() {
     step(6, "Ручные настройки агентов", "MCP и skills, добавленные агентам в обход слоёв: перенесите нужные в конфигурацию — их получат все агенты.");
-    const d = doctor(machineAgents, machine!, false);
+    const d = doctor(machineAgents, machine!, false, undefined, (c) => sys.which(c));
     const state = loadState(config);
     const keep = new Set(state.keep ?? []);
     // Одна добавка у нескольких агентов — один вопрос

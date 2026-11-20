@@ -2,9 +2,9 @@
 // клон (копия src/, adapters/, examples/ этого движка), релизы — теги vX.Y.Z и ветка stable в репо
 // владельца (dev), отправленные в bare. Конфигурация, HOME и workspace — свои у каждого теста (cliFixture)
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { Ask } from "../src/ask";
 import { runCommand } from "../src/commands";
 import { ENGINE } from "../src/load";
@@ -262,8 +262,9 @@ describe("miksy update — ветка main (тестеры, склонирова
 });
 
 // Вопросы в терминале: сценарий ответов, шаги после обновления — заглушка (в процессе теста)
+// Вопрос «Найден агент X. Подключить?» зависит от агентов в PATH машины (шаг 1 — настоящий which): «нет», вне сценария
 const answers = (list: boolean[], asked: string[]): Ask => ({
-  yes: (q) => { asked.push(q); const a = list.shift(); if (a === undefined) throw new Error(`лишний вопрос: ${q}`); return a; },
+  yes: (q) => { if (q.startsWith("Найден агент ")) return false; asked.push(q); const a = list.shift(); if (a === undefined) throw new Error(`лишний вопрос: ${q}`); return a; },
   choose: () => null,
   line: () => null,
 });
@@ -316,6 +317,36 @@ describe("шаги после обновления (update --finish)", () => {
     out.length = 0;
     expect(finishUpdate({ from: "0.1.0", ask: answers([], asked), run: runCommand, engine: r.user, log: (s = "") => out.push(s) })).toBe(0);
     expect(out.join("\n")).toContain("Записывать агентам нечего");
+  }, 120000);
+
+  // Круг 10i: агент в PATH вне agents (новый или убранный пользователем). Поддельная команда codex — первой в PATH
+  test("агент вне agents: без терминала — подсказка, machine.yaml не тронут; в терминале — вопрос, «да» — дописан", () => {
+    const r = repos();
+    const bin = `${r.dir}/fakebin`;
+    put(process.platform === "win32" ? `${bin}/codex.cmd` : `${bin}/codex`, process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n");
+    if (process.platform !== "win32") chmodSync(`${bin}/codex`, 0o755);
+    const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+    Object.assign(process.env, { MIKSY_CONFIG: r.f.config, HOME: r.f.home, USERPROFILE: r.f.home, BUN_INSTALL: `${r.dir}/bun`, [pathKey]: `${bin}${delimiter}${process.env[pathKey]}` });
+    const machine = `${r.f.config}/local/machine.yaml`;
+    const before = readFileSync(machine, "utf8");
+    const out: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { out.push(a.map(String).join(" ")); };
+    const asked: string[] = [];
+    try {
+      expect(finishUpdate({ from: "0.1.0", ask: null, run: runCommand, engine: r.user, log: (s = "") => out.push(s) })).toBe(0);
+      expect(out.join("\n"), out.join("\n")).toMatch(/• найден[^\n]* codex[^\n]* в agents \(local\/machine\.yaml\) — miksy (его|их) не настраивает\. Подключить: miksy setup в терминале/);
+      expect(readFileSync(machine, "utf8")).toBe(before);
+      const tty: Ask = {
+        yes: (q, def = false) => { asked.push(q); return q.startsWith("Найден агент codex") ? true : q.startsWith("Найден агент ") ? false : def; },
+        choose: () => null,
+        line: () => null,
+      };
+      out.length = 0;
+      finishUpdate({ from: "0.1.0", ask: tty, run: runCommand, engine: r.user, log: (s = "") => out.push(s) });
+    } finally { console.log = orig; }
+    expect(asked, out.join("\n")).toContain("Найден агент codex. Подключить?");
+    expect(readFileSync(machine, "utf8")).toMatch(/^agents: \[claude, codex\]$/m);
   }, 120000);
 });
 

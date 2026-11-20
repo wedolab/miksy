@@ -83,7 +83,8 @@ export function finishUpdate(o: { from: string; ask: Ask | null; run: Run; log?:
   if (after.length) log(`\nПосле обновления нужно (CHANGELOG):\n${after.join("\n")}`);
 
   log("\n1. Команда miksy и local/ (setup --yes, только безопасная часть)");
-  try { setup({ ask: null, force: false, hints: false, log, engine }); }
+  // В терминале — и вопрос о найденных агентах вне agents (круг 10i): без него update дописывал бы и убранного
+  try { setup({ ask: null, agentAsk: o.ask, force: false, hints: false, log, engine }); }
   catch (e) { log(`Ошибка setup: ${(e as Error).message}\nДвижок обновлён, но setup не выполнен: исправьте сказанное выше, затем miksy setup --yes`); }
 
   let machine: Machine;
