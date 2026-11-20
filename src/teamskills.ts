@@ -1,4 +1,4 @@
-import { gitCaching, gitEnv, gitMemo, gitSpawn, gitWhy } from "./git";
+import { gitCaching, gitEnv, gitMemo, gitSpawn, gitWhy, indexModes } from "./git";
 // Командные skills в репо проекта: поиск, склейка копий, проверка формы.
 // Только чтение — файлы команды miksy не меняет.
 import { createHash } from "node:crypto";
@@ -77,6 +77,14 @@ function classify(dir: string, readers: Record<AgentId, string[]>) {
 
 // Файлы команды в агентных каталогах: путь → симлинк ли (git mode 120000)
 function trackedFiles(dir: string): Map<string, boolean> {
+  // С кешем команды — из индекса репо, который и так читается одним запросом (git.ts: indexOf; круг 10k); git не ответил —
+  // пусто, как без кеша. Отбор — как у pathspec ROOTS: сам путь или внутри него, с учётом регистра
+  const modes = (() => { try { return indexModes(dir); } catch { return new Map<string, string>(); } })();
+  if (modes) {
+    const out = new Map<string, boolean>();
+    for (const [p, mode] of modes) if (ROOTS.some((r) => p === r || p.startsWith(r + "/"))) out.set(p, mode === "120000");
+    return out;
+  }
   const r = Bun.spawnSync(["git", "-C", dir, "ls-files", "-s", "-z", "--", ...ROOTS], { env: gitEnv(), stdout: "pipe", stderr: "ignore" });
   const out = new Map<string, boolean>();
   if (r.exitCode !== 0) return out;

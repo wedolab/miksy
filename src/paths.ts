@@ -67,9 +67,33 @@ const exists = (p: string) => {
   }
 };
 
+// Кеш canonical на время одной команды, которая ничего не пишет (doctor, --dry-run; включает runCommand — круг 10k):
+// одни и те же пути раскрываются тысячи раз. Только для таких команд: сама команда ни одной папки или ссылки не
+// создаёт, не удаляет и не переносит — ответ (и «пути нет», и ошибка) до её конца не устаревает. Ключ — путь после
+// resolve (рабочий каталог miksy не меняет). Пишущие команды кеша не получают: запись меняла бы ответы
+let canonCache: Map<string, string | Error> | null = null;
+export function cachePaths(on: boolean): Map<string, string | Error> | null {
+  const was = canonCache;
+  canonCache = on ? new Map() : null;
+  return was;
+}
+export const restorePaths = (was: Map<string, string | Error> | null) => { canonCache = was; };
+
 // Канонический путь: realpath ближайшего существующего предка + несуществующий остаток.
 // Битый симлинк в пути — ошибка: куда он поведёт после создания цели, неизвестно
 export function canonical(path: string): string {
+  if (!canonCache) return canonicalNow(path);
+  const key = resolve(path);
+  let hit = canonCache.get(key);
+  if (hit === undefined) {
+    try { hit = canonicalNow(key); } catch (e) { hit = e as Error; }
+    canonCache.set(key, hit);
+  }
+  if (hit instanceof Error) throw new Error(hit.message);
+  return hit;
+}
+
+function canonicalNow(path: string): string {
   let p = resolve(path);
   const rest: string[] = [];
   let real: string;

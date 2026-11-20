@@ -87,8 +87,16 @@ export function repoOf(dir: string): string | null {
   if (hit instanceof GitError) throw hit;
   if (hit !== undefined) return hit;
   // Путь без ссылок: его текстовые родители — те же каталоги, где ищет git
-  let real = "";
-  if (cache) try { real = fold(canonical(d)); } catch { /* нет доступа — только сам каталог */ }
+  let real = "", realPath = "";
+  if (cache) try { realPath = canonical(d); real = fold(realPath); } catch { /* нет доступа — только сам каталог */ }
+  // Каталог за ссылкой (junction, symlink): git ищет репо от физического пути (chdir — getcwd; проверено на Windows для
+  // junction и symlink, macOS/Linux так всегда) — ответ тот же, что для пути без ссылок, а у него работает подсказка
+  // родителя: ссылки на skills внутри проекта не запускают git каждая (круг 10k)
+  if (cache && real && real !== key) {
+    const top = repoOf(realPath);
+    cache.repo.set(key, top);
+    return top;
+  }
   // Известный ответ родителя: каталог внутри уже найденного репо, и между ними нет другого .git —
   // тот же корень (соседние каталоги local/run/<агент>/<цель>, подкаталоги проекта)
   if (cache && real === key)
@@ -123,32 +131,42 @@ export function repoOf(dir: string): string | null {
 
 // Индекс каталога одним запросом (для кеша): полные пути в нижнем регистре и каталоги-префиксы
 // (нижний регистр → варианты написания)
-type Index = { files: Map<string, Set<string>>; dirs: Map<string, Set<string>> };
+// modes — путь как в индексе → режим git (120000 — ссылка): им пользуется разбор командных skills (teamskills.ts), чтобы
+// не спрашивать git второй раз (круг 10k)
+type Index = { files: Map<string, Set<string>>; dirs: Map<string, Set<string>>; modes: Map<string, string> };
 function indexOf(dir: string): Index {
   const key = fold(slash(dir));
   const hit = cache!.index.get(key);
   if (hit instanceof GitError) throw hit;
   if (hit) return hit;
-  const r = run(dir, ["ls-files", "-z"]);
+  const r = run(dir, ["ls-files", "-s", "-z"]);
   if (r.code !== 0) {
     const e = new GitError(`git ls-files в ${slash(dir)}: ${gitWhy(r.err, r.code)}`);
     cache!.index.set(key, e);
     throw e;
   }
-  const index: Index = { files: new Map(), dirs: new Map() };
+  const index: Index = { files: new Map(), dirs: new Map(), modes: new Map() };
   const add = (m: Map<string, Set<string>>, p: string) => {
     const k = p.toLowerCase();
     const s = m.get(k);
     if (s) s.add(p);
     else m.set(k, new Set([p]));
   };
-  for (const l of r.out.split("\0")) {
-    if (!l) continue;
+  for (const e of r.out.split("\0")) {
+    const m = e.match(/^(\d+) \S+ \d+\t(.+)$/s);
+    if (!m) continue;
+    const l = m[2];
+    index.modes.set(l, m[1]);
     add(index.files, l);
     for (let i = l.indexOf("/"); i > 0; i = l.indexOf("/", i + 1)) add(index.dirs, l.slice(0, i));
   }
   cache!.index.set(key, index);
   return index;
+}
+
+// Записи индекса репо (путь → режим) из кеша команды; null — кеша нет (запрос — свой)
+export function indexModes(dir: string): Map<string, string> | null {
+  return cache ? indexOf(dir).modes : null;
 }
 
 // Совпадение с индексом только регистром (:(icase)): отслеживаемое, если это не два разных

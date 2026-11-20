@@ -4,7 +4,7 @@ import type { RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
 import { fold, pathKey, slash } from "./paths";
 import { headerMark, miksyOpencodeJson } from "./marks";
-import { GitError, gitSpawn, gitWhy, protectedBy, trackedPaths } from "./git";
+import { GitError, gitMemo, gitSpawn, gitWhy, protectedBy, trackedPaths } from "./git";
 import { backup, originalBackup, runDir } from "./backup";
 import { blockHash, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
@@ -61,6 +61,10 @@ function excludeFile(dir: string): { path: string; shared: boolean; root: string
   const git = join(dir, ".git");
   if (!existsSync(git)) return null;
   if (lstatSync(git).isDirectory()) return { path: join(git, "info", "exclude").replaceAll("\\", "/"), shared: false, root: canonical(git) };
+  // Ответ git — один на каталог за команду (gitMemo): каждый агент спрашивал заново (круг 10k); устройство репо miksy не меняет
+  return { ...gitMemo(`exclude|${fold(slash(dir))}`, () => worktreeExclude(dir)) };
+}
+function worktreeExclude(dir: string): { path: string; shared: boolean; root: string } {
   const r = gitSpawn(["-C", dir, "rev-parse", "--git-path", "info/exclude", "--git-dir", "--git-common-dir"], { needOut: true });
   if (r.code !== 0) throw new GitError(`git exclude для ${dir}: ${gitWhy(r.err, r.code)}`);
   const lines = r.out.trim().split(/\r?\n/).filter(Boolean);

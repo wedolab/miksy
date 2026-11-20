@@ -2,7 +2,7 @@
 // (src/setup.ts) вызывают runCommand; вопросы — через Ask (в терминале — prompt, в тестах — сценарий)
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { canonical, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { cachePaths, canonical, restorePaths, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
@@ -778,8 +778,11 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   observe = io.observe ?? null;
   resetRun();
   if (gitCaching()) cacheGit();
+  // Кеш путей — только командам, которые ничего не пишут: doctor и sync/clean с --dry-run (круг 10k, src/paths.ts).
+  // Вложенный запуск (план setup/update — sync --dry-run) кеширует своё и по выходе возвращает внешнее состояние
+  const paths = cachePaths(cmd === "doctor" || (["sync", "clean"].includes(cmd) && "dry-run" in flags));
   try { return command(cmd, flags, positional); }
-  finally { ask = null; observe = null; }
+  finally { ask = null; observe = null; restorePaths(paths); }
 }
 
 function command(cmd: string, flags: Record<string, string>, positional: string[]): number {
