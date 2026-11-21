@@ -1,7 +1,7 @@
 // Круг 10q: miksy downgrade — откат движка на прежний выпуск. Песочница как update.test.ts: репо владельца (dev),
 // «удалённый» bare и клон пользователя; выпуски — теги и ветка stable. Шаги прежней версии подставляются (записываются),
 // кроме последних тестов: там клон настоящего движка с его тегами и настоящие v0.3.5, v0.3.2, v0.3.0 (тегов нет —
-// пропуск, как downgrade022)
+// пропуск)
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

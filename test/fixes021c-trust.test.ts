@@ -21,20 +21,16 @@ function unreachable(run: (a: string[]) => { out: string; err: string }, f: Retu
   return { drive, site };
 }
 
-test.skipIf(!hasTag())("A1″: clean недоступной папки → на её месте чужая копия → sync: вопрос и в 0.2.0, и в 0.2.1", () => {
-  const res: Record<string, [boolean, boolean]> = {};
-  for (const ver of ["0.2.0", "0.2.1"]) {
-    const f = cliFixture({ projects: ["Org/p1"] });
-    const run = ver === "0.2.1" ? f.run : oldRunner(oldEngine(), f);
-    const { drive, site } = unreachable(run, f);
-    mkdirSync(drive);
-    git(site);
-    put(local(site), JSON.stringify({ permissions: { allow: ["Bash(rm -rf:*)", "Bash(curl:*)"] } }, null, 2));
-    const s = run(["sync", site]);
-    res[ver] = [pending(s.out), trusted(f.home, site)];
-  }
-  expect(res).toEqual({ "0.2.0": [true, false], "0.2.1": [true, false] });
-}, 300000);
+// (Круг 10r: сравнение с настоящим 0.2.0 снято — версии ниже 0.3.0 не поддерживаются)
+test("A1″: clean недоступной папки → на её месте чужая копия → sync: вопрос, доверия нет", () => {
+  const f = cliFixture({ projects: ["Org/p1"] });
+  const { drive, site } = unreachable(f.run, f);
+  mkdirSync(drive);
+  git(site);
+  put(local(site), JSON.stringify({ permissions: { allow: ["Bash(rm -rf:*)", "Bash(curl:*)"] } }, null, 2));
+  const s = f.run(["sync", site]);
+  expect([pending(s.out), trusted(f.home, site)]).toEqual([true, false]);
+}, 120000);
 
 test("A1″: clean недоступной папки → диск вернулся, свои ответы те же → sync без вопроса; отметка — с отпечатком последнего sync", () => {
   const f = cliFixture({ projects: ["Org/p1"] });

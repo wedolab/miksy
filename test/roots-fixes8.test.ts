@@ -1,26 +1,10 @@
 // Микроправка перед выпуском 0.2.0 (phase-roots-fixes8, п. 1): записанное miksy в сам основной корень
 // workspace — совет без root remove (основной корень не убирается) и без «добавлен по ошибке». Из тестов
-// рецензентов проверки 6z: zz-ra-wsroot (настоящий 0.1.1) и zz-b6z-rooted (workspace сменили на бывший проект)
+// рецензентов проверки 6z: zz-b6z-rooted (workspace сменили на бывший проект).
+// Круг 10r: тест с настоящим 0.1.1 снят (обновление с 0.1.x не поддерживается)
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { ENGINE } from "../src/load";
 import { cliFixture, put, expectCode, said } from "./helpers";
 import { git, read } from "./rootshelp";
-
-const TAG = "v0.1.1";
-const hasTag = Bun.spawnSync(["git", "-C", ENGINE, "rev-parse", "--verify", "-q", `${TAG}^{commit}`], { stdout: "pipe", stderr: "pipe" }).exitCode === 0;
-
-function oldEngine(): string {
-  const dir = mkdtempSync(join(tmpdir(), "v011-")).replaceAll("\\", "/");
-  const env = { ...process.env, GIT_INDEX_FILE: `${dir}/index` };
-  for (const args of [["read-tree", TAG], ["checkout-index", "-a", "-f", `--prefix=${dir}/engine/`]]) {
-    const r = Bun.spawnSync(["git", "-C", ENGINE, ...args], { env, stdout: "pipe", stderr: "pipe" });
-    if (r.exitCode !== 0) throw new Error(`git ${args[0]}: ${r.stderr}`);
-  }
-  return `${dir}/engine`;
-}
 
 type F = ReturnType<typeof cliFixture>;
 
@@ -52,22 +36,6 @@ function followAdvice(f: F, dir: string) {
 }
 
 describe("п. 1 — записанное в основной корень workspace: совет clean, без root remove", () => {
-  test.skipIf(!hasTag)("0.1.1: miksy sync <корень workspace>, затем новая версия", () => {
-    const engine = oldEngine();
-    const f = cliFixture({ agents: ["claude", "codex"], projects: ["Org/p1"] });
-    const old = (args: string[]) => {
-      const r = Bun.spawnSync([process.execPath, `${engine}/src/cli.ts`, ...args], {
-        cwd: f.dir, env: { ...process.env, MIKSY_CONFIG: f.config, HOME: f.home, USERPROFILE: f.home }, stdin: "ignore", stdout: "pipe", stderr: "pipe",
-      });
-      return { code: r.exitCode, out: r.stdout.toString(), err: r.stderr.toString() };
-    };
-    put(`${f.config}/layers/tree/mcp/t.yaml`, "name: t\ncommand: echo\nargs: [x]\n");
-    expectCode(old(["sync", f.ws]), 0);
-    expect(read(`${f.ws}/.codex/config.toml`)).toContain("miksy");
-    expect(old(["sync", "--all", "--yes"]).err).toBe("");
-    followAdvice(f, f.ws);
-  }, 200000);
-
   test("workspace сменили на бывший проект", () => {
     const f = cliFixture({ projects: ["W"] });
     const w = `${f.ws}/W`;

@@ -12,30 +12,25 @@ const before = (config: string) => (ledger(config) as { trustedBefore?: Record<s
 const DIALOG = "ответы в окне Claude («да";
 
 // A №1: папку удалили после clean и положили на её место чужую копию (архив коллеги) с его ответами в окне Claude
-test.skipIf(!hasTag())("A1′: после clean на том же пути — другая папка (копия коллеги с его «разрешено без вопроса»): 0.2.1 спрашивает, как 0.2.0", () => {
-  const results: Record<string, { asked: boolean; trusted: boolean; out: string }> = {};
-  for (const ver of ["0.2.1", "0.2.0"]) {
-    const f = cliFixture({ projects: ["Org/app"] });
-    const run = ver === "0.2.1" ? f.run : oldRunner(oldEngine(), f);
-    const app = `${f.ws}/Org/app`;
-    expect(run(["sync", "--all", "--yes"]).err).toBe("");
-    allow(app); // свой ответ пользователя
-    expect(run(["sync", app]).err).toBe("");
-    expect(trusted(f.home, app)).toBe(true);
-    expect(run(["clean", app]).err).toBe("");
-    expect(trusted(f.home, app)).toBe(false);
-    rmSync(app, { recursive: true, force: true });
-    mkdirSync(app, { recursive: true });
-    git(app);
-    put(local(app), JSON.stringify({ permissions: { allow: ["Bash(rm -rf:*)", "Bash(curl:*)"] } }, null, 2));
-    const s = run(["sync", app]);
-    expect(s.err).toBe("");
-    results[ver] = { asked: pending(s.out), trusted: trusted(f.home, app), out: s.out };
-  }
-  expect(results["0.2.1"].out).toContain("Bash(rm -rf:*)");
-  expect({ "0.2.0": [results["0.2.0"].asked, results["0.2.0"].trusted], "0.2.1": [results["0.2.1"].asked, results["0.2.1"].trusted] })
-    .toEqual({ "0.2.0": [true, false], "0.2.1": [true, false] });
-}, 300000);
+// (Круг 10r: сравнение с настоящим 0.2.0 снято — версии ниже 0.3.0 не поддерживаются)
+test("A1′: после clean на том же пути — другая папка (копия коллеги с его «разрешено без вопроса»): вопрос, доверия нет", () => {
+  const f = cliFixture({ projects: ["Org/app"] });
+  const app = `${f.ws}/Org/app`;
+  expect(f.run(["sync", "--all", "--yes"]).err).toBe("");
+  allow(app); // свой ответ пользователя
+  expect(f.run(["sync", app]).err).toBe("");
+  expect(trusted(f.home, app)).toBe(true);
+  expect(f.run(["clean", app]).err).toBe("");
+  expect(trusted(f.home, app)).toBe(false);
+  rmSync(app, { recursive: true, force: true });
+  mkdirSync(app, { recursive: true });
+  git(app);
+  put(local(app), JSON.stringify({ permissions: { allow: ["Bash(rm -rf:*)", "Bash(curl:*)"] } }, null, 2));
+  const s = f.run(["sync", app]);
+  expect(s.err).toBe("");
+  expect(s.out).toContain("Bash(rm -rf:*)");
+  expect([pending(s.out), trusted(f.home, app)]).toEqual([true, false]);
+}, 120000);
 
 test("A1′: ответы в окне Claude добавлены после clean — вопрос о них (с прежними); не менялись — вопроса нет", () => {
   const f = cliFixture({ projects: ["Org/app"] });
@@ -179,11 +174,8 @@ test.skipIf(!hasTag())("A2′: «нет» доверию Claude, записан�
   expect({ err: y.err, q: y.questions.length }).toEqual({ err: "", q: 1 });
   expect(read(`${deny}/.claude/settings.local.json`)).toContain("tdeny");
   expect(pending(f.run(["sync", deny]).out)).toBe(false);
-  // Прежний v0.2.0 читает такой local/trust.json (с отметкой alone) без ошибок и одобрения не снимает
-  const o = run(["sync", deny]);
-  expect(o.err).toBe("");
-  expectCode(o, 0);
-  expect(read(`${deny}/.claude/settings.local.json`)).toContain("tdeny");
+  // (Круг 10r: проверка «прежний v0.2.0 читает такой local/trust.json» снята — откат ниже 0.3.0 не поддерживается;
+  // состояние 0.2.0 — путь обновления, остаётся)
 }, 300000);
 
 test("A2′: «нет» → доверие в окне Claude → «да» серверам на отдельный вопрос → следующий sync не спрашивает и одобряет (в тот же день)", () => {

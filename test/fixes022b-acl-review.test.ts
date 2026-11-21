@@ -6,7 +6,6 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLI, said } from "./helpers";
-import { hasTag, oldEngine } from "./fixes021b-helpers";
 
 const win = process.platform === "win32";
 const put = (p: string, s: string) => { mkdirSync(join(p, ".."), { recursive: true }); writeFileSync(p, s); };
@@ -54,10 +53,10 @@ test.skipIf(!win)("0.2.2 (снимок): ~/.claude/CLAUDE.md — ссылка н
   expect({ setup: s.code, warned: outs.map((t) => /закройте вручную/.test(t)) }, said(s, outs)).toEqual({ setup: 0, warned: [false, false, false] });
 }, 120000);
 
-for (const [label, engine] of [["0.2.2 (снимок)", join(import.meta.dir, "..")]] as const) // вариант v0.2.1 убран: там ошибка есть, он падает (проверено, out/8b-progress.md)
+for (const [label, engine] of [["0.2.2 (снимок)", join(import.meta.dir, "..")]] as const) // варианта v0.2.1 нет: там ошибка есть (out/8b-progress.md)
   for (const inHome of [false, true])
-    test.skipIf(!win || (engine === "v0.2.1" && !hasTag("v0.2.1")))(`${label}: setup --yes --backup, ~/.agents/skills — junction (dotfiles ${inHome ? "в доме" : "вне дома"}) → sync, clean, doctor`, () => {
-      const eng = engine === "v0.2.1" ? oldEngine("v0.2.1") : engine.replaceAll("\\", "/");
+    test.skipIf(!win)(`${label}: setup --yes --backup, ~/.agents/skills — junction (dotfiles ${inHome ? "в доме" : "вне дома"}) → sync, clean, doctor`, () => {
+      const eng = engine.replaceAll("\\", "/");
       const o = world(inHome);
       Bun.spawnSync(["icacls", w(`${o.dot}/agents-skills/s1/SKILL.md`), "/grant", "*S-1-5-32-545:(R)"]);
       const aclBefore = acl(`${o.dot}/agents-skills/s1/SKILL.md`);
