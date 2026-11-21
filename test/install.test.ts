@@ -177,7 +177,12 @@ EOF
   }, 60000);
 });
 
-// Запуск PowerShell на раннерах GitHub Windows — до ~50 с на тест: лимит с запасом
+// Запуск PowerShell на раннерах GitHub Windows медленный: один запуск install.ps1 — до ~75 с, а на медленном раннере в
+// полтора-два раза дольше (круг 10o: тест с двумя запусками шёл 104–148 с при пределе 180 с и на 5356efa его превысил —
+// весь прогон был в 1,5 раза медленнее; локально все пять тестов — 19 с). Предел одного запуска — PS_LIMIT: он
+// срабатывает раньше предела теста (TEST_LIMIT — два запуска и запас), и в ошибке — что install.ps1 успел напечатать
+const PS_LIMIT = 150_000;
+const TEST_LIMIT = 2 * PS_LIMIT + 30_000;
 describe.skipIf(!win)("install.ps1", () => {
   const fakes = (f: ReturnType<typeof sandbox>) => {
     // Официальный установщик: powershell -c "irm bun.sh/install.ps1 | iex" → кладёт bun.cmd
@@ -191,8 +196,10 @@ describe.skipIf(!win)("install.ps1", () => {
       cwd: f.dir, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe",
       env: { USERPROFILE: f.home, HOME: f.home, SystemRoot: sys, PATHEXT: ".COM;.EXE;.BAT;.CMD", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${f.home}/.gitconfig`,
         PATH: [f.bin.replaceAll("/", "\\"), `${sys}\\System32`, `${sys}\\System32\\WindowsPowerShell\\v1.0`, git].join(";"), MIKSY_REPO: repo },
+      timeout: PS_LIMIT,
     });
-    return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+    const out = r.stdout.toString() + r.stderr.toString();
+    return { code: r.exitCode, out: r.exitedDueToTimeout ? `${out}\n(install.ps1 остановлен: не закончил за ${PS_LIMIT / 1000} с — выше всё, что он успел напечатать)` : out };
   };
 
   test("нет Bun — официальный установщик после «y», клон движка, мастер с аргументами", () => {
@@ -211,7 +218,7 @@ describe.skipIf(!win)("install.ps1", () => {
 ${again.out}`).toBe("");
     expect(again.out).toContain("1.4.3");
     expect(existsSync(`${f.home}/ps-args`) && readFileSync(`${f.home}/ps-args`, "utf8").split("\n").filter(Boolean).length).toBe(1);
-  }, 180000);
+  }, TEST_LIMIT);
 
   test("две установки Bun (PATH и ~/.bun/bin) — какая используется, совет оставить одну; ничего не удаляется", () => {
     const f = sandbox();
@@ -234,7 +241,7 @@ ${again.out}`).toBe("");
     copyFileSync(`${one.dir}/fakebun.cmd`, `${one.bin}/bun.cmd`);
     copyFileSync(join(ROOT, "install.ps1"), `${one.dl}/install.ps1`);
     expect(run(one, `${one.dl}/install.ps1`, "\r\n").out).not.toContain("несколько установок Bun");
-  }, 180000);
+  }, TEST_LIMIT);
 
   test("в репо есть ветка stable — клон на ней (последний релиз); без неё — ветка по умолчанию", () => {
     const f = sandbox({ stable: true });
@@ -251,7 +258,7 @@ ${again.out}`).toBe("");
     copyFileSync(join(ROOT, "install.ps1"), `${plain.dl}/install.ps1`);
     expect(run(plain, `${plain.dl}/install.ps1`, "y\r\n\r\n").out).not.toContain("ветка stable");
     expect(Bun.spawnSync(["git", "-C", `${plain.home}/Projects/miksy`, "symbolic-ref", "--short", "HEAD"]).stdout.toString().trim()).not.toBe("stable");
-  }, 180000);
+  }, TEST_LIMIT);
 
   test("отказ от установки Bun — выход без изменений; ошибка клона — подсказка про доступ", () => {
     const f = sandbox();
@@ -263,7 +270,7 @@ ${again.out}`).toBe("");
     const bad = run(f, `${f.dl}/install.ps1`, "y\r\n\r\n", `${f.dir}/nope.git`);
     expectCode(bad, 1);
     expect(bad.out).toContain("gh auth login");
-  }, 180000);
+  }, TEST_LIMIT);
 
   // Круг 10f: минимум Bun 1.4.3 — на 1.4.2 установщик отказывает и подсказывает bun upgrade, движок не качает
   test("Bun 1.4.2 — отказ с подсказкой bun upgrade, движок не скачан", () => {
@@ -274,5 +281,5 @@ ${again.out}`).toBe("");
     expectCode(r, 1);
     expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
     expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
-  }, 180000);
+  }, TEST_LIMIT);
 });
