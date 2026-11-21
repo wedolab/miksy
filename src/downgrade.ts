@@ -11,6 +11,7 @@ import { configRoot, ENGINE } from "./load";
 import { writeAtomic } from "./manifest";
 import { quoteArg, slash } from "./paths";
 import { gitIn, lastLine, MAIN, netError, STABLE, versionOf } from "./update";
+import { engineBunArgs } from "./setup";
 import { compareVersions, engineRepo, SEMVER } from "./version";
 
 export const DOWNGRADE_MIN = "0.3.0";
@@ -192,7 +193,7 @@ export function downgrade(o: DowngradeOptions): number {
   };
   log(`\n✓ движок на выпуске ${target} (был ${cur}). Дальше — шаги версией ${target}; если прервётся, выполните сами: ${rest(0)}.`);
   const step = o.step ?? ((e: string, args: string[]) => {
-    const r = Bun.spawnSync([process.execPath, join(e, "src", "cli.ts"), ...args], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    const r = Bun.spawnSync([process.execPath, ...engineBunArgs(e), join(e, "src", "cli.ts"), ...args], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
     return r.exitCode ?? 1;
   });
   const steps = o.ask ? all : all.slice(0, 1);

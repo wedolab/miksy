@@ -109,13 +109,16 @@ export function substitute(
     const lacking = new Set<string>();
     const used = new Set<string>();
     const problems: string[] = [];
+    const local = new Set<string>(); // переменные машины в запуске stdio-сервера
     // Способ доставки выбирается до проверки значений: ограничения у каждого свои
     const how: Delivery = !item.url ? "stdio" : [...item.url.matchAll(REF)].some((m) => isSecret(m[1])) ? "bridge" : opts.http ?? "helper";
     const sub = (s: string, where: "command" | "env" | "arg" | "header" | "url" | "raw", key?: string) => {
       const whole = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(s);
       return s.replace(REF, (ref, name: string) => {
-        if (name in builtin) return builtin[name];
-        if (name in machine.vars) return machine.vars[name];
+        if (name in builtin || name in machine.vars) {
+          if (where === "command" || where === "arg" || where === "env") local.add(name);
+          return name in builtin ? builtin[name] : machine.vars[name];
+        }
         if (!(name in secrets)) {
           lacking.add(name);
           return ref;
@@ -149,6 +152,7 @@ export function substitute(
       headers: subMap(item.headers, "header"),
       ...(agents && { agents }),
     };
+    if (local.size) s.machineVars = [...local].sort();
     if (lacking.size || problems.length) {
       for (const v of lacking) missing.add(v);
       skipped.push({ name: item.name, vars: [...lacking], ...(problems.length && { why: [...new Set(problems)].join("; ") }), item: s });

@@ -23,7 +23,7 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
   if (special === "skip") return null;
   const d = deliver(s, launch, "bridge");
   const base: Record<string, unknown> =
-    d.kind === "stdio" ? { command: d.command, args: [] }
+    d.kind === "stdio" ? { command: d.command, args: d.args }
     : s.url ? { url: s.url, ...(s.headers && { headers: s.headers }) }
     : { command: s.command, args: s.args ?? [], ...(s.env && { env: s.env }) };
   return special ? { ...base, ...special.raw } : base;
@@ -37,6 +37,7 @@ export const antigravity: Adapter = {
   homeConfig: [".gemini/GEMINI.md", ".gemini/config", ".gemini/antigravity-ide/mcp_config.json", ".gemini/antigravity-cli/mcp_config.json"],
   nativeMcp,
   httpSecrets: "bridge",
+  projectMcp: "portable",
 
   knownDirs(machine) {
     const p = join(machine.home, ".gemini", "projects.json");

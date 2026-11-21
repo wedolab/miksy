@@ -20,7 +20,8 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
   if (special === "skip") return null;
   const d = deliver(s, launch, "helper");
   const base: Record<string, unknown> =
-    d.kind === "stdio" ? { command: d.command, args: [] }
+    // Переносимая форма: Codex очищает окружение сервера (на Windows нет и HOME) — MIKSY_CONFIG, если задан, нужен miksy mcp
+    d.kind === "stdio" ? { command: d.command, args: d.args, ...(d.portable && { env_vars: ["MIKSY_CONFIG"] }) }
     : d.kind === "helper" ? { url: d.url, http_headers_helper: d.helper }
     : s.url ? { url: s.url, ...(s.headers && { http_headers: s.headers }) }
     : { command: s.command, args: s.args ?? [], ...(s.env && { env: s.env }) };
@@ -34,6 +35,7 @@ export const codex: Adapter = {
   internalMcp: ["node_repl"],
   nativeMcp,
   httpSecrets: "helper",
+  projectMcp: "portable",
   knownDirs: (machine) => Object.keys(readConfig(join(machine.home, ".codex", "config.toml")).projects ?? {}),
   current: (target, machine) => target.scope === "global"
     ? currentGlobal(machine.home) : currentProject(target.dir, machine.home, machine.os),

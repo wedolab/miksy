@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync } from "node:fs";
 import { apply, plan } from "../src/apply";
+import { configRoot } from "../src/load";
 import { canonical } from "../src/paths";
 import { emptyState, sha } from "../src/manifest";
 import { ADAPTERS, renderFor } from "../src/registry";
 import { compare } from "../src/sync";
-import { cliFixture, put, expectCode } from "./helpers";
+import { cliFixture, put, expectCode, mcpWrapper, portableRuns } from "./helpers";
 
 for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false, true]) test(`R2: ${id} keep own, последний=${last}`, () => {
   const f = cliFixture();
@@ -23,11 +24,12 @@ for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false
   const next = apply(plan(second.result, target, machine, state, false, id), state).state;
   const path = id === "codex" ? ".codex/config.toml" : id === "opencode" ? "opencode.json" : ".agents/plugins/miksy/mcp_config.json";
   const text = readFileSync(`${target.dir}/${path}`, "utf8");
-  // Пропущенный сервер остаётся обёрткой (значения в конфиге нет), обёртка — на месте
+  // Пропущенный сервер остаётся обёрткой (значения в конфиге нет), обёртка — на месте (круг 10u: в файле проекта —
+  // переносимый запуск miksy mcp, обёртка этой машины — в local/run по месту проекта)
   expect(text).not.toContain("artificial-value");
-  const wrapper = (text.replace(/\\+/g, "/").match(/[^"' [\]]*local\/run\/[^"' [\]]+/) ?? [])[0];
-  expect(wrapper).toBeDefined();
-  expect(existsSync(wrapper!)).toBe(true);
+  const runs = portableRuns(text);
+  expect(runs.map((r) => [r.agent, r.place, r.server])).toEqual([[id, "Org/p1", "secret"]]);
+  expect(existsSync(mcpWrapper(configRoot(), runs[0], machine.os))).toBe(true); // обёртки — в local/ конфигурации процесса
   if (!last) { expect(text).toContain("new"); expect(text).not.toContain('"old"'); }
   expect(plan(second.result, target, machine, next, false, id)).toEqual([]);
 }, 30000);

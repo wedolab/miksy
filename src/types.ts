@@ -12,6 +12,9 @@ export interface McpServer {
   os?: Os[];
   // Особенности конкретного агента: не подключать или подмешать сырые настройки
   agents?: Record<string, "skip" | { raw: Record<string, unknown> }>;
+  // Ставит подстановка (src/vars.ts): в command, args или env подставлены HOME, WORKSPACE или переменные
+  // machine.yaml — значения этой машины (в файл проекта такой сервер идёт через обёртку, src/launch.ts)
+  machineVars?: string[];
 }
 
 export interface Instruction {

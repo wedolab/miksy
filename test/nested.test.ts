@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { claude } from "../adapters/claude";
 import { sha } from "../src/manifest";
 import type { Resolved } from "../src/types";
-import { cliFixture, put, expectCode } from "./helpers";
+import { cliFixture, put, expectCode, mcpWrapper, portableRuns } from "./helpers";
 
 const real = (p: string) => realpathSync.native(p).replaceAll("\\", "/");
 
@@ -60,7 +60,9 @@ describe("вложенные проекты", () => {
     expectCode(r, 0);
     const toml = readFileSync(`${f.ws}/Org/notes/.codex/config.toml`, "utf8");
     expect(toml).not.toContain("glpat-very-secret");
-    expect(toml.replace(/\\+/g, "/")).toContain("local/run/codex/");
+    // Круг 10u: в файле проекта — переносимый запуск, обёртка этой машины — в local/run/codex/
+    expect(portableRuns(toml)).toEqual([{ agent: "codex", place: "Org/notes", server: "gl", kind: "stdio" }]);
+    expect(existsSync(mcpWrapper(f.config, portableRuns(toml)[0]))).toBe(true);
     expect(r.out).not.toContain("не защищены git");
     expect(r.out).toContain("GL_TOKEN");
     expect(r.out).not.toContain("glpat-very-secret");

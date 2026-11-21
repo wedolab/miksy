@@ -10,7 +10,7 @@ import { environment, opencodeMajor } from "../src/environ";
 import { canonical } from "../src/paths";
 import { rcAddsDir } from "../src/setup";
 import type { Machine, Resolved } from "../src/types";
-import { cliFixture, put, expectCode } from "./helpers";
+import { cliFixture, put, expectCode, mcpWrapper, portableRuns } from "./helpers";
 
 const win = process.platform === "win32";
 const os = win ? "windows" as const : process.platform === "darwin" ? "macos" as const : "linux" as const;
@@ -142,7 +142,10 @@ describe("агент antigravity (прежнее имя gemini — синони�
     expect(Object.keys(manifest.targets).filter((id) => id.startsWith("antigravity|")).length).toBe(2);
     expect(existsSync(`${f.config}/local/run/gemini`)).toBe(false);
     expect(readdirSync(`${f.config}/local/run/antigravity`).length).toBeGreaterThan(0);
-    expect(read(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`)).toMatch(/run[\\/]+antigravity/);
+    // Круг 10u: в файле проекта — переносимый запуск miksy mcp antigravity …, обёртка — в local/run/antigravity/
+    const runs = portableRuns(read(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`));
+    expect(runs.map((r) => r.agent)).toEqual(["antigravity"]);
+    expect(existsSync(mcpWrapper(f.config, runs[0]))).toBe(true);
     expect(read(`${f.home}/.gemini/config/mcp_config.json`)).toMatch(/run[\\/]+antigravity/);
     const ex = read(`${f.ws}/Org/p1/.git/info/exclude`);
     expect(ex).toContain("# >>> miksy:antigravity");

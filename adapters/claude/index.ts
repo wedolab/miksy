@@ -16,7 +16,7 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
   if (special === "skip") return null;
   const d = deliver(s, launch, "helper");
   const base: Record<string, unknown> =
-    d.kind === "stdio" ? { type: "stdio", command: d.command, args: [] }
+    d.kind === "stdio" ? { type: "stdio", command: d.command, args: d.args }
     : d.kind === "helper" ? { type: "http", url: d.url, headersHelper: d.helper }
     : s.url ? { type: "http", url: s.url, ...(s.headers && { headers: s.headers }) }
     : { type: "stdio", command: s.command, args: s.args ?? [], ...(s.env && { env: s.env }) };

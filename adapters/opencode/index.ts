@@ -20,7 +20,7 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
   if (special === "skip") return null;
   const d = deliver(s, launch, "file");
   const base: Record<string, unknown> =
-    d.kind === "stdio" ? { type: "local", command: [d.command] }
+    d.kind === "stdio" ? { type: "local", command: [d.command, ...d.args] }
     : d.kind === "file" ? { type: "remote", url: d.url, headers: d.headers }
     : s.url ? { type: "remote", url: s.url, ...(s.headers && { headers: s.headers }) }
     : { type: "local", command: [s.command, ...(s.args ?? [])], ...(s.env && { environment: s.env }) };
@@ -50,6 +50,7 @@ export const opencode: Adapter = {
   // читается только из каталога сессии — правила наследованием не приходят, нужна полная цепочка
   inherits: () => ({ skills: true, mcp: true }),
   httpSecrets: "file",
+  projectMcp: "portable",
 
   // opencode не хранит реестр проектов — каталоги берём из лога запусков
   knownDirs(machine) {

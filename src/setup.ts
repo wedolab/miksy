@@ -47,19 +47,31 @@ export const PROGRAMS: { name: string; commands: string[]; install: Record<Os, s
 
 // Команда miksy (shim): запускает Bun, которым её создал setup, — по пути без версии (stableBun), чтобы
 // sync из неё писал обёрткам моста тот же Bun; этого Bun нет — bun из PATH с предупреждением.
-// .cmd — ASCII, а путь с не-ASCII — под chcp 65001 с возвратом прежней страницы и кода выхода
+// .cmd — ASCII, а путь с не-ASCII — под chcp 65001 с возвратом прежней страницы и кода выхода.
+// Bun — с --no-env-file и пустым конфигом движка (круг 10u-2): команду запускают в любой папке (агент — miksy mcp в
+// папке проекта), и .env и bunfig.toml (preload) этой папки не должны попасть в процесс miksy и в серверы с
+// секретами. legacy — формат до 10u-2 (без этих флагов): setup узнаёт его как свой и переписывает
 const shq = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
-export function shimText(os: Os, bun: string, cli: string): string {
+export const shimConfig = (cli: string) => `${cli.slice(0, cli.lastIndexOf("/") + 1)}bridge.bunfig.toml`;
+// Те же флаги для процесса Bun с движком engine (update --finish, шаги downgrade — в каталоге пользователя);
+// у движка без пустого конфига (старые выпуски) — только --no-env-file
+export const engineBunArgs = (engine: string) => {
+  const cfg = shimConfig(slash(join(engine, "src", "cli.ts")));
+  return ["--no-env-file", ...(existsSync(cfg) ? [`--config=${cfg}`] : [])];
+};
+export function shimText(os: Os, bun: string, cli: string, legacy = false): string {
+  const cfg = shimConfig(cli);
   if (os !== "windows") return [
     "#!/bin/sh",
     "# Команда miksy — создана miksy setup, он же её обновляет",
     `b=${shq(bun)}`,
     `[ -x "$b" ] || { echo "miksy: нет Bun $b — запускаю bun из PATH (обновить команду: miksy setup)" >&2; b=bun; }`,
-    `exec "$b" ${shq(cli)} "$@"`,
+    `exec "$b" ${legacy ? "" : `--no-env-file ${shq(`--config=${cfg}`)} `}${shq(cli)} "$@"`,
     "",
   ].join("\n");
   const b = bun.replaceAll("/", "\\").replaceAll("%", "%%");
   const c = cli.replaceAll("%", "%%");
+  const flags = legacy ? "" : `--no-env-file "--config=${cfg.replaceAll("%", "%%")}" `;
   const utf8 = /[^\x00-\x7f]/.test(b + c);
   return [
     "@echo off",
@@ -67,12 +79,12 @@ export function shimText(os: Os, bun: string, cli: string): string {
     ...(utf8 ? ["set /a miksy_cp=0", `for /f "tokens=2 delims=:." %%c in ('chcp') do set /a "miksy_cp=%%c" >nul 2>&1`, "chcp 65001 >nul"] : []),
     "rem miksy command - created by miksy setup, which also updates it",
     `if not exist "${b}" goto path`,
-    `"${b}" "${c}" %*`,
+    `"${b}" ${flags}"${c}" %*`,
     // Код выхода — явно: exit /b без кода после setlocal возвращает 0
     utf8 ? "goto done" : "exit /b %errorlevel%",
     ":path",
     `echo miksy: Bun "${b}" not found - running bun from PATH (miksy setup updates this command) 1>&2`,
-    `bun "${c}" %*`,
+    `bun ${flags}"${c}" %*`,
     ...(utf8 ? [":done", "set miksy_rc=%errorlevel%", "if %miksy_cp% GTR 0 chcp %miksy_cp% >nul", "exit /b %miksy_rc%"] : ["exit /b %errorlevel%"]),
     "",
   ].join("\r\n");
@@ -82,15 +94,16 @@ export function shimText(os: Os, bun: string, cli: string): string {
 const OLD_SHIM = /^(?:@bun "[^"\r\n]*\/src\/cli\.ts" %\*\r?\n?|#!\/bin\/sh\nexec bun "[^"\n]*\/src\/cli\.ts" "\$@"\n?)$/;
 export function ourShim(text: string): boolean {
   if (OLD_SHIM.test(text)) return true;
-  const sh = text.match(/^b='((?:[^']|'\\'')*)'$[\s\S]*^exec "\$b" '((?:[^']|'\\'')*)' "\$@"$/m);
+  // Нынешний формат и формат до 10u-2 (legacy, без --no-env-file и --config)
+  const sh = text.match(/^b='((?:[^']|'\\'')*)'$[\s\S]*^exec "\$b" (?:--no-env-file '(?:[^']|'\\'')*' )?'((?:[^']|'\\'')*)' "\$@"$/m);
   if (sh) {
     const un = (s: string) => s.replaceAll("'\\''", "'");
-    return text === shimText("macos", un(sh[1]), un(sh[2]));
+    return [false, true].some((legacy) => text === shimText("macos", un(sh[1]), un(sh[2]), legacy));
   }
   const cmd = text.match(/^if not exist "([^"\r\n]*)" goto path\r$/m);
-  const cli = text.match(/^bun "([^"\r\n]*)" %\*\r$/m);
+  const cli = text.match(/^bun (?:--no-env-file "[^"\r\n]*" )?"([^"\r\n]*)" %\*\r$/m);
   if (!cmd || !cli) return false;
-  return text === shimText("windows", cmd[1].replaceAll("%%", "%"), cli[1].replaceAll("%%", "%"));
+  return [false, true].some((legacy) => text === shimText("windows", cmd[1].replaceAll("%%", "%"), cli[1].replaceAll("%%", "%"), legacy));
 }
 
 // Все ${VAR} из MCP слоёв: имя → слои, где встречается. applies — слой (путь от layers/: global,

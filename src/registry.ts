@@ -356,7 +356,19 @@ export function teamFor(cfg: Resolved, target: Target, adapter: Adapter): { cfg:
 // Доставка секретов цели: обёртки и helper-ы в local/run/<агент>/<цель>/. Bun моста — по стабильному
 // пути (без каталога с версией): обновление Bun не ломает обёртки
 export function launcherFor(adapter: Adapter, target: Target, machine: Machine) {
-  return createLauncher({ os: machine.os, local: join(configRoot(), "local"), agent: adapter.id, target, bun: stableBun(process.execPath), engine: ENGINE });
+  const portable = target.scope === "project" && adapter.projectMcp === "portable" ? target.rel : undefined;
+  const blocked = portable === undefined ? undefined : sharedPlace(portable, machine);
+  return createLauncher({ os: machine.os, local: join(configRoot(), "local"), agent: adapter.id, target, bun: stableBun(process.execPath), engine: ENGINE,
+    ...(portable !== undefined && { portable }), ...(blocked && { portableBlocked: blocked }) });
+}
+
+// Место в дереве, которое есть у двух корней (ветка корня совпадает с папкой другого — treeClashes, и в обоих есть
+// эта папка): у обеих целей был бы один каталог обёрток, и miksy mcp не различил бы их — переносимая форма не пишется
+function sharedPlace(rel: string, machine: Machine): string | undefined {
+  const roots = machineRoots(machine);
+  if (roots.length < 2) return undefined;
+  const dirs = dirsOf(rel, roots);
+  return dirs.length > 1 ? `место проекта «${rel}» в дереве слоёв есть у двух корней (${dirs.map((d) => d.dir).join(" и ")}), и команда miksy mcp не различит их. Чтобы это исправить, смените tree корня или переименуйте папку` : undefined;
 }
 
 // Полная генерация для цели: подстановка переменных, импорт командных skills, рендер адаптера.

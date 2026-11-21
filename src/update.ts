@@ -11,7 +11,7 @@ import { gitEnv, gitSpawn } from "./git";
 import { ENGINE, loadMachine } from "./load";
 import { quoteArg, slash } from "./paths";
 import { agentsFor } from "./registry";
-import { planSummary, type Run, setup } from "./setup";
+import { engineBunArgs, planSummary, type Run, setup } from "./setup";
 import type { Machine } from "./types";
 import { compareVersions, describeEngine, engineRepo, engineVersion, packageVersion, SEMVER } from "./version";
 
@@ -311,7 +311,7 @@ export function update(o: UpdateOptions): number {
   function done(): number {
     log(`\n✓ движок обновлён: ${current} → ${describeEngine(engine)}`);
     const finish = o.finish ?? ((e: string, from: string) => {
-      const r = Bun.spawnSync([process.execPath, join(e, "src", "cli.ts"), "update", "--finish", "--from", from], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      const r = Bun.spawnSync([process.execPath, ...engineBunArgs(e), join(e, "src", "cli.ts"), "update", "--finish", "--from", from], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
       return r.exitCode ?? 1;
     });
     return finish(engine, curVersion ?? "0.0.0");

@@ -20,8 +20,16 @@ import { BRIDGE_RESET, bridgeEnv, type Part, parts, serverSecrets } from "./vars
 // Сочетание, которое этот способ доставки передать не может: сервер пропускается с сообщением
 export class DeliveryError extends Error {}
 
+// Как агенту запустить сервер: команда и аргументы
+export type Run = { command: string; args: string[] };
+
 export interface Launcher {
   os: Os;
+  // Переносимая форма (MCP цели лежит в папке проекта, src/adapter.ts projectMcp): в конфиг агента идёт
+  // «miksy mcp <агент> <место> <сервер>», путь обёртки этой машины команда находит сама (src/mcprun.ts)
+  portable: boolean;
+  run(s: McpServer, kind: "stdio" | "bridge"): Run; // запуск обёртки: путь или (portable) команда miksy
+  notes: string[]; // предупреждения доставки (имя не передать команде miksy — записан путь этой машины)
   secretsDir: string; // абсолютный каталог файлов секретов
   secretPath(name: string): string; // абсолютный путь файла секрета (прямые слэши)
   stdio(s: McpServer): string; // путь обёртки для command
@@ -38,6 +46,10 @@ export interface LaunchOptions {
   target: Target;
   bun: string; // исполняемый файл Bun для моста
   engine: string; // каталог движка (src/bridge.ts)
+  portable?: string; // место цели в дереве (target.rel): обёртки — по нему, в конфиг — команда miksy
+  // Переносимая форма невозможна (место в дереве есть у двух корней — miksy mcp не различил бы их): почему; в
+  // конфиг — пути этой машины с этим предупреждением
+  portableBlocked?: string;
 }
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -66,6 +78,16 @@ export function targetSlug(target: Target): string {
   if (target.scope === "global") return "global";
   return `${safeName(basename(target.dir)).slice(0, 40)}-${sha(fold(pathKey(target.dir))).slice(0, 8)}`;
 }
+
+// Каталог обёрток переносимой цели — по месту в дереве (одинаково на машинах с одной tree), а не по
+// абсолютному пути: команда miksy mcp находит его по аргументам без корней и machine.yaml
+export function placeSlug(rel: string): string {
+  return `${safeName(rel.slice(rel.lastIndexOf("/") + 1)).slice(0, 40)}-${sha(`tree\0${fold(rel)}`).slice(0, 8)}`;
+}
+
+// Знаки, которые доходят до miksy одинаково через любой запуск агента (Rust/Go/cross-spawn → miksy.cmd через
+// cmd.exe на Windows, sh на macOS и Linux) и в строке helper-а в двойных кавычках: буквы, цифры, пробел, . _ - / + , @
+export const portableName = (s: string) => /^[\p{L}\p{N}._\- /+,@]+$/u.test(s) && !s.startsWith("-");
 
 export { BRIDGE_RESET };
 
@@ -162,7 +184,16 @@ function cmdMissing(server: string, dir: string, names: string[]): string[] {
 export function createLauncher(o: LaunchOptions): Launcher {
   const win = o.os === "windows";
   const secretsDir = slash(join(o.local, "secrets"));
-  const runRel = `run/${safeName(o.agent)}/${targetSlug(o.target)}`;
+  const notes: string[] = [];
+  // Переносимая форма — только для имён, которые доходят до miksy без искажений; иначе путь этой машины
+  const placeOk = o.portable !== undefined && portableName(o.portable) && !o.portableBlocked;
+  const LIMIT = "содержит знаки, которые нельзя передать команде miksy одинаково на всех ОС (можно буквы, цифры, пробел и . _ - / + , @; не в начале -)";
+  const SHARED = "если папка проекта общая с другой машиной, там будет конфликт файлов miksy";
+  const placeNote = o.portableBlocked
+    ? `${o.portableBlocked} — в файл проекта записаны пути этой машины: ${SHARED}`
+    : `путь проекта «${o.portable}» ${LIMIT} — в файл проекта записаны пути этой машины: ${SHARED}. Чтобы его не было, переименуйте папку`;
+  const legacyRel = `run/${safeName(o.agent)}/${targetSlug(o.target)}`;
+  const runRel = placeOk ? `run/${safeName(o.agent)}/${placeSlug(o.portable!)}` : legacyRel;
   const made = new Map<string, RenderedFile>();
   const where = o.target.scope === "global" ? "глобально" : o.target.rel || o.target.dir;
   const native = (rel: string) => {
@@ -211,8 +242,23 @@ export function createLauncher(o: LaunchOptions): Launcher {
     return put(`${file}.cmd`, lines.join("\r\n") + "\r\n");
   };
 
-  return {
+  const portableFor = (s: McpServer) => {
+    if (o.portable === undefined) return false;
+    const note = !placeOk ? placeNote : portableName(s.name) ? null
+      : `mcp ${s.name}: имя сервера ${LIMIT} — в файл проекта записан путь этой машины: ${SHARED}. Чтобы его не было, переименуйте сервер в слое`;
+    if (note === null) return true;
+    if (!notes.includes(note)) notes.push(note);
+    return false;
+  };
+  const self = {
     os: o.os,
+    portable: o.portable !== undefined,
+    notes,
+    run(s: McpServer, kind: "stdio" | "bridge"): Run {
+      const path = kind === "stdio" ? self.stdio(s) : self.bridge(s);
+      if (!portableFor(s)) return { command: path, args: [] };
+      return { command: "miksy", args: ["mcp", o.agent, o.portable!, s.name, ...(kind === "bridge" ? ["--bridge"] : [])] };
+    },
     secretsDir,
     secretPath: (n) => `${secretsDir}/${n}`,
     stdio(s) {
@@ -287,27 +333,44 @@ export function createLauncher(o: LaunchOptions): Launcher {
     },
     files: () => [...made.values()],
     kept(name) {
-      return [...(["stdio", "headers", "bridge"] as const).map((k) => scriptName(name, k)), ...legacyNames(name)].flatMap((f) => [".sh", ".cmd"].map((e) => `${runRel}/${f}${e}`))
+      // Записанное раньше определение может ссылаться на каталог по абсолютному пути (до переносимой формы)
+      return [...new Set([runRel, legacyRel])].flatMap((dir) => [...(["stdio", "headers", "bridge"] as const).map((k) => scriptName(name, k)), ...legacyNames(name)].flatMap((f) => [".sh", ".cmd"].map((e) => `${dir}/${f}${e}`)))
         .filter((rel) => existsSync(join(o.local, rel)))
         .map((rel) => ({ base: "local" as const, path: rel, mode: "own" as const, content: readFileSync(join(o.local, rel), "utf8"), executable: true }));
     },
   };
+  return self;
 }
 
 // Как агент получит сервер: без секретов — как есть; stdio — обёрткой; HTTP — штатным механизмом
 // агента (http: helper заголовков, {file:} или мост); секрет в URL — только мост
 export type Delivered =
   | { kind: "plain"; server: McpServer }
-  | { kind: "stdio"; command: string }
+  | { kind: "stdio"; command: string; args: string[]; portable?: boolean }
   | { kind: "helper"; url: string; helper: string }
   | { kind: "file"; url: string; headers: Record<string, string> };
 
 export function deliver(s: McpServer, launch: Launcher | undefined, http: "helper" | "file" | "bridge"): Delivered {
-  if (!serverSecrets(s).length) return { kind: "plain", server: s };
+  const stdio = (kind: "stdio" | "bridge"): Delivered => {
+    const r = launch!.run(s, kind);
+    return { kind: "stdio", ...r, ...(r.command === "miksy" && { portable: true }) };
+  };
+  if (!serverSecrets(s).length) {
+    // Переносимая цель: подставленные пути и переменные машины — тоже через обёртку (в файле проекта — без них)
+    // Обёртка не передаёт значение (кавычка в аргументе .cmd и т. п.) — как раньше, значения этой машины в файле
+    if (launch?.portable && !s.url && s.machineVars?.length) {
+      try { return stdio("stdio"); }
+      catch (e) {
+        if (!(e instanceof DeliveryError)) throw e;
+        launch.notes.push(`mcp ${s.name}: ${e.message} — сервер записан в файл проекта со значениями этой машины, как раньше: если папка проекта общая с другой машиной, там будет конфликт файлов miksy`);
+      }
+    }
+    return { kind: "plain", server: s };
+  }
   if (!launch) throw new DeliveryError("секрет без доставки (ошибка вызова адаптера)");
-  if (!s.url) return { kind: "stdio", command: launch.stdio(s) };
+  if (!s.url) return stdio("stdio");
   const inUrl = parts(s.url).some((x) => typeof x !== "string");
-  if (inUrl || http === "bridge") return { kind: "stdio", command: launch.bridge(s) };
+  if (inUrl || http === "bridge") return stdio("bridge");
   if (http === "helper") return { kind: "helper", url: s.url, helper: launch.helper(s) };
   const headers = Object.fromEntries(Object.entries(s.headers ?? {}).map(([k, v]) =>
     [k, parts(v).map((x) => (typeof x === "string" ? x : `{file:${launch.secretPath(x.secret)}}`)).join("")]));
@@ -323,7 +386,7 @@ export function nativeServers(
   launch: Launcher | undefined,
   warnings: string[],
 ): Record<string, Record<string, unknown>> {
-  return Object.fromEntries(mcp.flatMap(({ item }) => {
+  const out = Object.fromEntries(mcp.flatMap(({ item }) => {
     try {
       const n = native(item, launch);
       if (!n) warnings.push(`mcp ${item.name}: для ${agent} указан skip`);
@@ -334,4 +397,6 @@ export function nativeServers(
       return [];
     }
   }));
+  for (const n of launch?.notes ?? []) if (!warnings.includes(n)) warnings.push(n);
+  return out;
 }

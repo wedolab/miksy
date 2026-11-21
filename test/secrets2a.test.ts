@@ -70,14 +70,14 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     expect(claude.mcpServers.plain).toEqual({ type: "stdio", command: "echo", args: ["hi"] });
     // Codex: http_headers_helper
     expect(readFileSync(`${f.home}/.codex/config.toml`, "utf8")).toContain("http_headers_helper");
-    // opencode: форма mcp.<имя>, stdio — command: [обёртка], HTTP — {file:} файла секрета
+    // opencode: форма mcp.<имя>, stdio — command: переносимый запуск обёртки (круг 10u), HTTP — {file:} файла секрета
     const oc = JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8"));
-    expect(oc.mcp["stdio-secret"].command).toHaveLength(1);
+    expect(oc.mcp["stdio-secret"].command).toEqual(["miksy", "mcp", "opencode", "Org/p1", "stdio-secret"]);
     expect(oc.mcp["http-secret"].headers.Authorization).toMatch(/^Bearer \{file:.*local\/secrets\/HTTP_TOKEN\}$/);
     expect(oc.mcp.servers).toBeUndefined();
     // Antigravity: HTTP с секретом — мост (stdio), в плагине проекта и в обоих глобальных конфигах
     const plugin = JSON.parse(readFileSync(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`, "utf8"));
-    expect(plugin.mcpServers["http-secret"].command).toMatch(/http-secret-bridge-[0-9a-f]{8}\.(cmd|sh)$/);
+    expect(plugin.mcpServers["http-secret"]).toMatchObject({ command: "miksy", args: ["mcp", "antigravity", "Org/p1", "http-secret", "--bridge"] });
     expect(plugin.mcpServers["http-secret"].url).toBeUndefined();
     for (const c of [".gemini/config/mcp_config.json", ".gemini/antigravity-ide/mcp_config.json"])
       expect(JSON.parse(readFileSync(`${f.home}/${c}`, "utf8")).mcpServers["http-secret"].command).toMatch(/-bridge-[0-9a-f]{8}\.(cmd|sh)$/);

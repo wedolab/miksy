@@ -162,6 +162,12 @@ describe("setup: команда miksy запоминает Bun", () => {
     writeFileSync(f.shim, win ? `@bun "${CLI_PATH}" %*\r\n` : `#!/bin/sh\nexec bun "${CLI_PATH}" "$@"\n`);
     expect(f.setup().stdout.toString()).toContain("команда miksy обновлена");
     expect(readFileSync(f.shim, "utf8")).toBe(now);
+    // Формат 0.4.0 (до круга 10u-2: без --no-env-file и --config) — своя команда, обновляется (update — тем же setup)
+    writeFileSync(f.shim, shimText(os, stableBun(process.execPath).replaceAll("\\", "/"), CLI_PATH, true));
+    expect(ourShim(readFileSync(f.shim, "utf8"))).toBe(true);
+    expect(f.setup().stdout.toString()).toContain("команда miksy обновлена");
+    expect(readFileSync(f.shim, "utf8")).toBe(now);
+    expect(now).toContain("--no-env-file");
     // Новый формат, но другой Bun (был Homebrew, стал ~/.bun/bin)
     writeFileSync(f.shim, shimText(os, "/opt/homebrew/bin/bun", CLI_PATH));
     f.setup();
@@ -191,7 +197,7 @@ describe("setup: команда miksy запоминает Bun", () => {
   test("путь с не-ASCII — .cmd под chcp 65001 с возвратом страницы; sh — в кавычках", () => {
     const text = shimText("windows", "C:/Users/Иван/.bun/bin/bun.exe", "D:/ai/miksy%x/src/cli.ts");
     expect(text).toContain("chcp 65001 >nul");
-    expect(text).toContain('"C:\\Users\\Иван\\.bun\\bin\\bun.exe" "D:/ai/miksy%%x/src/cli.ts" %*');
+    expect(text).toContain('"C:\\Users\\Иван\\.bun\\bin\\bun.exe" --no-env-file "--config=D:/ai/miksy%%x/src/bridge.bunfig.toml" "D:/ai/miksy%%x/src/cli.ts" %*');
     expect(text).toContain("exit /b %miksy_rc%");
     expect(ourShim(text)).toBe(true);
     expect(shimText("windows", "C:/b/bun.exe", "D:/cli.ts")).not.toContain("chcp");

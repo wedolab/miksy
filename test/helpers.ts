@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { expect } from "bun:test";
+import { placeSlug, scriptName } from "../src/launch";
 
 export const CLI = resolve(import.meta.dir, "..", "src", "cli.ts");
 
@@ -40,6 +41,16 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
     return res;
   };
   return { dir, config, home, ws, run };
+}
+
+// Переносимый запуск в файле проекта (круг 10u): «miksy mcp <агент> <место> <сервер> [--bridge]» в TOML или JSON →
+// обёртка этой машины, как её находит src/mcprun.ts. Нет такого запуска — null
+export function portableRuns(text: string): { agent: string; place: string; server: string; kind: "stdio" | "bridge" }[] {
+  return [...text.replace(/\s+/g, " ").matchAll(/"mcp", "([^"]+)", "([^"]+)", "([^"]+)"(, "--bridge")?/g)]
+    .map((m) => ({ agent: m[1], place: m[2], server: m[3], kind: m[4] ? "bridge" as const : "stdio" as const }));
+}
+export function mcpWrapper(config: string, r: { agent: string; place: string; server: string; kind?: "stdio" | "bridge" | "headers" }, os = process.platform === "win32" ? "windows" : "macos"): string {
+  return `${config}/local/run/${r.agent}/${placeSlug(r.place)}/${scriptName(r.server, r.kind ?? "stdio")}${os === "windows" ? ".cmd" : ".sh"}`;
 }
 
 // Текстовые файлы каталога для проверок «что записано»: без .git (кроме info/exclude) и без бинарных

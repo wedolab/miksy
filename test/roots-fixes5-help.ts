@@ -293,7 +293,8 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     // Машина A
     put(`${f.config}/local/machine.yaml`, yamlA);
     expectCode(f.run(["sync", p1]), 0);
-    expect(read(`${p1}/.codex/config.toml`)).toContain("tool.exe");
+    // Круг 10u: в файле проекта — переносимый запуск (путь программы машины A — в её обёртке)
+    expect(read(`${p1}/.codex/config.toml`)).toContain(`"args" = ["mcp", "codex", "Org/p1", "tool"]`);
     const ledgerA = read(manifest);
     const exA = exclude(p1);
     // Машина B: своя конфигурация (тот же репо слоёв), свой учёт — без записей об этом проекте, переменной TOOL нет
