@@ -98,6 +98,7 @@ reads Russian fine and can explain the steps to you in English.
 | `miksy explain [<path>]` | what a folder (the current one by default) gets and from which layer; `--global` — home folder settings |
 | `miksy trust [<path>]` | decide whether to trust a project whose hooks or MCP servers were not set up by miksy (`sync` asks itself) |
 | `miksy update` | update miksy to the latest release (`--check` only checks) |
+| `miksy downgrade [<version>]` | go back to the previous version (the one before the last update, or a given one, 0.3.0 or newer) and rewrite the agents' settings with it |
 | `miksy clean --all`, `miksy clean --global` | remove everything miksy wrote (to uninstall it) |
 | `miksy restore` | after `clean`: bring back the agents' settings from the "before miksy" copy the installer made |
 

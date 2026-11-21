@@ -16,6 +16,7 @@ import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsaf
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
 import { checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
+import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
 import { engineVersion, newerLedger } from "./version";
@@ -108,6 +109,10 @@ export const USAGE = `miksy — раскладывает ваши правила
 Обновление miksy
   miksy update                 новая версия (ветка stable): покажет, что изменилось, и после
                                «да» обновит. --check — только проверить, есть ли новая
+  miksy downgrade [<версия>]   откатить на прежнюю версию (без номера — ту, что стояла до
+                               обновления): покажет, что уйдёт, и после «да» вернёт движок и
+                               перепишет настройки агентов прежней версией. --dry-run — только
+                               показать, --yes — без вопроса. Обратно — miksy update
   miksy version                версия (то же — miksy --version)
 
 Примеры
@@ -1549,6 +1554,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       code = "finish" in flags
         ? finishUpdate({ from: flags.from ?? "0.0.0", ask, run: runCommand })
         : update({ ask, yes: "yes" in flags, check: "check" in flags, main: "main" in flags });
+      break;
+
+    case "downgrade":
+      code = downgrade({ version: positional[0], ask, yes: "yes" in flags, dryRun: "dry-run" in flags });
       break;
 
     case "doctor": {

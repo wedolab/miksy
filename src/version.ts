@@ -68,13 +68,13 @@ export function oldBun(version: string = Bun.version): string | null {
 }
 
 // Учёт записан более новой версией движка: на другой копии движка уже обновились или этот откатили. Только
-// сообщение, запись не блокируется: рецепт отката (docs/update.md, «Откатиться на прежнюю версию») — setup и sync прежней
-// версией, а учёт совместим вперёд — чужое не перезаписывается, лишнее поле прежняя версия отбрасывает. Отметку
+// сообщение, запись не блокируется: откат (miksy downgrade, src/downgrade.ts) — setup и sync прежней версией, а учёт
+// совместим вперёд — чужое не перезаписывается, лишнее поле прежняя версия отбрасывает. Отметку
 // переписывают setup этой версии (markLedger, src/setup.ts — с 0.2.2) и любая запись учёта. Сравниваются номера
 // X.Y.Z: сборка main «0.2.0-3-g…» — та же 0.2.0, не новее
 export function newerLedger(recorded: string | undefined, engine = ENGINE): string | null {
   const mine = packageVersion(engine);
   const theirs = recorded && baseVersion(recorded);
   if (!theirs || mine === "?" || compareVersions(theirs, mine) <= 0) return null;
-  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}. Обновились на другой копии движка — обновите и эту: miksy update. Откатились нарочно — сделайте шаги из docs/update.md, «Откатиться на прежнюю версию»: без них часть записанного будет конфликтами (ничего не потеряется); шаг miksy setup из них уберёт и это сообщение (если команда miksy ведёт на этот движок; иначе оно пропадёт при первом sync с изменениями)`;
+  return `учёт miksy (local/state/manifest.json) записан более новой версией движка — ${theirs}, а этот движок — ${mine}. Обновились на другой копии движка — обновите и эту: miksy update. Откатили движок сами (git), а не командой miksy downgrade, — выполните miksy setup --yes, затем miksy sync --global и miksy sync --all (docs/update.md, «Откатиться на прежнюю версию»): без них часть записанного будет конфликтами (ничего не потеряется); miksy setup уберёт и это сообщение (если команда miksy ведёт на этот движок; иначе оно пропадёт при первом sync с изменениями)`;
 }

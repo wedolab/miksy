@@ -31,11 +31,11 @@ export type UpdateOptions = {
   finish?: (engine: string, from: string) => number;
 };
 
-type Git = (args: string[], net?: boolean) => { code: number; out: string; err: string };
+export type Git = (args: string[], net?: boolean) => { code: number; out: string; err: string };
 
 // git в каталоге движка. Сетевые команды без терминала не спрашивают учётные данные (иначе агент
 // повис бы на запросе) и ограничены по времени
-function gitIn(engine: string, interactive: boolean): Git {
+export function gitIn(engine: string, interactive: boolean): Git {
   return (args, net = false) => {
     const env: Record<string, string | undefined> = { ...gitEnv() };
     if (net && !interactive) Object.assign(env, { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" });
@@ -52,12 +52,12 @@ function gitIn(engine: string, interactive: boolean): Git {
   };
 }
 
-const lastLine = (s: string) => s.split("\n").filter((l) => l.trim()).pop() ?? "";
+export const lastLine = (s: string) => s.split("\n").filter((l) => l.trim()).pop() ?? "";
 // Ошибка сети git: последняя строка и, если похоже на отказ в доступе (репо приватный), — как войти
-const netError = (err: string, code: number) => `${lastLine(err) || `код ${code}`}${
+export const netError = (err: string, code: number) => `${lastLine(err) || `код ${code}`}${
   /could not read Username|Authentication failed|Permission denied|Repository not found|terminal prompts disabled/i.test(err)
     ? ". Нет доступа к репо: войдите в GitHub (gh auth login, затем gh auth setup-git) или клонируйте по SSH-адресу" : ""}`;
-const versionOf = (pkg: string | null) => {
+export const versionOf = (pkg: string | null) => {
   try {
     const v = pkg && (JSON.parse(pkg) as { version?: unknown }).version;
     return typeof v === "string" && SEMVER.test(v) ? v : null;
