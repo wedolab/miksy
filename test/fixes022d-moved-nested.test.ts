@@ -102,26 +102,3 @@ test("B №2: перенесли содержимое, прежняя папка
     code: a.code, after: [rules(`${ws2}/Org/p1/CLAUDE.local.md`), rules(`${ws2}/Lab/q/CLAUDE.local.md`)],
   }, said(a)).toEqual({ said: true, back: false, leaves: false, code: 0, after: before });
 }, 240000);
-
-// B №4: прежний основной без ветки, у нового основного папка с тем же именем (Org) — перенос layers/tree/Org снял бы
-// слои и с её проектов: рецепта «Вернуть его: 1) …» нет, названа папка. Без совпадений — рецепт, и в нём B №5: в новой
-// копии файлы с путями — конфликт до sync --force
-for (const clash of [true, false])
-  test(`B №4, B №5: новый основной — другая папка${clash ? " с той же папкой Org" : " без общих папок"}`, () => {
-    const f = cliFixture({ projects: [] });
-    const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
-    git(`${ws}/Org/p1`);
-    git(`${ws}/Lab/q`);
-    git(`${work}/${clash ? "Org" : "Team"}/p2`);
-    git(`${work}/Other/r`);
-    put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws])}agents: [claude]\n`);
-    put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-    expectCode(f.run(["sync", "--all", "--yes"]), 0);
-    const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
-    const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
-    expect({
-      recipe: line.includes("Вернуть его: 1) "),
-      named: line.includes("у нового основного есть папка с тем же именем (Org), и если переложить layers/tree/<папка> под ветку прежнего, проекты этой папки нового основного потеряют правила, MCP и skills из этих слоёв"),
-      copy: line.includes('в новой копии файлы miksy с путями (например, .codex/config.toml с ${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет)'),
-    }).toEqual(clash ? { recipe: false, named: true, copy: true } : { recipe: true, named: false, copy: true });
-  }, 240000);

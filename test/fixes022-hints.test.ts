@@ -66,6 +66,13 @@ function followSetupHint(f: F, out: string, folders: string[]) {
   const m = line.match(/2\) miksy root add (?:"([^"]+)"|'((?:[^']|'')+)') --tree ("[^"]*"|'(?:[^']|'')*'|\S+) /)!;
   const unq = (s: string) => (s.startsWith("'") ? s.slice(1, -1).replaceAll("''", "'") : s);
   const add = [m[0], m[1] ?? unq(`'${m[2]}'`), m[3].startsWith("'") ? `"${unq(m[3])}"` : m[3]];
+  returnRoot(f, branch, add[1], add[2].replace(/^"|"$/g, ""), folders, split);
+  return branch;
+}
+
+// Вернуть прежний основной дополнительным корнем, как в docs/roots.md: слои его папок — под ветку, привязки map.yaml —
+// ветку в начало (в {…} — к каждой папке или, с «,» и «}» в ветке, отдельной привязкой), ** в начале — без изменений; root add
+function returnRoot(f: F, branch: string, path: string, tree: string, folders: string[], split = /[,}]/.test(branch)) {
   for (const d of folders) if (existsSync(`${f.config}/layers/tree/${d}`)) {
     mkdirSync(`${f.config}/layers/tree/${branch}`, { recursive: true });
     renameSync(`${f.config}/layers/tree/${d}`, `${f.config}/layers/tree/${branch}/${d}`);
@@ -78,9 +85,8 @@ function followSetupHint(f: F, out: string, folders: string[]) {
       ? alts.split(",").map((a) => `${pre}match: ${JSON.stringify(`${branch}/${a}${rest}`)}${post}`).join("\n")
       : `${pre}match: ${JSON.stringify(`{${alts.split(",").map((a) => `${branch}/${a}`).join(",")}}${rest}`)}${post}`);
   writeFileSync(`${f.config}/map.yaml`, map);
-  const r = inProcess(f, ["root", "add", add[1], "--tree", add[2].replace(/^"|"$/g, "")], f.dir, [true]);
+  const r = inProcess(f, ["root", "add", path, "--tree", tree], f.dir, [true]);
   expect(r.err).toBe("");
-  return branch;
 }
 
 // Прежний основной корень <name> (Org/p1, Lab/p2) и дополнительный drive (Clients); привязки map.yaml трёх видов
@@ -215,22 +221,6 @@ test("е: clean пропавшей забытой папки вне workspace �
   expect(f.run(["clean", site]).out).not.toContain("осталась только отметка");
 }, 240000);
 
-// Круг 8b, C6 (рецензия B №4 проверки 8a): основным setup --force выбран новый каталог, не из дополнительных. «Вернуть
-// его» печатается и тут; выполненный дословно, он возвращает проектам прежнего основного те же слои; подсказка clean
-// забытой папки вне workspace ссылается на него — по ней в папке ничего не остаётся
-for (const name of ["ws", "Work, old"])
-  test(`C6: setup --force, основной — новый каталог; прежний основной «${name}» — «Вернуть его» дословно возвращает слои`, () => {
-    const { f, ws } = forceScenario(name);
-    const fresh = `${f.dir}/New`;
-    mkdirSync(fresh, { recursive: true });
-    const s = inSetup(f, true, [[/Корень workspace/, [fresh]], [/Есть ещё папки/, [null]]]);
-    expectCode(s, 0);
-    expect(s.out).toContain(`прежний основной ${ws} из workspace уходит`);
-    followSetupHint(f, s.out, ["Org", "Lab"]);
-    expect(rules(`${ws}/Org/p1/CLAUDE.local.md`)).toEqual(["org", "orgx", "both", "deep"]);
-    expect(rules(`${ws}/Lab/p2/CLAUDE.local.md`)).toEqual(["both"]);
-  }, 180000);
-
 test("C6: забытая папка, основной сменил setup --force на новый каталог — подсказка clean верна; по ней в папке ничего", () => {
   const { f, ws } = forceScenario("ws");
   const p1 = `${ws}/Org/p1`;
@@ -239,12 +229,12 @@ test("C6: забытая папка, основной сменил setup --force
   renameSync(`${ws}-x`, ws);
   const fresh = `${f.dir}/New`;
   mkdirSync(fresh, { recursive: true });
-  const s = inSetup(f, true, [[/Корень workspace/, [fresh]], [/Есть ещё папки/, [null]]]);
+  const s = inSetup(f, true, [[/Корень workspace/, [fresh]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]]]);
   expectCode(s, 0);
+  expect(s.out).toContain(`прежний основной ${ws} из workspace уходит`);
   const c = f.run(["clean", p1]);
   expect(c.out).toContain("ветка — любая новая, которой нет в layers/tree. Слои его проектов под неё скопируйте, а не переносите");
-  expect(s.out).toContain("Вернуть его: 1) ");
-  followSetupHint(f, s.out, ["Org", "Lab"]);
+  returnRoot(f, "Old", ws, "Old", ["Org", "Lab"]);
   runLines(f, c.out.split("\n").filter((l) => /^\s+miksy sync/.test(l)));
   expect(filesIn(p1)).toEqual([]);
   expect(forgotten(f)).toEqual([]);
@@ -279,45 +269,6 @@ test("C7: root remove без «забыть» — команда поиска к
   expect(read(last).match(/path: "([^"]+)", tree: "([^"]+)"/)!.slice(1)).toEqual([drive, "Clients"]);
 }, 240000);
 
-// Рецензия A круга 8b, п. 2: у прежнего основного была ветка (Main) — новый каталог берёт её, «Вернуть его» печатается:
-// слои прежнего — из layers/tree/Main/<папка> под новую ветку, привязки «Main/…» — под неё же; дословно — слои те же
-test("C6: прежний основной с веткой, основной — новый каталог: «Вернуть его» дословно возвращает слои", () => {
-  const f = cliFixture({ projects: [] });
-  const ws = `${f.dir}/ws`, drive = `${f.dir}/drive`;
-  git(`${ws}/Org/p1`);
-  git(`${ws}/Lab/p2`);
-  git(`${drive}/Acme/site`);
-  put(`${f.config}/local/machine.yaml`, `${yamlRoots([{ path: ws, tree: "Main" }, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
-  put(`${f.config}/map.yaml`, "global:\n  - { use: global }\nlayers:\n  - { match: \"Main/Org/**\", use: orgx }\n  - { match: \"{Main/Org,Main/Lab}/**\", use: both }\n  - { match: \"**/p1\", use: deep }\n");
-  for (const l of ["orgx", "both", "deep"]) put(`${f.config}/layers/${l}/instructions/50-${l}.md`, `# ${l} rule\n`);
-  put(`${f.config}/layers/tree/Main/Org/instructions/10-org.md`, "# org rule\n");
-  // Слой самой ветки (повторная проверка круга 8b, п. 1) — должен вернуться прежнему основному, а не остаться у нового
-  put(`${f.config}/layers/tree/Main/instructions/05-main.md`, "# main rule\n");
-  expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  expect(rules(`${ws}/Org/p1/CLAUDE.local.md`)).toEqual(["main", "org", "orgx", "both", "deep"]);
-  const fresh = `${f.dir}/New`;
-  git(`${fresh}/Acme/n1`);
-  const s = inSetup(f, true, [[/Корень workspace/, [fresh]], [/Есть ещё папки/, [null]]]);
-  expectCode(s, 0);
-  const line = s.out.split("\n").find((l) => l.includes("Вернуть его"))!;
-  expect(line).toContain(`прежний основной ${ws} из workspace уходит`);
-  const branch = line.match(/папку layers\/tree\/Main целиком \(с её собственными instructions, mcp, skills\) переименуйте в layers\/tree\/(.+?), а в привязках map\.yaml \(match:\) замените начало Main\/ на /)![1];
-  expect(line).toContain(`(Main/** → ${branch}/**, шаблон Main → ${branch})`);
-  expect(line).toContain(`({Main/Org,Main/Lab}/** → {${branch}/Org,${branch}/Lab}/**)`);
-  // Дословно: ветку целиком — под новое имя, привязки «Main/…» — под него, root add
-  renameSync(`${f.config}/layers/tree/Main`, `${f.config}/layers/tree/${branch}`);
-  writeFileSync(`${f.config}/map.yaml`, readFileSync(`${f.config}/map.yaml`, "utf8").replaceAll("Main/", `${branch}/`));
-  // Путь — в двойных кавычках или, с $ ` ! " в имени, в одинарных (выпуск 0.2.3, A2)
-  const m = line.match(/2\) miksy root add (?:"([^"]+)"|'((?:[^']|'')+)') --tree ("[^"]*"|'(?:[^']|'')*'|\S+) /)!;
-  const unq = (s: string) => (s.startsWith("'") ? s.slice(1, -1).replaceAll("''", "'") : s);
-  const add = [m[0], m[1] ?? unq(`'${m[2]}'`), m[3].startsWith("'") ? `"${unq(m[3])}"` : m[3]];
-  expect(inProcess(f, ["root", "add", add[1], "--tree", add[2].replace(/^"|"$/g, "")], f.dir, [true]).err).toBe("");
-  expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  expect(rules(`${ws}/Org/p1/CLAUDE.local.md`)).toEqual(["main", "org", "orgx", "both", "deep"]);
-  expect(rules(`${ws}/Lab/p2/CLAUDE.local.md`)).toEqual(["main", "both"]);
-  expect(rules(`${fresh}/Acme/n1/CLAUDE.local.md`)).toEqual([]);
-}, 240000);
-
 // Повторная проверка круга 8b, п. 2: основным стал бывший дополнительный корень, внутри которого лежит прежний основной —
 // проекты прежнего остаются в workspace, «Вернуть его» нет
 test("C6: прежний основной внутри бывшего дополнительного, ставшего основным — «уходит» не печатается", () => {
@@ -334,15 +285,17 @@ test("C6: прежний основной внутри бывшего допол
 
 // Рецензия A круга 8b, п. 3: новый основной — папка внутри прежнего (ws/Org): её проекты остаются в workspace (слои — по
 // пути от неё), уходят остальные — подсказка говорит так и возвращает слои им; прежний внутри нового — «Вернуть» не нужно
-test("C6: новый основной внутри прежнего — текст по правде, подсказка возвращает слои проектам вне него", () => {
+// Круг 10p: вопроса «Оставить её основной…» нет (одна папка внутри другой), рецепта возврата нет — что убрать и как передумать
+test("C6: новый основной внутри прежнего — текст по правде; clean из подсказки убирает записанное в проекты вне него", () => {
   const { f, ws } = forceScenario("ws");
   const s = inSetup(f, true, [[/Корень workspace/, [`${ws}/Org`]], [/Есть ещё папки/, [null]]]);
   expectCode(s, 0);
-  const line = s.out.split("\n").find((l) => l.includes("Вернуть его"))!;
+  const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
   expect(line).toContain(`прежний основной ${ws} из workspace уходит (кроме проектов внутри нового основного: они остаются в workspace, слои — по их пути от ${ws}/Org`);
-  expect(line).toContain("остальные его проекты miksy больше не обновляет");
-  followSetupHint(f, s.out, ["Org", "Lab"]);
-  expect(rules(`${ws}/Lab/p2/CLAUDE.local.md`)).toEqual(["both"]);
+  expect(line).toContain(`остальные его проекты miksy больше не обновляет. Не нужны — уберите записанное в них: miksy clean "<путь проекта>". Передумали — miksy setup --force ещё раз, корень workspace — ${ws}`);
+  expect(line).not.toMatch(/Вернуть его|miksy root add/);
+  expectCode(f.run(["clean", `${ws}/Lab/p2`]), 0);
+  expect(read(`${ws}/Lab/p2/CLAUDE.local.md`)).toBe("");
 }, 240000);
 
 test("C6: прежний основной внутри нового — «Вернуть его» нет, проекты остаются в workspace", () => {
@@ -352,29 +305,6 @@ test("C6: прежний основной внутри нового — «Вер
   expect(s.out).not.toContain("Вернуть его");
   expect(s.out).toContain(`прежний основной ${ws} лежит внутри нового: его проекты остаются в workspace`);
 }, 240000);
-
-// Повторная проверка 2 круга 8b, п. 1–3 (решение основного агента: ветку прежнего основного забирает новый каталог).
-// Ветка из нескольких частей или внутри неё ветка другого корня — без рецепта переименования: только правда и README.
-// Прежний основной внутри оставшегося дополнительного корня — его проекты остаются, «уходит» не печатается
-for (const [label, roots] of [
-  ["ветка из двух частей", (ws: string) => [{ path: ws, tree: "Clients/Home" }]],
-  ["внутри ветки — ветка другого корня", (ws: string, drive: string) => [{ path: ws, tree: "Main" }, { path: drive, tree: "Main/Drive" }]],
-] as const)
-  test(`C6: ${label} — ветка перешла к новому основному, без рецепта переименования`, () => {
-    const f = cliFixture({ projects: [] });
-    const ws = `${f.dir}/ws`, drive = `${f.dir}/drive`;
-    git(`${ws}/Org/p1`);
-    git(`${drive}/Acme/site`);
-    put(`${f.config}/local/machine.yaml`, `${yamlRoots(roots(ws, drive))}agents: [claude]\n`);
-    const fresh = `${f.dir}/New`;
-    mkdirSync(fresh, { recursive: true });
-    const s = inSetup(f, true, [[/Корень workspace/, [fresh]], [/Есть ещё папки/, [null]]]);
-    expectCode(s, 0);
-    const tree = roots(ws, drive)[0].tree;
-    const line = s.out.split("\n").find((l) => l.includes("перешла к новому основному"))!;
-    expect(line).toContain(`ветка layers/tree/${tree} перешла к новому основному ${fresh}; прежний основной ${ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его — docs/roots.md, «Сменить основной корень»`);
-    expect(line).not.toMatch(/переименуйте|miksy root add/);
-  }, 240000);
 
 for (const how of ["новый каталог", "другой дополнительный"])
   test(`C6: прежний основной внутри оставшегося дополнительного корня, основной — ${how}: «уходит» не печатается`, () => {
@@ -403,8 +333,8 @@ test("C6: новый основной внутри прежнего с ветк�
   expectCode(s, 0);
   const line = s.out.split("\n").find((l) => l.includes("перешла к новому основному"))!;
   expect(line).toContain(`(кроме проектов внутри нового основного: они остаются в workspace`);
-  expect(line).toContain("Вернуть его — docs/roots.md, «Сменить основной корень»");
-  expect(line).not.toMatch(/переименуйте|miksy root add/);
+  expect(line).toContain(`Передумали — miksy setup --force ещё раз, корень workspace — ${ws}`);
+  expect(line).not.toMatch(/Вернуть его|переименуйте|miksy root add/);
 }, 240000);
 
 // Круг 8c, C12 (рецензия B №3 проверки 8b): папку с проектами перенесли (прежней нет) и выбрали основным — рецепта
@@ -439,18 +369,16 @@ for (const tree of [null, "Main"])
     expect(rules(`${ws2}/Org/p1/CLAUDE.local.md`)).toEqual(["org", "orgx"]);
   }, 240000);
 
-test("C12: папку скопировали (прежняя на месте) — подсказка: возвращать, только если прежняя нужна; иначе clean в её проектах", () => {
+test("C12: папку скопировали (прежняя на месте), «нет» на «Оставить её основной…» — clean в её проектах", () => {
   const { f, ws, ws2 } = movedScenario(null);
   mkdirSync(`${f.dir}/disk2`, { recursive: true });
   cpSync(ws, ws2, { recursive: true });
-  const s = inSetup(f, true, [[/Корень workspace/, [ws2]], [/Есть ещё папки/, [null]]]);
+  const s = inSetup(f, true, [[/Корень workspace/, [ws2]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]]]);
   expectCode(s, 0);
-  // В копии те же папки (Org, Lab): перенос их слоёв снял бы слои и с копии — рецепта нет (круг 8d, B №4); что делать со
-  // скопированной — сказано (B №5)
+  // Прежняя не нужна — рецепта возврата нет (круг 10p); что делать со скопированной — сказано (B №5)
   const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
-  expect(line).not.toContain("Вернуть его:");
-  expect(line).toContain("у нового основного есть папка с тем же именем (Org)");
-  expect(line).toContain("Если папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean \"<путь проекта>\" в её проектах; в новой копии файлы miksy с путями");
+  expect(line).not.toContain("Вернуть его");
+  expect(line).toContain("Прежняя папка не нужна — уберите записанное в неё: miksy clean \"<путь проекта>\" в её проектах; если новая — её копия, файлы miksy с путями в ней");
   // Дословно: clean в проекте прежней копии — в ней не остаётся файлов miksy; у нового основного слои на месте
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expectCode(f.run(["clean", `${ws}/Org/p1`]), 0);
@@ -500,7 +428,7 @@ for (const [label, tree] of [["новая пустая", null], ["новая п�
     const siteBefore = layersOf(f, `${f.dir}/drive/Acme/site`);
     const wrong = label === "новая пустая" ? `${f.dir}/empty` : `${f.dir}/drive`;
     mkdirSync(wrong, { recursive: true });
-    expectCode(inSetup(f, true, [[/Корень workspace/, [wrong]], [/Есть ещё папки/, [null]]]), 0);
+    expectCode(inSetup(f, true, [[/Корень workspace/, [wrong]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]]]), 0);
     expect(read(`${f.config}/local/machine.yaml`)).not.toBe(machineBefore);
     // Последняя по дате папка запуска, где есть копия machine.yaml (путь — как у конфигурации, без двоеточия)
     const backups = `${f.config}/local/backups`;
@@ -521,7 +449,7 @@ test("D3: проект ошибочной папки — путь из doctor «
   const { f, ws } = movedScenario(null);
   const wrong = `${f.dir}/empty`;
   git(`${wrong}/Wrong/p9`);
-  expectCode(inSetup(f, true, [[/Корень workspace/, [wrong]], [/Есть ещё папки/, [null]]]), 0);
+  expectCode(inSetup(f, true, [[/Корень workspace/, [wrong]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]]]), 0);
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
   expect(read(`${wrong}/Wrong/p9/CLAUDE.local.md`)).not.toBe("");
   const backups = `${f.config}/local/backups`;

@@ -9,28 +9,6 @@ type F = ReturnType<typeof cliFixture>;
 const layers = (f: F, p: string) => f.run(["explain", p]).out.match(/^Слои\s+(.*)$/m)?.[1] ?? "";
 const say = (s: { out: string }) => s.out.split("\n").find((l) => /из workspace уходит/.test(l)) ?? "";
 
-// G1. Вложенный корень с «естественной» веткой (ветка = имя папки, как предлагает root add по Enter): его слои —
-// layers/tree/Clients = layers/tree/<папка>. Единственная общая папка с новым основным — Clients → на d8 она в списке
-// одноимённых (рецепта нет), в 8e исключена → рецепт «Вернуть его: 1) … layers/tree/<папка> перенесите …»
-test("G1: вложенный корень с веткой = имя папки — остаётся в одноимённых, рецепта переноса нет, слои прежние", () => {
-  const f = cliFixture({ agents: ["claude"], projects: [] });
-  const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
-  git(`${ws}/Org/p1`); git(`${ws}/Clients/Acme/site`); git(`${work}/Clients/q`); git(`${work}/Lab/x`);
-  put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Clients`, tree: "Clients" }])}agents: [claude]\n`);
-  put(`${f.config}/layers/tree/Clients/instructions/10.md`, "# clients rule\n");
-  put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-  expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  const before = { site: layers(f, `${ws}/Clients/Acme/site`), q: "" };
-  const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
-  f.run(["sync", "--all"]);
-  before.q = layers(f, `${work}/Clients/q`);
-  const line = say(s);
-  // Рецепта переноса нет — переносить нечего; слои обоих проектов после sync --all прежние
-  f.run(["sync", "--all"]);
-  expect({ recipe: line.includes("Вернуть его: 1)"), sameListed: /с тем же именем \([^)]*Clients/.test(line), site: layers(f, `${ws}/Clients/Acme/site`), q: layers(f, `${work}/Clients/q`) })
-    .toEqual({ recipe: false, sameListed: true, site: before.site, q: before.q });
-}, 300000);
-
 // 2. Новый основной — другая папка (не копия), внутри прежнего — вложенный корень: копии нет, а текст говорит о ней
 test("G2: новый основной — другая папка, копии нет — о копии и переходе только условно", () => {
   const f = cliFixture({ agents: ["claude"], projects: [] });
@@ -38,7 +16,7 @@ test("G2: новый основной — другая папка, копии н
   git(`${ws}/Org/p1`); git(`${ws}/Inner/Acme/site`); git(`${work}/Lab/x`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Inner`, tree: "Code" }])}agents: [claude]\n`);
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [work]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   // Всё о копии и переходе — только с условием «если папку скопировали или перенесли»; копии нет — пути копии нет
   expect({
@@ -55,7 +33,7 @@ test("G2: у нового основного своя одноимённая п�
   git(`${ws}/Org/p1`); git(`${ws}/Clients/Acme/site`); git(`${work}/Clients/q`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Clients`, tree: "Code" }])}agents: [claude]\n`);
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [work]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   expect({
     copy: line.includes(`(ветка Code; если новая папка — копия прежней, его копия — ${work}/Clients)`),
@@ -93,21 +71,6 @@ test("F1: перенесли, пустые папки остались — по�
   const after = P.map((p) => layers(f, `${ws2}/${p}`));
   expect({ code: all.code, after, oldLeft: P.map((p) => read(`${ws}/${p}/CLAUDE.local.md`)) }, said(all, P)).toEqual({ code: 0, after: before, oldLeft: ["", "", "", ""] });
 }, 300000);
-
-// Проверка круга 8f, №1: ветка вложенного корня лежит внутри layers/tree/<папка прежнего основного> (Clients/Main, Org/X) —
-// перенос layers/tree/<папка> задел бы её: папка в списке одноимённых, рецепта переноса нет
-for (const [dir, tree] of [["Clients", "Clients/Main"], ["Inner", "Org/X"], ["Clients", "clients"]] as const)
-  test(`G1: вложенный корень ${dir} с веткой ${tree} — рецепта переноса нет`, () => {
-    const f = cliFixture({ agents: ["claude"], projects: [] });
-    const ws = `${f.dir}/ws`, work = `${f.dir}/work`;
-    git(`${ws}/Org/p1`); git(`${ws}/${dir}/Acme/site`); git(`${work}/${dir}/q`); git(`${work}/Org/p2`);
-    put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/${dir}`, tree }])}agents: [claude]\n`);
-    put(`${f.config}/layers/tree/${tree}/instructions/10.md`, "# nested rule\n");
-    put(`${f.config}/layers/tree/Org/instructions/10.md`, "# org rule\n");
-    expectCode(f.run(["sync", "--all", "--yes"]), 0);
-    const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
-    expect(say(s).includes("Вернуть его: 1)")).toBe(false);
-  }, 300000);
 
 // Проверка круга 8f, №2: прежнего основного нет (диск не подключён), новый основной — другая папка со своей Inner: о новом
 // месте вложенного корня — только «если папку перенесли сюда», совет поправить path: — только условно

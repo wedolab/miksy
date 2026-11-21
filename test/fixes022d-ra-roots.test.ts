@@ -75,7 +75,7 @@ test("B №2: в прежнем основном только проект бе�
   put(`${f.config}/layers/tree/Notes/instructions/10.md`, "# notes rule\n");
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
   const synced = rules(`${ws}/Notes/n1/CLAUDE.local.md`);
-  const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [work]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => /прежн/.test(l)) ?? "(нет строки)";
   expect({ synced, saysNothingToDo: /делать ничего не нужно/.test(line), leaves: /больше не обновляет/.test(line) }).toEqual({ synced: "workspace,notes rule", saysNothingToDo: false, leaves: true });
 }, 300000);
@@ -125,7 +125,7 @@ test("B №5: скопировали — clean в прежней копии, syn
   const before = { p1: layers(f, `${ws}/Org/p1`), q: layers(f, `${ws}/Lab/q`) };
   mkdirSync(`${f.dir}/copy`, { recursive: true });
   cpSync(ws, ws2, { recursive: true });
-  const s = inSetup(f, [[/Корень workspace/, [ws2]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [ws2]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => /уходит/.test(l)) ?? "(нет)";
   const g = f.run(["sync", "--global"]);
   const a1 = f.run(["sync", "--all"]);

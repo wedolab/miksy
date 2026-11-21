@@ -37,7 +37,7 @@ test("A10: два вложенных корня — множественное �
   git(`${ws}/Org/p1`); git(`${ws}/Inner/a`); git(`${ws}/Inner2/b`); git(`${work}/Inner/q`); git(`${work}/Inner2/r`);
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: `${ws}/Inner`, tree: "Code" }, { path: `${ws}/Inner2`, tree: "Code2" }])}agents: [claude]\n`);
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  const s = inSetup(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [work]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   expect({ plural: line.includes("одноимённая папка в ней — не их копии"), singular: line.includes("не его копия)") }).toEqual({ plural: true, singular: false });
 }, 300000);
@@ -62,7 +62,7 @@ test("A10+: основной — новая папка; у прежнего ос
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([ws, { path: lab, tree: "Lab" }])}agents: [claude]\n`);
   put(`${f.config}/layers/tree/Lab/instructions/20.md`, "# lab rule\n");
   expectCode(f.run(["sync", "--all", "--yes"]), 0);
-  const s = inSetup(f, [[/Корень workspace/, [neu]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = inSetup(f, [[/Корень workspace/, [neu]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   expect({ recipe: /Вернуть его: 1\)|Вернуть его: miksy root add/.test(line) }).toEqual({ recipe: false });
 }, 300000);
