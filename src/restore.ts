@@ -551,7 +551,6 @@ export function runRestore(arg: string | undefined, flags: Record<string, string
     return known ? 1 : 0;
   }
   if (dry) { log("\n--dry-run: ничего не записано."); return known ? 1 : 0; }
-  log("\nЗакройте агентов (Claude Code, Codex, opencode, Antigravity) и редакторы: открытая сессия может записать свои\nнастройки поверх.");
   if (!("yes" in flags)) {
     if (!ask) throw new UsageError("miksy restore затирает файлы — без терминала только после явного «да» пользователя: miksy restore --yes (план — --dry-run)");
     if (!ask.yes("Вернуть?", false)) throw new Cancelled();
@@ -566,6 +565,7 @@ export function runRestore(arg: string | undefined, flags: Record<string, string
   if (res.replacedLinks.length) log(`  заменённые ссылки (в бэкап не сохраняются) вели на: ${res.replacedLinks.map((l) => `${tilde(l.rel)} → ${l.to}`).join(", ")}`);
   for (const f of res.failed) log(`не возвращён: ${tilde(f.rel)} — ${f.why}`);
   if ("error" in cl && cl.error) log(`не перенесены MCP-серверы Claude — ${cl.error}`);
+  if (res.done.length || cl.added.length) log("Перезапустите агентов (и редактор, если агент в нём) — они прочитают возвращённые настройки.");
   const bad = res.failed.length > 0 || !!("error" in cl && cl.error) || !!c?.problem || later.length > 0;
   if (bad) log("Исправьте то, что названо выше, и запустите miksy restore ещё раз — повторять безопасно.");
   return bad ? 1 : 0;

@@ -67,6 +67,8 @@ test("копия мастера 0.2.3 возвращается целиком; -
   expect(dry.out).toContain("Затрёт — изменилось после установки; нынешние файлы сохранятся в бэкап (1):\n  ~/.codex/config.toml");
   expect(dry.out).toContain("Допишу MCP-серверы Claude из копии (3): gh, pg (проект D:/w/app), old (проект D:/w/gone) — проекта нет в списке Claude, запись проекта появится");
   expect(dry.out).toContain("--dry-run: ничего не записано.");
+  // Круг 10s: закрывать агентов заранее не просит; перезапустить — только после записи
+  expect([dry.out.includes("Закройте агентов"), dry.out.includes("Перезапустите агентов")]).toEqual([false, false]);
   expect(dry.out).not.toContain("SECRET-VALUE-1");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("after\n");
   expect(read(`${f.home}/.claude.json`)).toBe(liveBefore);
@@ -76,6 +78,8 @@ test("копия мастера 0.2.3 возвращается целиком; -
   expect(r.out).toContain("✓ вернулось: 3 файла");
   expect(r.out).toContain("✓ MCP-серверы Claude дописаны в ~/.claude.json: gh, pg (проект D:/w/app), old (проект D:/w/gone)");
   expect(r.out).not.toContain("SECRET-VALUE-1");
+  expect(r.out).not.toContain("Закройте агентов");
+  expect(r.out.trimEnd().split("\n").at(-1)).toBe("Перезапустите агентов (и редактор, если агент в нём) — они прочитают возвращённые настройки.");
   expect(snapshot(f.home)).toEqual(before);
   // Затёртое — точной копией в before-restore-<метка>/, пути от ~ (и ~/.claude.json до дописки)
   const saved = readdirSync(`${f.config}/local/backups`).filter((d) => d.startsWith("before-restore-"));
@@ -97,6 +101,7 @@ test("копия мастера 0.2.3 возвращается целиком; -
   expectCode(again, 0);
   expect(again.out).toContain("Всё из копии уже на месте. Ничего не записано.");
   expect(again.out).toContain("Уже на месте: gh, pg (проект D:/w/app), old (проект D:/w/gone)");
+  expect(again.out).not.toContain("Перезапустите агентов");
   expect(JSON.parse(read(`${f.home}/.claude.json`)!)).toEqual(live);
 }, 30000);
 
@@ -315,6 +320,8 @@ test("на месте файла — папка: не возвращён, пап
   expectCode(r, 1);
   expect(r.out).toContain("не возвращён: ~/.codex/AGENTS.md — на этом месте папка");
   expect(r.out).toContain("повторять безопасно");
+  // Круг 10s: часть вернулась — перезапустить агентов; «исправьте и повторите» — последней строкой
+  expect(r.out.trimEnd().split("\n").slice(-2).map((l) => l.slice(0, 22))).toEqual(["Перезапустите агентов ", "Исправьте то, что назв"]);
   expect(read(`${f.home}/.codex/AGENTS.md/inside.txt`)).toBe("keep\n");
   expect(read(`${f.home}/.codex/config.toml`)).toBe("before .codex/config.toml\n");
   rmSync(`${f.home}/.codex/AGENTS.md`, { recursive: true });
