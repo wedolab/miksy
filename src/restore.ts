@@ -28,44 +28,19 @@ import { linkIsDir, resetLinkKinds } from "./setup";
 
 const win = process.platform === "win32";
 
-// Что мастер копировал в before-miksy: homeConfig адаптеров. Список не менялся с первой версии мастера (2026-10-28,
-// до 0.1.0) по 0.2.3 — сверено по тегам; прежние пути остаются здесь, даже если адаптер их уберёт
-const EVER_COPIED = [
-  ".claude.json", ".claude/CLAUDE.md", ".claude/settings.json", ".claude/skills",
-  ".codex/config.toml", ".codex/AGENTS.md", ".codex/AGENTS.override.md", ".agents/skills",
-  ".config/opencode/opencode.json", ".config/opencode/opencode.jsonc", ".config/opencode/AGENTS.md", ".config/opencode/skills",
-  ".gemini/GEMINI.md", ".gemini/config", ".gemini/antigravity-ide/mcp_config.json", ".gemini/antigravity-cli/mcp_config.json",
-];
+// Что мастер копировал в before-miksy (адаптер: restore.everCopied — homeConfig с первой версии мастера, 2026-10-28,
+// до 0.1.0, по 0.2.3; прежние пути остаются, даже если адаптер уберёт их из homeConfig)
+const EVER_COPIED = Object.values(ADAPTERS).flatMap((a) => a.restore?.everCopied ?? []);
 // Каталоги настроек агентов: папка каждого скопированного пути (.claude, .codex, .agents, .config/opencode, .gemini).
 // Всё внутри — настройки агента, даже если мастер такой файл не копировал (копия, собранная руками, архив tar)
 export const AGENT_DIRS = [...new Set([...EVER_COPIED, ...Object.values(ADAPTERS).flatMap((a) => a.homeConfig ?? [])]
   .map((r) => r.split("/").slice(0, r.startsWith(".config/") ? 2 : 1).join("/")).filter((d) => d !== ".claude.json"))];
 const CLAUDE_JSON = ".claude.json";
-// Не возвращаются никогда, как и ~/.claude.json: файлы входа и рабочее состояние агентов — то, что агент пишет сам во
-// время работы (история, сессии, кэши, служебные номера, логи), а не настройки. Старое затёрло бы нынешний вход, историю
-// и сессии. Мастер их не копирует (его пути — EVER_COPIED, ни один сюда не попадает; тест); бывают в копии, собранной
-// руками или не мастером (круг 10c-3, М5). Папка — со всем содержимым
-const NOT_RESTORED = [
-  // вход
-  ".claude/.credentials.json", ".claude/.claude.json" /* при CLAUDE_CONFIG_DIR=~/.claude */, ".codex/auth.json",
-  ".gemini/oauth_creds.json", ".gemini/google_accounts.json", ".gemini/google_account_id",
-  // Claude Code: копии .claude.json, история и сессии по проектам (там же память проектов), задачи, снимки оболочки,
-  // история правок, служебное; local — своя установка Claude (старая откатила бы версию)
-  ".claude/backups", ".claude/projects", ".claude/todos", ".claude/tasks", ".claude/plans", ".claude/history.jsonl",
-  ".claude/shell-snapshots", ".claude/session-env", ".claude/file-history", ".claude/ide", ".claude/statsig",
-  ".claude/telemetry", ".claude/debug", ".claude/logs", ".claude/cache", ".claude/paste-cache", ".claude/stats-cache.json",
-  ".claude/local", ".claude/downloads",
-  // Codex: сессии, история, логи, снимки оболочки, служебные кэши и номера
-  ".codex/sessions", ".codex/archived_sessions", ".codex/history.jsonl", ".codex/log", ".codex/logs",
-  ".codex/shell_snapshots", ".codex/tmp", ".codex/cache", ".codex/version.json", ".codex/models_cache.json",
-  ".codex/internal_storage.json",
-  // Antigravity и Gemini CLI: номера установки, чаты и контрольные точки (tmp, history), беседы и память Antigravity
-  ".gemini/installation_id", ".gemini/user_id", ".gemini/tmp", ".gemini/history", ".gemini/antigravity/brain",
-  ".gemini/antigravity/conversations", ".gemini/antigravity/implicit", ".gemini/antigravity/code_tracker",
-  ".gemini/antigravity/annotations", ".gemini/antigravity/browser_recordings", ".gemini/antigravity/playground",
-  // opencode: зависимости плагинов (ставит сам; состояние opencode — вне ~/.config/opencode)
-  ".config/opencode/node_modules",
-];
+// Не возвращаются никогда, как и ~/.claude.json: файлы входа и рабочее состояние агентов (адаптер: restore.notRestored) —
+// то, что агент пишет сам во время работы (история, сессии, кэши, служебные номера, логи), а не настройки. Старое
+// затёрло бы нынешний вход, историю и сессии. Мастер их не копирует (его пути — EVER_COPIED, ни один сюда не попадает;
+// тест); бывают в копии, собранной руками или не мастером (круг 10c-3, М5). Папка — со всем содержимым
+const NOT_RESTORED = Object.values(ADAPTERS).flatMap((a) => a.restore?.notRestored ?? []);
 // Базы и логи в папках агентов (state_5.sqlite Codex и т. п.) — тоже состояние, под любым именем
 const STATE_FILE = /\.(log|sqlite|sqlite-wal|sqlite-shm|sqlite-journal|db|db-wal|db-shm)$/i;
 

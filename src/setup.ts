@@ -10,7 +10,8 @@ import { basename, delimiter, dirname, join, posix, relative, win32 } from "node
 import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
 import { locate, machineRoots, type Root, rootKey, suggestTree, treeAbove, treeJoin } from "./roots";
-import { AGENT_COMMANDS, agentId, detectAgents, notConnectedText } from "./agentid";
+import { agentId, detectAgents, notConnectedText } from "./agentid";
+import { ADAPTERS } from "./agents";
 export { detectAgents };
 import { backup } from "./backup";
 import { loadManifest, writeAtomic } from "./manifest";
@@ -693,7 +694,7 @@ export function setup(o: SetupOptions): number {
     log(`• ${d.id}: команды нет в PATH, но есть ${d.dir} — пользуетесь им (например, через редактор)? Добавьте ${d.id} в agents в local/machine.yaml`);
     return false;
   }).map((d) => d.id);
-  const found = Object.keys(AGENT_COMMANDS).filter((id) => detected.inPath.includes(id) || viaDir.includes(id));
+  const found = Object.keys(ADAPTERS).filter((id) => detected.inPath.includes(id) || viaDir.includes(id));
   // machine.yaml есть и не перезаписывается — агенты из него: найденных вне agents подключает только «да» (ниже)
   const agents = keptAgents ?? listedIds ?? found;
   const newAgents = keptAgents ? found.filter((a) => !keptAgents.includes(a)) : [];
@@ -725,8 +726,8 @@ export function setup(o: SetupOptions): number {
     for (const r of inFile.slice(1)) log(`  ещё корень: ${r}`);
   } else log(workspace ? `Workspace: ${workspace}${existsSync(workspace) ? "" : unreachable(workspace) ? `  (сейчас недоступен — ${unreachable(workspace)}; создаваться не будет, miksy пропустит его, пока он не появится)` : "  (каталога ещё нет — будет создан)"}` : "Workspace: не выбран — local/machine.yaml не будет записан");
   if (!inFile.length && workspace) for (const r of extra) log(`  ещё корень: ${r.path}${r.tree ? ` → layers/tree/${r.tree}` : ""}${existsSync(r.path) ? "" : "  (каталога сейчас нет — пропускается, пока не появится)"}`);
-  log(`Агенты: ${agents.length ? agents.join(", ") : "не найдено ни одного (claude, codex, opencode, agy)"}${keptAgents || listedIds ? " (из текущего local/machine.yaml)" : ""}`);
-  const absent = Object.keys(AGENT_COMMANDS).filter((a) => !agents.includes(a) && !known.includes(a) && !found.includes(a));
+  log(`Агенты: ${agents.length ? agents.join(", ") : `не найдено ни одного (${Object.values(ADAPTERS).map((x) => x.detect.commands[0]).join(", ")})`}${keptAgents || listedIds ? " (из текущего local/machine.yaml)" : ""}`);
+  const absent = Object.keys(ADAPTERS).filter((a) => !agents.includes(a) && !known.includes(a) && !found.includes(a));
   if (ask && absent.length) log(`  не найдены: ${absent.join(", ")} — miksy их не ставит; как поставить — docs/install.md, «Установка агентов». Поставите — запустите setup снова`);
   if (newAgents.length) log(`  найдены ещё: ${newAgents.join(", ")} — не добавлены; нужны — допишите в agents в local/machine.yaml`);
   if (kept && workspace !== kept) log(`  workspace меняется: было ${kept}`);

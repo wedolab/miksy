@@ -6,7 +6,8 @@ import { skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { serverSecrets } from "../../src/vars";
 import { configsOf, currentGlobal, currentProject, strictJson } from "./current";
-import { miksyOpencodeJson } from "../../src/marks";
+import { miksyOpencodeJson } from "./mark";
+import { opencodeMajor } from "./version";
 import { teamCollection } from "../../src/git";
 import { miksyExcludeLines } from "../../src/apply";
 
@@ -34,12 +35,32 @@ const ROOT_CONFIGS = ["opencode.json", "opencode.jsonc"];
 // не отличает свой файл без instructions от чужого и чужой с меткой от своего
 // pathKey, а не samePath: битая ссылка на пути (.opencode → удалённый каталог) не роняет рендер,
 // а даёт логический ключ; запись по такому пути отвергнет ядро (конфликт цели)
-import { fold, pathKey } from "../../src/paths";
+import { fold, pathKey, slash } from "../../src/paths";
 const isOwned = (abs: string, ctx?: RenderContext) =>
   !!ctx?.ownedFiles.some((f) => fold(pathKey(f)) === fold(pathKey(abs)));
 
 export const opencode: Adapter = {
   id: "opencode",
+  title: "opencode",
+  detect: { commands: ["opencode"], dirs: [".config/opencode"] },
+  program: { name: "opencode", commands: ["opencode"] },
+  programMajor: opencodeMajor,
+  programNote: (exe, shown) => (opencodeMajor(exe) === 1 ? `opencode ${shown} — версия 1.x, а miksy пишет настройки в формате opencode 2.x: обновите opencode` : null),
+  envVars: [
+    { name: "XDG_CONFIG_HOME", title: "opencode", std: (h) => join(h, ".config"), replace: true, dir: (v) => join(v, "opencode"), stdDir: (h) => join(h, ".config", "opencode") },
+    { name: "OPENCODE_CONFIG", title: "opencode", std: () => "", replace: false, over: (h) => join(h, ".config", "opencode") },
+    { name: "OPENCODE_CONFIG_DIR", title: "opencode", std: () => "", replace: false, over: (h) => join(h, ".config", "opencode") },
+  ],
+  homeSkillsDir: ".config/opencode/skills",
+  collections: [".opencode/skills"],
+  // Пропускает skills, уже доставленные этим sync в .claude/skills или .agents/skills (render ниже)
+  deliverLast: true,
+  ownFile: (path, text) => /(^|\/)opencode\.json$/.test(slash(path)) && miksyOpencodeJson(text),
+  restore: {
+    everCopied: [".config/opencode/opencode.json", ".config/opencode/opencode.jsonc", ".config/opencode/AGENTS.md", ".config/opencode/skills"],
+    // Зависимости плагинов (ставит сам; состояние opencode — вне ~/.config/opencode)
+    notRestored: [".config/opencode/node_modules"],
+  },
   // Проверено вживую (2026-10-10): проектные skills читает из .agents, .claude (Claude-совместимость),
   // .opencode/skills и .opencode/skill; .codex/.gemini — нет. Дедупликация с .claude/skills — открытый вопрос.
   skillDirs: [".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill"],

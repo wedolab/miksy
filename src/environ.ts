@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import { canonical, fold, samePath, slash } from "./paths";
 import type { Os } from "./types";
 import { agentId } from "./agentid";
+import { ADAPTERS } from "./agents";
+import type { Adapter } from "./adapter";
 
 type Env = Record<string, string | undefined>;
 
@@ -20,15 +22,12 @@ export interface EnvInput {
   config: string; // конфигурация, с которой работает этот запуск
 }
 
-// Программы, у которых вторая установка путает: Bun (команда miksy и мосты), агенты, команды
+// Программы, у которых вторая установка путает: Bun (команда miksy и мосты), агенты (адаптер: program), команды
 // MCP-серверов. npx не проверяется отдельно: npm обновляет себя в свой каталог (%APPDATA%\npm),
 // а Node.js — один (node)
-const PROGRAMS: { name: string; cmds: string[] }[] = [
+const programs = (): { name: string; cmds: string[]; agent?: Adapter }[] => [
   { name: "Bun", cmds: ["bun"] },
-  { name: "Claude Code", cmds: ["claude"] },
-  { name: "Codex", cmds: ["codex"] },
-  { name: "opencode", cmds: ["opencode"] },
-  { name: "Antigravity (agy)", cmds: ["agy"] },
+  ...Object.values(ADAPTERS).map((a) => ({ name: a.program.name, cmds: a.program.commands, agent: a })),
   { name: "Node.js", cmds: ["node"] },
   { name: "uv", cmds: ["uv"] },
   { name: "Python", cmds: ["python3", "python"] },
@@ -36,7 +35,7 @@ const PROGRAMS: { name: string; cmds: string[] }[] = [
 
 const isFile = (p: string) => { try { return statSync(p).isFile(); } catch { return false; } };
 // Один файл — одна установка: ссылки (Homebrew) раскрываются; scoop — shim и каталог версии
-const real = (p: string) => {
+export const real = (p: string) => {
   let r: string;
   try { r = fold(slash(realpathSync(p))); } catch { r = fold(slash(p)); }
   return r.replace(/\/scoop\/(?:shims\/([^/]+)\.exe|apps\/([^/]+)\/[^/]+\/[^/]+\.exe)$/i, (_m, shim, app) => `/scoop/${(shim ?? app).toLowerCase()}`);
@@ -74,76 +73,36 @@ export function bunPlaces(env: Env, home: string, os: Os): string[] {
   return [join(env.BUN_INSTALL || join(home, ".bun"), "bin", exe), join(home, ".bun", "bin", exe)];
 }
 
-// Официальный установщик (opencode.ai/install — 1.x, opencode.ai/v2/install — 2.x) кладёт opencode в
-// ~/.opencode/bin. Установщик 2.x рядом всегда пишет команду совместимости opencode2 — маленький скрипт,
-// который запускает opencode из того же каталога; установщик 1.x её не пишет (а opencode2 — большая
-// программа: так раньше ставили 2.x рядом с 1.x). Возвращает основную версию или null — не этот случай
-function installerMajor(exe: string): number | null {
-  for (const p of [slash(exe), (() => { try { return slash(realpathSync(exe)); } catch { return null; } })()]) {
-    if (!p || !/\/\.opencode\/bin\/opencode(\.exe|\.cmd)?$/i.test(p)) continue;
-    const dir = dirname(p);
-    const shim = ["opencode2", "opencode2.cmd"].map((n) => join(dir, n)).find(isFile);
-    let small = "";
-    try { if (shim && statSync(shim).size < 4096) small = readFileSync(shim, "utf8"); } catch { /* нет доступа — как без скрипта */ }
-    return /opencode(\.exe)?["\s]/.test(small) ? 2 : 1;
-  }
-  return null;
-}
-
-// Основная версия opencode — по пакету, из которого он установлен (npm: opencode-ai — 1.x, @opencode/cli
-// — 2.x; Homebrew — по каталогу Cellar; официальный установщик — по команде opencode2 рядом); иначе —
-// неизвестна. Сам opencode не запускается: проверка только читает (opencode 2.x при запуске поднимает
-// фоновый сервис)
-export function opencodeMajor(exe: string): number | null {
-  const where = [slash(exe), slash(real(exe))];
-  try { if (statSync(exe).size < 65536) where.push(readFileSync(exe, "utf8")); } catch { /* нет доступа — по пути */ }
-  const text = where.join("\n").replaceAll("\\", "/");
-  if (/node_modules\/opencode-ai\//.test(text)) return 1;
-  if (/node_modules\/@opencode\/cli\//.test(text)) return 2;
-  const brew = text.match(/Cellar\/opencode\/(\d+)\./);
-  return brew ? Number(brew[1]) : installerMajor(exe);
-}
-
-// Переменные, меняющие, где агент ищет настройки: стандартный каталог (куда пишет miksy) — и что
-// значит другое значение. replace — агент читает только оттуда; иначе — дополнительный конфиг поверх
-const AGENT_VARS: { agent: string; name: string; title: string; std: (home: string) => string; replace: boolean }[] = [
-  { agent: "claude", name: "CLAUDE_CONFIG_DIR", title: "Claude Code", std: (h) => join(h, ".claude"), replace: true },
-  { agent: "codex", name: "CODEX_HOME", title: "Codex", std: (h) => join(h, ".codex"), replace: true },
-  { agent: "opencode", name: "XDG_CONFIG_HOME", title: "opencode", std: (h) => join(h, ".config"), replace: true },
-  { agent: "opencode", name: "OPENCODE_CONFIG", title: "opencode", std: () => "", replace: false },
-  { agent: "opencode", name: "OPENCODE_CONFIG_DIR", title: "opencode", std: () => "", replace: false },
-  { agent: "antigravity", name: "GEMINI_CLI_HOME", title: "Antigravity", std: (h) => h, replace: true },
-];
-
 const same = (a: string, b: string) => { try { return samePath(a, b); } catch { return fold(slash(a)) === fold(slash(b)); } };
 
 export function environment(i: EnvInput): string[] {
   const notes: string[] = [];
   const tilde = (p: string) => (same(p, i.home) ? "~" : fold(slash(p)).startsWith(fold(slash(i.home)) + "/") ? `~${slash(p).slice(slash(i.home).length)}` : slash(p));
 
-  for (const p of PROGRAMS) {
+  for (const p of programs()) {
     const bun = p.cmds[0] === "bun";
     let list = installs(p.cmds, i.env, i.os, bun ? bunPlaces(i.env, i.home, i.os) : []);
     // Bun: используется тот, которым запущен miksy (не обязательно первый в PATH)
     if (bun) list = [slash(i.bun), ...list.filter((x) => real(x) !== real(i.bun))];
-    const major = (x: string) => (p.cmds[0] === "opencode" ? opencodeMajor(x) : null);
+    const major = (x: string) => p.agent?.programMajor?.(x) ?? null;
     const ver = (x: string) => { const m = major(x); return m ? ` (${m}.x)` : ""; };
     if (list.length > 1) {
       const why = bun ? "этот Bun запоминают команда miksy и обёртки MCP-серверов" : "агенты и терминал могут запускать разные";
       notes.push(`${p.name}: установок несколько — используется ${tilde(list[0])}${ver(list[0])}${bun ? "" : " (первая в PATH)"}, ещё: ${list.slice(1).map((x) => tilde(x) + ver(x)).join(", ")}. Лучше оставить одну (${why}; обновляются они по отдельности) — лишние удалите сами`);
     }
-    if (p.cmds[0] === "opencode" && list.length && major(list[0]) === 1)
-      notes.push(`opencode ${tilde(list[0])} — версия 1.x, а miksy пишет настройки в формате opencode 2.x: обновите opencode`);
+    const note = list.length ? p.agent?.programNote?.(list[0], tilde(list[0])) : null;
+    if (note) notes.push(note);
   }
 
-  for (const v of AGENT_VARS) {
+  // Переменные, меняющие, где агент ищет настройки (адаптер: envVars): replace — агент читает только оттуда; иначе —
+  // дополнительный конфиг поверх стандартного
+  for (const v of Object.values(ADAPTERS).filter((a) => i.agents.map(agentId).includes(a.id)).flatMap((a) => a.envVars ?? [])) {
     const value = i.env[v.name];
-    if (!value || !i.agents.map(agentId).includes(v.agent)) continue;
+    if (!value) continue;
     if (v.replace) {
       if (same(value, v.std(i.home))) continue;
-      const dir = v.name === "XDG_CONFIG_HOME" ? join(value, "opencode") : v.name === "GEMINI_CLI_HOME" ? join(value, ".gemini") : value;
-      notes.push(`${v.name}=${slash(value)}: ${v.title} читает настройки из ${tilde(dir)}, а miksy пишет в стандартный ${tilde(v.name === "XDG_CONFIG_HOME" ? join(v.std(i.home), "opencode") : v.name === "GEMINI_CLI_HOME" ? join(i.home, ".gemini") : v.std(i.home))} — настройки miksy агент не увидит`);
-    } else notes.push(`${v.name}=${slash(value)}: ${v.title} читает этот конфиг поверх ~/.config/opencode — его ключи перекрывают настройки miksy`);
+      notes.push(`${v.name}=${slash(value)}: ${v.title} читает настройки из ${tilde(v.dir?.(value) ?? value)}, а miksy пишет в стандартный ${tilde(v.stdDir?.(i.home) ?? v.std(i.home))} — настройки miksy агент не увидит`);
+    } else notes.push(`${v.name}=${slash(value)}: ${v.title} читает этот конфиг поверх ${tilde(v.over!(i.home))} — его ключи перекрывают настройки miksy`);
   }
 
   // Конфигурация задана явно (MIKSY_CONFIG или ~/.miksy), а рядом с движком лежит другая

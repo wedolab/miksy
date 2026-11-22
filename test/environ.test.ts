@@ -4,7 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bunPlaces, environment, installs, opencodeMajor } from "../src/environ";
+import { bunPlaces, environment, installs } from "../src/environ";
+import { opencodeMajor } from "../adapters/opencode/version";
 import { canonical } from "../src/paths";
 import { cliFixture, CLI, put, expectCode } from "./helpers";
 

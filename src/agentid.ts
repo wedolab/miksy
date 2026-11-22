@@ -4,33 +4,21 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { slash } from "./paths";
+import { ADAPTERS } from "./agents";
 
-export const AGENT_ALIASES: Record<string, string> = { gemini: "antigravity" };
+// Прежнее имя → нынешний id (адаптер: aliases)
+export const aliasesOf = (): Record<string, string> =>
+  Object.fromEntries(Object.values(ADAPTERS).flatMap((a) => (a.aliases ?? []).map((old) => [old, a.id])));
 
-export const agentId = (id: string) => AGENT_ALIASES[id] ?? id;
+export const agentId = (id: string) => aliasesOf()[id] ?? id;
 
-// Как найти агента: команда в PATH
-export const AGENT_COMMANDS: Record<string, string[]> = {
-  claude: ["claude"],
-  codex: ["codex"],
-  opencode: ["opencode"],
-  antigravity: ["agy", "antigravity"],
-};
-
-// Каталоги настроек агента в домашнем каталоге: агент бывает только в редакторе (Zed), без команды в PATH
-const AGENT_DIRS: Record<string, string[]> = {
-  claude: [".claude"],
-  codex: [".codex"],
-  opencode: [".config/opencode"],
-  antigravity: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"],
-};
-
-// Какие агенты есть на машине: команда в PATH или (отдельно) только каталог настроек
+// Какие агенты есть на машине: команда в PATH или (отдельно) только каталог настроек — агент бывает только в
+// редакторе (Zed), без команды в PATH (адаптер: detect)
 export function detectAgents(home: string, which: (cmd: string) => string | null = (c) => Bun.which(c)) {
   const inPath: string[] = [], dirOnly: { id: string; dir: string }[] = [];
-  for (const [id, cmds] of Object.entries(AGENT_COMMANDS)) {
-    if (cmds.some((c) => which(c))) { inPath.push(id); continue; }
-    const dir = AGENT_DIRS[id].map((d) => join(home, d)).find((d) => existsSync(d));
+  for (const { id, detect } of Object.values(ADAPTERS)) {
+    if (detect.commands.some((c) => which(c))) { inPath.push(id); continue; }
+    const dir = detect.dirs.map((d) => join(home, d)).find((d) => existsSync(d));
     if (dir) dirOnly.push({ id, dir: slash(dir) });
   }
   return { inPath, dirOnly };

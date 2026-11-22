@@ -31,6 +31,26 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
 
 export const antigravity: Adapter = {
   id: "antigravity",
+  title: "Antigravity",
+  // Прежнее имя агента (Antigravity — агент, Gemini — модель): рабочий синоним во входных данных и учёте
+  aliases: ["gemini"],
+  // Агент бывает только в редакторе (Zed) — без команды в PATH, с каталогом настроек
+  detect: { commands: ["agy", "antigravity"], dirs: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"] },
+  program: { name: "Antigravity (agy)", commands: ["agy"] },
+  envVars: [{ name: "GEMINI_CLI_HOME", title: "Antigravity", std: (h) => h, replace: true, dir: (v) => join(v, ".gemini"), stdDir: (h) => join(h, ".gemini") }],
+  homeSkillsDir: ".gemini/config/skills",
+  teamImport: true,
+  collections: [".agents/plugins"],
+  restore: {
+    everCopied: [".gemini/GEMINI.md", ".gemini/config", ".gemini/antigravity-ide/mcp_config.json", ".gemini/antigravity-cli/mcp_config.json"],
+    // Вход; номера установки, чаты и контрольные точки (tmp, history), беседы и память Antigravity (и Gemini CLI)
+    notRestored: [
+      ".gemini/oauth_creds.json", ".gemini/google_accounts.json", ".gemini/google_account_id",
+      ".gemini/installation_id", ".gemini/user_id", ".gemini/tmp", ".gemini/history", ".gemini/antigravity/brain",
+      ".gemini/antigravity/conversations", ".gemini/antigravity/implicit", ".gemini/antigravity/code_tracker",
+      ".gemini/antigravity/annotations", ".gemini/antigravity/browser_recordings", ".gemini/antigravity/playground",
+    ],
+  },
   // Проверено вживую (2026-10-10): Antigravity ищет проектные skills в .agents/skills/
   // .gemini/skills в коде и исполняемом файле не поддерживается
   skillDirs: [".agents/skills"],

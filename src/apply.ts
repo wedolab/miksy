@@ -3,7 +3,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import type { RenderedFile, RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
 import { fold, pathKey, slash } from "./paths";
-import { headerMark, miksyOpencodeJson } from "./marks";
+import { headerMark } from "./marks";
+import { ADAPTERS } from "./agents";
 import { GitError, gitMemo, gitSpawn, gitWhy, protectedBy, trackedPaths } from "./git";
 import { backup, neverCopied, originalBackup, runDir } from "./backup";
 import { blockHash, hashMarkers, instructionBlock, joinOutside, splitInstructions } from "./instructions";
@@ -12,7 +13,7 @@ import { canonicalState, emptyState, type ForgottenMark, pruneState, rememberPat
 import type { Machine } from "./types";
 import { configRoot } from "./load";
 import { ensurePrivateLocal } from "./secretfiles";
-import { AGENT_ALIASES } from "./agentid";
+import { aliasesOf } from "./agentid";
 import { definitionHash, mcpTables, ownedTomlParts, parseToml, replaceOwnedMcp, splitToml } from "./toml";
 
 // roots — где путь обязан остаться после раскрытия симлинков (проект, домашний каталог);
@@ -21,7 +22,7 @@ import { definitionHash, mcpTables, ownedTomlParts, parseToml, replaceOwnedMcp, 
 export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: boolean; beforeHash?: string; known?: boolean } & (
   | TrustAction
   | ApproveAction
-  | { kind: "write"; abs: string; content: string; why: "новый" | "обновление"; executable?: boolean; roots?: string[] }
+  | { kind: "write"; abs: string; content: string; why: "новый" | "обновление"; executable?: boolean; roots?: string[]; toml?: boolean }
   | { kind: "adopt"; abs: string; content: string; executable?: boolean }
   // Только права (секретный файл открыт группе, скрипту не хватает +x): chmod без перезаписи и бэкапа
   | { kind: "chmod"; abs: string; mode: number; roots?: string[] }
@@ -81,11 +82,15 @@ function occupiedParent(path: string, base: string): string | null {
   return null;
 }
 
+// Каталоги-коллекции, куда адаптеры пишут skills и плагины (<каталог>/<имя>/…): [1] — <каталог>/<имя>, [2] — <каталог>
+const escapeDir = (d: string) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const collectionRx = () => new RegExp(`^((${[...new Set(Object.values(ADAPTERS).flatMap((a) => a.collections ?? []))].map(escapeDir).join("|")})\\/[^/]+)\\/`);
+
 // Строки exclude: файлы проекта; для skills и plugins — их каталоги, если в каталоге нет чужого
 // файла с конфликтом (open): тогда — точные строки файлов, чтобы чужой файл оставался виден git
 export function excludeLines(paths: string[], open: string[] = []): string[] {
   const lines = paths.map((p) => {
-    const m = p.match(/^(\.(?:claude|codex|agents|opencode)\/skills\/[^/]+)\//) ?? p.match(/^(\.agents\/plugins\/[^/]+)\//);
+    const m = p.match(collectionRx());
     if (m && !open.some((o) => fold(o).startsWith(fold(m[1] + "/")))) return "/" + m[1] + "/";
     return "/" + p;
   });
@@ -116,11 +121,18 @@ function olderMiksy(f: RenderedFile, path: string): string {
     : "";
 }
 
+// Адаптер перенёс skills проекта в запасной каталог (командная коллекция в основном): файлы основного --force не
+// удаляет (адаптер: skillsFallback)
+function fallbackMove(owner: string | undefined, result: RenderResult, path: string): boolean {
+  const f = owner ? ADAPTERS[owner]?.skillsFallback : undefined;
+  return !!f && !result.clean && path.includes(`/${f.from}/`) && result.files.some((x) => x.base === "project" && x.path.startsWith(`${f.to}/`));
+}
+
 export function miksyMade(path: string, opts: { rendered?: string; covered?: boolean; block?: boolean } = {}): boolean {
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch { return false; }
   if (headerMark(text)) return true;
-  if (/(^|\/)opencode\.json$/.test(slash(path)) && miksyOpencodeJson(text)) return true;
+  if (Object.values(ADAPTERS).some((a) => a.ownFile?.(path, text))) return true;
   if (opts.block) {
     try { if (splitInstructions(text).block) return true; } catch { /* повреждённые маркеры — не улика */ }
   }
@@ -195,7 +207,8 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     if (target.scope !== "project") return null;
     for (const p of new Set([path, pathKey(path)])) {
       if (!inside(p, target.dir)) continue;
-      const m = relative(target.dir, p).replaceAll("\\", "/").match(/^(\.(?:claude|codex|agents|opencode)\/skills|\.agents\/plugins)\/[^/]+\//);
+      const c = relative(target.dir, p).replaceAll("\\", "/").match(collectionRx());
+      const m = c && [c[0], c[2]];
       if (!m) continue;
       if (!teamDirs.has(m[1])) teamDirs.set(m[1], trackedPaths(target.dir, [m[1]]).length > 0);
       if (teamDirs.get(m[1])) return m[1];
@@ -367,7 +380,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     const known = f.base === "project" && target.scope === "project" && exists && !recorded && miksyMade(path, { rendered: content, covered: covered(f.path, path) });
     // known — и у конфликта и перезаписи узнанного файла: для проверки доверия в sync он свой, а не чужой конфиг; в
     // просмотре miksy trust конфликтный — чужой (trust.ts, own)
-    const x = { ...(f.executable && { executable: true }), roots, beforeHash: onDisk ?? sha(""), ...(exists && !recorded && !known && { original: true }), ...(known && { known: true }) };
+    const x = { ...(f.executable && { executable: true }), ...(f.mode === "own" && f.mcp?.format === "toml" && { toml: true }), roots, beforeHash: onDisk ?? sha(""), ...(exists && !recorded && !known && { original: true }), ...(known && { known: true }) };
     if (!exists) actions.push({ kind: "write", abs: path, content, why: "новый", ...x });
     else if (onDisk === sha(content)) {
       // Содержимое то же: взять под учёт (adopt исправит и права) или исправить только права —
@@ -413,7 +426,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     const original = prev.originals?.[path];
     if (original && hash !== recorded) actions.push({ kind: "conflict", abs: path, why: `изменён вручную после захвата — оригинал для восстановления: ${original.path}` });
     else if (original) actions.push({ kind: "restore", abs: path, source: original.path, sourceHash: original.hash, roots: fileRoots, beforeHash: hash });
-    else if (hash === recorded || (force && !(owner === "codex" && !result.clean && /\/\.agents\/skills\//.test(path) && result.files.some((f) => f.base === "project" && f.path.startsWith(".codex/skills/")))))
+    else if (hash === recorded || (force && !fallbackMove(owner, result, path)))
       actions.push({ kind: "delete", abs: path, roots: fileRoots, beforeHash: hash });
     else actions.push({ kind: "conflict", abs: path, why: recorded === UNKNOWN_HASH ? `больше не нужен, но ${UNKNOWN_WHY}` : "больше не нужен, но изменён вручную — не удаляю" });
   }
@@ -794,7 +807,8 @@ const blockRx = (owner: string, flags = "m") =>
 function legacyOwner(owner: string): string | null {
   const at = owner.indexOf("@");
   const id = at < 0 ? owner : owner.slice(0, at);
-  const old = Object.keys(AGENT_ALIASES).find((k) => AGENT_ALIASES[k] === id);
+  const aliases = aliasesOf();
+  const old = Object.keys(aliases).find((k) => aliases[k] === id);
   return old ? old + (at < 0 ? "" : owner.slice(at)) : null;
 }
 
@@ -924,10 +938,11 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
     }
     if (a.kind === "write") {
       if (a.roots) guard(a.abs, ...a.roots);
-      if (a.abs.endsWith("/.codex/config.toml")) parseToml(a.content);
+      // Свой TOML-конфиг агента с MCP (Codex: .codex/config.toml проекта) — разбирается до и после записи
+      if (a.toml) parseToml(a.content);
       backup(a.abs);
       writeAtomic(a.abs, a.content, { executable: a.executable, sensitive: a.sensitive });
-      if (a.abs.endsWith("/.codex/config.toml")) parseToml(readFileSync(a.abs, "utf8"));
+      if (a.toml) parseToml(readFileSync(a.abs, "utf8"));
       if (lstatSync(a.abs).isSymbolicLink()) (state.links ??= {})[pathKey(a.abs)] = a.abs;
       state.files[pathKey(a.abs)] = sha(a.content);
       rememberPath(state, a.abs);

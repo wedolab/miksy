@@ -33,7 +33,6 @@ import { type AgentId, formatTeamSkills, scanTeamSkills } from "./teamskills";
 import type { Adapter } from "./adapter";
 import type { Machine, Resolved } from "./types";
 import { deliveredSkillNames, deliveryOrder } from "./registry";
-import { adoptCodexTable } from "./codex-adopt";
 import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, linkedDir, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
 
 // Ссылка (в том числе битая)
@@ -1183,8 +1182,9 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         if (defs.size > 1 && !flags.agent)
           throw new Error(`У агентов разные определения «${name}» (${mcps.map((m) => m.agent).join(", ")}) — укажите --agent`);
         const src = mcps[0];
-        const codexSource = isGlobal && mcps.find((m) => m.agent === "codex");
-        if (codexSource) adoptCodexTable(manifest, machine, name, codexSource.def, true);
+        // Ручной сервер в домашнем конфиге агента, который переносит его под учёт сам (адаптер: adoptGlobal — Codex)
+        const tableSource = isGlobal ? mcps.find((m) => ADAPTERS[m.agent]?.adoptGlobal) : undefined;
+        if (tableSource) ADAPTERS[tableSource.agent].adoptGlobal!(manifest, machine, name, tableSource.def, true);
         // ${WORKSPACE} — только пути основного корня (при любом --to); пути в другие корни — как есть
         const { server, secrets: found, open, elsewhere } = fromNative(name, src.def, src.agent, machine, level, secrets);
         const comment = `Поднято из ${src.agent} (${src.source}) командой miksy adopt`;
@@ -1204,11 +1204,11 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         confirm("Записать в слой", flags);
         ensurePrivateLocal();
         adoptMcp(server, found, level, comment);
-        if (codexSource) {
-          adoptCodexTable(manifest, machine, name, codexSource.def);
+        if (tableSource) {
+          ADAPTERS[tableSource.agent].adoptGlobal!(manifest, machine, name, tableSource.def);
           saveMoves(manifest, moves);
           saveManifest(manifest);
-          console.log(`  Codex: таблица mcp_servers.${name} взята под учёт с бэкапом; следующий sync --global не требует --force.`);
+          console.log(`  ${ADAPTERS[tableSource.agent].title}: таблица mcp_servers.${name} взята под учёт с бэкапом; следующий sync --global не требует --force.`);
         }
         console.log(`✓ MCP ${name} → ${file}`);
         if (Object.keys(found).length) console.log(`  на другой машине эти секреты нужно добавить в её local/secrets.env`);

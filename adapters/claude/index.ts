@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Adapter, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
 import { skillFiles } from "../../src/skillfiles";
@@ -24,6 +25,26 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
 }
 export const claude: Adapter = {
   id: "claude",
+  title: "Claude",
+  detect: { commands: ["claude"], dirs: [".claude"] },
+  program: { name: "Claude Code", commands: ["claude"] },
+  envVars: [{ name: "CLAUDE_CONFIG_DIR", title: "Claude Code", std: (h) => join(h, ".claude"), replace: true }],
+  homeSkillsDir: ".claude/skills",
+  teamImport: true,
+  collections: [".claude/skills"],
+  restore: {
+    // Что мастер копировал в before-miksy (с первой версии мастера по 0.2.3; прежние пути остаются, даже если homeConfig изменится)
+    everCopied: [".claude.json", ".claude/CLAUDE.md", ".claude/settings.json", ".claude/skills"],
+    // Вход и рабочее состояние: копии .claude.json, история и сессии по проектам (там же память проектов), задачи,
+    // снимки оболочки, история правок, служебное; local — своя установка Claude (старая откатила бы версию)
+    notRestored: [
+      ".claude/.credentials.json", ".claude/.claude.json" /* при CLAUDE_CONFIG_DIR=~/.claude */,
+      ".claude/backups", ".claude/projects", ".claude/todos", ".claude/tasks", ".claude/plans", ".claude/history.jsonl",
+      ".claude/shell-snapshots", ".claude/session-env", ".claude/file-history", ".claude/ide", ".claude/statsig",
+      ".claude/telemetry", ".claude/debug", ".claude/logs", ".claude/cache", ".claude/paste-cache", ".claude/stats-cache.json",
+      ".claude/local", ".claude/downloads",
+    ],
+  },
   skillDirs: [".claude/skills"],
   nativeMcp,
 

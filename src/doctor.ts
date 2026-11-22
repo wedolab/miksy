@@ -17,7 +17,7 @@ import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
-import { AGENT_NAMES, deliveredSkillNames, deliveryOrder } from "./registry";
+import { ADAPTERS, agentTitle, deliveredSkillNames, deliveryOrder } from "./registry";
 import { files } from "./plural";
 import { AGENT_NOTE, AGENT_TITLE, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
 import { shimNotes } from "./shim";
@@ -33,7 +33,7 @@ const MANUAL = /изменён вручную|управляемый блок и
 
 // Глобальные каталоги skills агентов — чтобы найти чужие регистрации (например, от установщиков наборов skills).
 // Skill — каталог со SKILL.md; служебные каталоги агента без него (контейнеры синхронизации) не считаются
-const GLOBAL_SKILL_DIRS = [".claude/skills", ".agents/skills", ".config/opencode/skills", ".gemini/config/skills"];
+const globalSkillDirs = () => Object.values(ADAPTERS).flatMap((a) => (a.homeSkillsDir ? [a.homeSkillsDir] : []));
 
 // bunVersion — версия Bun для предупреждения о старом Bun (тест подменяет)
 export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, bunVersion: string = Bun.version, which: (cmd: string) => string | null = (c) => Bun.which(c)): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
@@ -255,7 +255,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   // Глобальные skills, которые положил не miksy
   const owned = new Set(Object.values(manifest.targets).flatMap((s) => Object.keys(s.files)));
   const foreign: string[] = [];
-  for (const d of GLOBAL_SKILL_DIRS) {
+  for (const d of globalSkillDirs()) {
     const dir = join(machine.home, d);
     if (!existsSync(dir)) continue;
     for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -330,7 +330,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Секрет нельзя доставить", "сервер пропущен; исправьте значение в local/secrets.env или определение в слое", undeliverable);
   section("Пустые значения секретов", "сервер получит пустое значение; задайте его в local/secrets.env", emptySecrets);
   // Команда miksy: старый вид — всегда; нет её — когда ею запускаются MCP-серверы проектов (src/shim.ts)
-  const shim = shimNotes(machine.home, machine.os, portableUsed, { agents: adapters.filter((x) => x.projectMcp === "portable").map((x) => AGENT_NAMES[x.id] ?? x.id) });
+  const shim = shimNotes(machine.home, machine.os, portableUsed, { agents: adapters.filter((x) => x.projectMcp === "portable").map((x) => agentTitle(x.id)) });
   const shimProblems = shim.problems.map((detail) => ({ agent: "—", target: "", detail }));
   section("Команда miksy", "ею агенты запускают MCP-серверы проектов", shimProblems);
   section("Нет исполняемого файла обёртки", "обёртка не запустится: программа удалена или обновлена (новый путь)", missingExe);

@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Machine } from "./types";
-import { emptyState, sha, type Manifest } from "./manifest";
-import { pathKey } from "./paths";
-import { definitionHash, parseToml, splitToml } from "./toml";
-import { backup } from "./backup";
-import { protectedBy } from "./git";
-import { guard } from "./bounds";
-import { ensurePrivateLocal } from "./secretfiles";
+import type { Machine } from "../../src/types";
+import { emptyState, sha, type Manifest } from "../../src/manifest";
+import { pathKey } from "../../src/paths";
+import { definitionHash, parseToml, splitToml } from "../../src/toml";
+import { backup } from "../../src/backup";
+import { protectedBy } from "../../src/git";
+import { guard } from "../../src/bounds";
+import { ensurePrivateLocal } from "../../src/secretfiles";
 
 // adopt передаёт только выбранное имя, сам общий файл не переписывает.
 export function adoptCodexTable(manifest: Manifest, machine: Machine, name: string, expected: unknown, dryRun = false) {

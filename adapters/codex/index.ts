@@ -11,6 +11,7 @@ import { keepOwn } from "../../src/paths";
 import { teamCollection } from "../../src/git";
 import { shimPath, shimState } from "../../src/shim";
 import { splitInstructions } from "../../src/instructions";
+import { adoptCodexTable } from "./adopt";
 
 export const HEADER = (layers: string[]) =>
   `<!-- Сгенерировано miksy (слои: ${layers.join(" → ")}). Не править вручную — изменения вносить в конфигурацию miksy (слои). -->`;
@@ -31,6 +32,26 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
 }
 export const codex: Adapter = {
   id: "codex",
+  title: "Codex",
+  detect: { commands: ["codex"], dirs: [".codex"] },
+  program: { name: "Codex", commands: ["codex"] },
+  envVars: [{ name: "CODEX_HOME", title: "Codex", std: (h) => join(h, ".codex"), replace: true }],
+  homeSkillsDir: ".agents/skills",
+  teamImport: true,
+  collections: [".agents/skills", ".codex/skills"],
+  // Командная коллекция в .agents/skills — skills проекта в .codex/skills (render ниже)
+  skillsFallback: { from: ".agents/skills", to: ".codex/skills" },
+  restore: {
+    everCopied: [".codex/config.toml", ".codex/AGENTS.md", ".codex/AGENTS.override.md", ".agents/skills"],
+    // Вход; сессии, история, логи, снимки оболочки, служебные кэши и номера
+    notRestored: [
+      ".codex/auth.json",
+      ".codex/sessions", ".codex/archived_sessions", ".codex/history.jsonl", ".codex/log", ".codex/logs",
+      ".codex/shell_snapshots", ".codex/tmp", ".codex/cache", ".codex/version.json", ".codex/models_cache.json",
+      ".codex/internal_storage.json",
+    ],
+  },
+  adoptGlobal: adoptCodexTable,
   skillDirs: [".agents/skills", ".codex/skills"],
   homeConfig: [".codex/config.toml", ".codex/AGENTS.md", ".codex/AGENTS.override.md", ".agents/skills"],
   // node_repl заводит само приложение Codex (computer use), это не пользовательский сервер

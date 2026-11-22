@@ -2,6 +2,7 @@ import type { Launcher } from "./launch";
 import type { OwnFiles, PendingTrust, TrustRenew } from "./trust";
 import type { HttpDelivery, SkippedMcp } from "./vars";
 import type { Machine, Resolved } from "./types";
+import type { Manifest } from "./manifest";
 
 // nested — внутри цели есть другие проекты: файлы, которые агент наследует вниз по дереву
 // (у Claude — CLAUDE.local.md), адаптер туда не пишет. git — цель является git-репо.
@@ -101,4 +102,41 @@ export interface Adapter {
   // Глобальные файлы и каталоги настроек агента (относительно ~): то, что miksy меняет глобально, и
   // настройки рядом — setup копирует их до первой записи (local/backups/before-miksy-<метка>/)
   homeConfig?: string[];
+
+  // ---- Особенности агента для общего кода (круг 10x): данные — полями, поведение — методами ----
+  // Название в сообщениях («Claude», «Codex»)
+  title: string;
+  // Прежние имена — рабочие синонимы во входных данных и учёте (src/agentid.ts)
+  aliases?: string[];
+  // Как найти агента на машине: команда в PATH или (агент только в редакторе) каталог настроек в доме
+  detect: { commands: string[]; dirs: string[] };
+  // Программа для сводки окружения (несколько установок — doctor, мастер): название и команды
+  program: { name: string; commands: string[] };
+  // Сводка окружения про установку программы (exe — первая в PATH): что не так (например, старая версия)
+  programNote?(exe: string, shown: string): string | null;
+  // Основная версия программы для сводки установок («(2.x)») — если её можно узнать, не запуская программу
+  programMajor?(exe: string): number | null;
+  // Переменные окружения, меняющие, где агент ищет настройки. replace — читает только оттуда (std — стандартный
+  // каталог, куда пишет miksy; dir/stdDir — каталог настроек по значению, если не само значение); иначе —
+  // дополнительный конфиг поверх over(home)
+  envVars?: { name: string; title: string; std(home: string): string; replace: boolean; dir?(value: string): string; stdDir?(home: string): string; over?(home: string): string }[];
+  // Глобальный каталог skills агента (относительно ~): doctor ищет в нём чужие регистрации
+  homeSkillsDir?: string;
+  // Импорт командных skills проекта проверен для агента
+  teamImport?: boolean;
+  // Каталоги-коллекции в проекте, куда агент пишет skills или плагины (<каталог>/<имя>/…): exclude — каталогом,
+  // командная коллекция — по ним
+  collections?: string[];
+  // Skills проекта — в основном каталоге, а при командной коллекции в нём — в запасном (Codex: .agents/skills →
+  // .codex/skills): файлы основного при переходе --force не удаляет
+  skillsFallback?: { from: string; to: string };
+  // Пишется после остальных агентов: пропускает skills, уже доставленные ими в общие каталоги
+  deliverLast?: boolean;
+  // Свой файл проекта узнаётся по содержимому без учёта (учёт забыт — clean --forget, диск вернулся)
+  ownFile?(path: string, text: string): boolean;
+  // Копия «до miksy» (miksy restore): что мастер когда-либо копировал (относительно ~) и что не возвращается
+  // никогда — вход и рабочее состояние агента
+  restore?: { everCopied: string[]; notRestored: string[] };
+  // Перенести ручной сервер из домашнего конфига агента под учёт miksy при adopt --global (Codex: таблица TOML)
+  adoptGlobal?(manifest: Manifest, machine: Machine, name: string, def: unknown, dryRun?: boolean): void;
 }

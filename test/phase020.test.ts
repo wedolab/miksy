@@ -6,7 +6,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { antigravity, mcpHint } from "../adapters/antigravity";
-import { environment, opencodeMajor } from "../src/environ";
+import { environment } from "../src/environ";
+import { opencodeMajor } from "../adapters/opencode/version";
 import { canonical } from "../src/paths";
 import { rcAddsDir } from "../src/setup";
 import type { Machine, Resolved } from "../src/types";

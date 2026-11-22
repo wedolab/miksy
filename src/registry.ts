@@ -1,8 +1,6 @@
 // Общее для команд CLI: адаптеры, построение целей, генерация для цели
-import { claude } from "../adapters/claude";
-import { codex } from "../adapters/codex";
-import { antigravity } from "../adapters/antigravity";
-import { opencode } from "../adapters/opencode";
+import { ADAPTERS } from "./agents";
+export { ADAPTERS };
 import type { Adapter, RenderedFile, RenderResult, Target } from "./adapter";
 import { createLauncher, stableBun } from "./launch";
 import { existsSync } from "node:fs";
@@ -25,16 +23,12 @@ import { blockHash, splitInstructions } from "./instructions";
 import { MIN as MASK_MIN } from "./mask";
 import { count } from "./plural";
 
-export const ADAPTERS: Record<string, Adapter> = { claude, codex, opencode, antigravity };
-
 // Где каждый агент сам находит skills проекта: объявления адаптеров поверх таблицы ядра
 export const READERS: Record<AgentId, string[]> = {
   ...DEFAULT_READERS,
   ...Object.fromEntries(Object.values(ADAPTERS).filter((a) => a.skillDirs).map((a) => [a.id, a.skillDirs!])),
 };
 
-// Импорт командных skills — для адаптеров, где он проверен
-export const TEAM_IMPORT = new Set(["claude", "codex", "antigravity"]);
 
 // Агенты для команды: --agent, иначе список машины (local/machine.yaml), иначе все. Прежние имена
 // (gemini) — синонимы
@@ -236,7 +230,7 @@ function belowOf(cfg: Resolved, above: Group[], machine: Machine): Below {
   return { groups, layers, instructions: cfg.instructions.filter((i) => layers.includes(i.layer)), leaked: [...leaked.values()] };
 }
 
-export const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "opencode", antigravity: "Antigravity" };
+export const agentTitle = (id: string) => ADAPTERS[id]?.title ?? id;
 
 // Канал правил группы доставлен: в учёте группы — блок или own-файл правил (rulesFiles адаптера), и он
 // цел на диске: блок разбирается и его хеш совпадает с учтённым, own-файл — с учтённым хешем. Файл без
@@ -270,7 +264,7 @@ export function groupCoverage(adapter: Adapter, t: TargetSpec, delivered?: (dir:
 
 export function unsyncedGroups(adapter: Adapter, t: TargetSpec, delivered: (dir: string) => boolean): string[] {
   return (groupCoverage(adapter, t, delivered)?.lacking ?? []).map((g) =>
-    `группа ${g.rel} выше не получила правила ${AGENT_NAMES[adapter.id] ?? adapter.id} (не синхронизирована, конфликт или файлы правил версионирует команда) — правила её слоёв ${g.layers.join(", ")} записаны в эту цель; когда группа их получит (sync ${g.rel} или sync --all), повторите sync цели`);
+    `группа ${g.rel} выше не получила правила ${agentTitle(adapter.id)} (не синхронизирована, конфликт или файлы правил версионирует команда) — правила её слоёв ${g.layers.join(", ")} записаны в эту цель; когда группа их получит (sync ${g.rel} или sync --all), повторите sync цели`);
 }
 
 // Бывшие группы: в учёте записаны как группа, а пометки больше нет (или она стала неверной).
@@ -346,7 +340,8 @@ export function allTargets(machine: Machine, groups: Group[], warn?: (msg: strin
 
 export function teamFor(cfg: Resolved, target: Target, adapter: Adapter): { cfg: Resolved; warnings: string[] } {
   if (target.scope !== "project" || !cfg.importSkills) return { cfg, warnings: [] };
-  if (!TEAM_IMPORT.has(adapter.id)) {
+  // Импорт командных skills — для адаптеров, где он проверен
+  if (!adapter.teamImport) {
     const unseen = scanTeamSkills(target.dir, READERS).skills.filter((s) => !s.seenBy.includes(adapter.id as AgentId)).length;
     return { cfg, warnings: unseen ? [`командных skills, которых ${adapter.id} не видит: ${unseen}; импорт для ${adapter.id} пока не включён`] : [] };
   }
@@ -465,7 +460,7 @@ export function httpEnvWarnings(cfg: Resolved, adapter: Adapter, http = adapter.
   return cfg.mcp.filter(({ item }) => item.url && item.env && item.agents?.[adapter.id] !== "skip").flatMap(({ item }) => {
     const bridge = http === "bridge" || refsIn(item.url).length > 0;
     const ignored = Object.keys(item.env!).filter((k) => !(bridge && bridgeEnv(k)));
-    return ignored.length ? [`mcp ${item.name}: env HTTP-сервера (${ignored.join(", ")}) ${AGENT_NAMES[adapter.id] ?? adapter.id} игнорирует — удалённому серверу переменные окружения не передаются${bridge ? " (мосту — только прокси/TLS)" : ""}`] : [];
+    return ignored.length ? [`mcp ${item.name}: env HTTP-сервера (${ignored.join(", ")}) ${agentTitle(adapter.id)} игнорирует — удалённому серверу переменные окружения не передаются${bridge ? " (мосту — только прокси/TLS)" : ""}`] : [];
   });
 }
 
@@ -530,8 +525,8 @@ export function ledgerSkills(manifest: Manifest, dir: string, except: Set<string
   return [...out];
 }
 
-// opencode использует результаты доставки остальных адаптеров, независимо от порядка machine.agents.
-export const deliveryOrder = (adapters: Adapter[]) => [...adapters].sort((a, b) => Number(a.id === "opencode") - Number(b.id === "opencode"));
+// Адаптер с deliverLast (opencode) использует результаты доставки остальных, независимо от порядка machine.agents.
+export const deliveryOrder = (adapters: Adapter[]) => [...adapters].sort((a, b) => Number(!!a.deliverLast) - Number(!!b.deliverLast));
 
 // Ни метки ссылки, ни значения секрета в MCP-файлах и скриптах рендера: адаптер, не умеющий
 // доставить секрет, должен пропустить сервер, а не записать значение
