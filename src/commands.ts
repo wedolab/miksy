@@ -17,22 +17,23 @@ import { foreignMcp, foreignSkills, ownMcpOf } from "./foreign";
 import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsafeWorkspace } from "./setup";
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
-import { checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
+import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
 import { engineVersion, newerLedger } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
-import { ADAPTERS, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
+import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
 import { merge } from "./resolve";
 import { clashText, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, suggestTree, treeClashes, treeOf } from "./roots";
 import { type RootItem, rootItems, rewriteRoots } from "./rootfile";
+import { rewriteList } from "./machinefile";
 import { files, plural } from "./plural";
 import { prepareSandbox, syncOut } from "./sync";
 import { applyMark, layerPath, markPlan, plainDirs, plainText, targetDir } from "./target";
 import { type AgentId, formatTeamSkills, scanTeamSkills } from "./teamskills";
 import type { Adapter } from "./adapter";
-import type { Machine, Resolved } from "./types";
+import type { Machine, McpServer, Resolved } from "./types";
 import { deliveredSkillNames, deliveryOrder } from "./registry";
 import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, linkedDir, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
 
@@ -97,6 +98,13 @@ export const USAGE = `miksy — раскладывает ваши правила
                                miksy root remove <путь> — убрать (--forget — как у clean);
                                miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
+
+MCP-серверы на этой машине
+  miksy mcp off <имя>          сервер из слоёв на этой машине не нужен (например, его секрета
+                               здесь нет и не будет): агенты не получат его или увидят пустым,
+                               без ошибки. Затем спросит, записать ли настройки сейчас.
+                               miksy mcp on <имя> — вернуть; miksy mcp off — список
+                               выключенных; --dry-run — только показать
 
 Доверие проектам
   miksy trust [<путь>]         доверять ли проекту, где есть то, что агент выполнит без вопроса и
@@ -853,7 +861,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
   let code = 0;
   // Запись в local/backups отказана (ссылка с открытой или несуществующей целью) — пишущие команды останавливаются в
   // начале, до вопросов и записи; их --dry-run — та же строка и код 1 (выпуск 0.2.2, круг 8c, C10; рецензия A, п. 7)
-  if (["sync", "clean", "trust", "target", "adopt", "restore"].includes(cmd) || (cmd === "root" && ["add", "remove"].includes(positional[0]))) {
+  if (["sync", "clean", "trust", "target", "adopt", "restore"].includes(cmd) || (cmd === "root" && ["add", "remove"].includes(positional[0])) || (cmd === "mcp" && positional.length === 2)) {
     const refuse = backupsRefusal();
     if (refuse) {
       if ("dry-run" in flags) { console.log(`Ошибка (запуск откажет): ${refuse}`); return 1; }
@@ -1403,6 +1411,58 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       break;
     }
 
+    case "mcp": {
+      // Выключить MCP-сервер на этой машине (круг 11c): ключ mcp_off в local/machine.yaml — правка строками
+      const machine = loadMachine();
+      const file = join(configRoot(), "local", "machine.yaml");
+      const text = readFileSync(file, "utf8");
+      const off = machine.mcpOff ?? [];
+      const [verb, name] = positional;
+      if (name === undefined) {
+        console.log(off.length ? `Выключены на этой машине (${off.length}): ${off.join(", ")}\nВключить — miksy mcp on <имя>` : "Выключенных MCP-серверов на этой машине нет. Выключить — miksy mcp off <имя>");
+        break;
+      }
+      if ((verb === "off") === off.includes(name)) {
+        console.log(`Сервер ${name} уже ${verb === "off" ? "выключен" : "включён"} на этой машине — ничего не изменилось.`);
+        break;
+      }
+      const defs = allLayerMcp().filter((s) => s.name === name);
+      const portableAgents = Object.values(ADAPTERS).filter((a) => a.projectMcp === "portable").map((a) => agentTitle(a.id)).join(", ");
+      if (!defs.length) console.log(`предупреждение: сервера ${name} нет ни в одном слое (mcp/${name}.yaml) — ${verb === "off" ? "отметка запишется и подействует, когда он появится" : "отметка снимается"}`);
+      const after = rewriteList(text, "mcp_off", verb === "off" ? [...off, name] : off.filter((n) => n !== name));
+      if (verb === "off") {
+        console.log(`Сервер ${name} будет выключен на этой машине (local/machine.yaml, mcp_off): в файлах проектов (${portableAgents}) он будет пустым — без инструментов и без ошибки, в остальные настройки агентов не попадёт.`);
+        // Без ссылок ${…} и вариантов для ОС сервер пишется в файл проекта как есть (общий для машин) — там он
+        // запустится (src/vars.ts substitute)
+        const refs = (s: McpServer) => [s.command, ...(s.args ?? []), s.url, ...Object.values(s.env ?? {}), ...Object.values(s.headers ?? {})]
+          .some((v) => v !== undefined && /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(String(v)));
+        const sameUrl = defs.every((s) => s.url && !refs(s) && JSON.stringify({ ...s, os: undefined }) === JSON.stringify({ ...defs[0], os: undefined }));
+        if (defs.length && !defs.some(refs) && (!defs.some((s) => s.os) || sameUrl))
+          console.log(`справка: у ${name} нет секретов и переменных — в файлах проектов (${portableAgents}) он записан как есть (такой файл одинаков на всех машинах) и там запустится; убрать его оттуда — exclude: [mcp.${name}] в слое проекта`);
+      } else console.log(`Сервер ${name} будет снова включён на этой машине.`);
+      if ("dry-run" in flags) {
+        console.log("\n--dry-run: ничего не записано.");
+        break;
+      }
+      backup(file);
+      writeAtomic(file, after);
+      console.log("✓ записано");
+      if (!ask) {
+        console.log("Дальше: miksy sync --global и miksy sync --all — записать настройки агентам");
+        break;
+      }
+      if (!ask.yes("Записать настройки агентам сейчас (miksy sync --global и miksy sync --all)?", true)) {
+        console.log("Позже: miksy sync --global и miksy sync --all");
+        break;
+      }
+      console.log("");
+      resetRun();
+      code = command("sync", { global: "" }, []);
+      console.log("");
+      resetRun();
+      code = Math.max(code, command("sync", { all: "" }, []));
+      break;
+    }
     case "root": {
       // Корни workspace (local/machine.yaml → workspace): список, добавить, убрать. Пишется только ключ
       // workspace; учёт и записанное в проекты — только с согласия (root remove)

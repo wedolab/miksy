@@ -16,8 +16,9 @@ export interface McpServer {
   // machine.yaml — значения этой машины (в файл проекта такой сервер идёт через обёртку, src/launch.ts)
   machineVars?: string[];
   // Ставит подстановка для переносимой цели (src/vars.ts, круг 11b): сервер записан в файл проекта, но на этой машине
-  // не запустится — why (нет переменной, значение секрета не доставить, другая ОС); quiet — без ошибки (пустой сервер)
-  unavailable?: { why: string; quiet?: boolean };
+  // не запустится — why (нет переменной, значение секрета не доставить, другая ОС); quiet — без ошибки (пустой сервер);
+  // off — выключен на этой машине (mcp_off, круг 11c)
+  unavailable?: { why: string; quiet?: boolean; off?: boolean };
   // Ставит renderFor для переносимой цели: у имени в слоях есть вариант для отдельной ОС (os:) — сервер идёт через miksy
   // на любой ОС, чтобы файл проекта был одинаков (кроме HTTP без секретов и переменных — он одинаков и так)
   perOs?: boolean;
@@ -89,6 +90,9 @@ export interface Machine {
   vars: Record<string, string>;
   agents?: string[]; // агенты, установленные на этой машине (local/machine.yaml)
   trust?: TrustSetting; // по умолчанию добавлять доверие доставленным проектам
+  // Серверы, выключенные на этой машине (local/machine.yaml mcp_off, miksy mcp off): в файле проекта — пустой сервер,
+  // в остальные конфиги не пишутся (круг 11c)
+  mcpOff?: string[];
 }
 
 export interface Sourced<T> {

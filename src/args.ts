@@ -61,6 +61,15 @@ export const COMMANDS: Record<string, Spec> = {
       if ("dry-run" in f && !p.length) throw new UsageError("--dry-run — для miksy root add и root remove");
     },
   },
+  // mcp off [<имя>] | mcp on <имя> — выключить MCP-сервер на этой машине (запуск агентом — быстрый путь src/cli.ts)
+  mcp: {
+    bool: ["dry-run"], positional: [1, 2],
+    check: (f, p) => {
+      if (p[0] !== "off" && p[0] !== "on") throw new UsageError("использование: miksy mcp off <имя>  |  miksy mcp on <имя>  |  miksy mcp off (список выключенных)");
+      if (p[0] === "on" && p.length !== 2) throw new UsageError("miksy mcp on <имя> — укажите, какой сервер включить");
+      if ("dry-run" in f && p.length !== 2) throw new UsageError("--dry-run — для miksy mcp off <имя> и miksy mcp on <имя>");
+    },
+  },
   trust: {
     valued: ["agent"], bool: ["confirm", "deny"], positional: [0, 1],
     check: (f) => { if ("confirm" in f && "deny" in f) throw new UsageError("укажите что-то одно: --confirm или --deny"); },

@@ -3,41 +3,24 @@
 // список правится по строкам (комментарии внутри сохраняются), прочие формы (flow-список) записываются
 // заново. Проверка разбором: прочие ключи не изменились, workspace — ровно ожидаемый список
 import { parseYaml } from "./load";
+import { keepBom, keyRegion, restOf, same } from "./machinefile";
 
 export type RootItem = string | { path: string; tree?: string };
 
 const itemText = (it: RootItem) =>
   typeof it === "string" ? JSON.stringify(it) : it.tree ? `{ path: ${JSON.stringify(it.path)}, tree: ${JSON.stringify(it.tree)} }` : JSON.stringify(it.path);
 
-// Область ключа workspace: строка ключа и строки его значения (отступ, пустые, комментарии — до
-// следующего ключа верхнего уровня)
-function region(lines: string[]): { at: number; end: number } | null {
-  const at = lines.findIndex((l) => /^workspace:/.test(l));
-  if (at < 0) return null;
-  let end = at + 1;
-  // Элементы списка бывают и без отступа («- a» под «workspace:»)
-  while (end < lines.length && (/^\s/.test(lines[end]) || /^-( |$)/.test(lines[end]) || /^\s*(#.*)?$/.test(lines[end]))) end++;
-  // Хвостовые пустые строки и комментарии без отступа — уже не значение workspace
-  while (end > at + 1 && /^(#.*)?$/.test(lines[end - 1])) end--;
-  return { at, end };
-}
-
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const rest = (d: Record<string, unknown>) => JSON.stringify(Object.fromEntries(Object.entries(d).filter(([k]) => k !== "workspace").sort(([a], [b]) => a.localeCompare(b))));
-
 // Новый текст machine.yaml: workspace = items (полный новый список). keep — индекс в старом списке для
 // каждого нового элемента (-1 — новый): по нему блочный список правится строками
 export function rewriteRoots(source: string, items: RootItem[], keep: number[]): string {
-  // BOM в начале (PowerShell 5.1, Блокнот) — сохраняется, как был; loadMachine его тоже принимает
-  const bom = source.startsWith("\uFEFF") ? "\uFEFF" : "";
-  return bom + rewrite(source.slice(bom.length), items, keep);
+  return keepBom(source, (text) => rewrite(text, items, keep));
 }
 
 function rewrite(text: string, items: RootItem[], keep: number[]): string {
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const lines = text.split(/\r?\n/);
   const doc = (parseYaml(text) ?? {}) as Record<string, unknown>;
-  const r = region(lines);
+  const r = keyRegion(lines, "workspace");
   if (!r) throw new Error("в local/machine.yaml нет ключа workspace");
   const head = lines[r.at].replace(/^workspace:[ \t]*/, "");
   const block = !head || head.startsWith("#");
@@ -81,7 +64,7 @@ function rewrite(text: string, items: RootItem[], keep: number[]): string {
   try { parsed = (parseYaml(after) ?? {}) as Record<string, unknown>; } catch { parsed = {}; }
   const norm = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "object" ? { path: (v as { path?: unknown }).path, tree: (v as { tree?: unknown }).tree ?? undefined } : v);
   const want = only !== null ? [typeof only === "string" ? only : only.path] : items;
-  if (rest(parsed) !== rest(doc) || (only === null && !Array.isArray(parsed.workspace)) || !same(rootItems(parsed.workspace).map(norm), want.map(norm)))
+  if (restOf(parsed, "workspace") !== restOf(doc, "workspace") || (only === null && !Array.isArray(parsed.workspace)) || !same(rootItems(parsed.workspace).map(norm), want.map(norm)))
     throw new Error("local/machine.yaml: workspace не изменить строками — поправьте файл вручную");
   return after;
 }

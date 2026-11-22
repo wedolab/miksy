@@ -97,7 +97,7 @@ export function substitute(
   r: Resolved,
   machine: Machine,
   secrets: Record<string, string>,
-  opts: { agent?: string; http?: HttpDelivery; portable?: (name: string) => boolean } = {},
+  opts: { agent?: string; http?: HttpDelivery; portable?: (name: string) => boolean; off?: Set<string> } = {},
 ): { resolved: Resolved; missing: string[]; skipped: SkippedMcp[]; secretServers: string[]; usedSecrets: string[]; serverUses: Record<string, string[]>; empty: { server: string; name: string }[] } {
   const builtin: Record<string, string> = { HOME: machine.home, WORKSPACE: machine.workspace };
   const missing = new Set<string>();
@@ -151,6 +151,17 @@ export function substitute(
     // raw сервера, который на этой машине не запустится: подстановки машины — как у работающего; ссылка на секрет в нём
     // в файл не попадает — тогда raw из слоя
     const rawFor = () => (agents && !JSON.stringify(agents).includes(SECRET_MARK) ? { agents } : {});
+    if (opts.off?.has(item.name)) {
+      // Выключен на этой машине (mcp_off, круг 11c). Переносимая цель: сервер, который и на других машинах идёт через
+      // miksy (ссылки ${…}, вариант для отдельной ОС, не запустится), — тихим пустым сервером; без них он пишется как
+      // есть (другая машина пишет его так же, иначе файл общей папки различался бы) — дальше, как обычно.
+      // Остальные цели (Claude, домашние настройки, непереносимое имя) — не пишется, без предупреждения и keep
+      if (!opts.portable?.(item.name)) return [];
+      const refs = [item.command, ...(item.args ?? []), item.url, ...Object.values(item.env ?? {}), ...Object.values(item.headers ?? {})]
+        .some((v) => v !== undefined && /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(String(v)));
+      if (item.perOs || item.unavailable || refs)
+        return [{ item: { ...item, ...rawFor(), unavailable: { why: "выключен на этой машине (miksy mcp off)", quiet: true, off: true } }, layer }];
+    }
     if (item.unavailable) return [{ item: { ...item, ...rawFor() }, layer }];
     const s: McpServer = {
       ...item,

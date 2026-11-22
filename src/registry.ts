@@ -403,7 +403,7 @@ export function renderFor(
   // переменной не зависит от цели. Путь в другой корень — своей переменной в vars local/machine.yaml
   const launch = launcherFor(adapter, t.target, machine);
   const portable = portableTarget(adapter, t.target) ? launch.canRun : undefined;
-  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(portable ? withElsewhere(t.cfg, portable) : t.cfg, machine, secrets, { agent: adapter.id, http: httpFor(adapter, t.target), portable });
+  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(portable ? withElsewhere(t.cfg, portable) : t.cfg, machine, secrets, { agent: adapter.id, http: httpFor(adapter, t.target), portable, off: new Set(machine.mcpOff) });
   const team = teamFor(resolved, t.target, adapter);
   const ownedFiles = Object.keys(prev?.files ?? {});
   // Ниже группы: агенту, который сам читает правила родительских каталогов, — только отрезок цели.

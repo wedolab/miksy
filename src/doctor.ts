@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -88,6 +88,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const literals: Finding[] = []; // значение секрета в ключе вне учёта (конфликт «создан не miksy»)
   const emptySecrets: Finding[] = []; // секрет, который использует сервер, пустой
   const delivered = new Map<string, string[]>();
+  // Серверы, которые на этой машине не запустятся (круг 11c, справочно): имя → причина → агенты
+  const idle = new Map<string, Map<string, Set<string>>>();
+  const offSet = new Set(machine.mcpOff);
   const rulesDelivered = (adapter: Adapter) => (dir: string) => groupRulesDelivered(adapter, manifest, dir);
 
   for (const adapter of deliveryOrder(adapters)) {
@@ -116,6 +119,15 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       for (const detail of unsyncedGroups(adapter, t, rulesDelivered(adapter))) groupBelow.push({ ...where, detail });
       const { result, cfg, missing: miss } = rendered;
       for (const m of miss) missing.set(m, (missing.get(m) ?? new Set()).add(adapter.id));
+      for (const { item } of cfg.mcp) {
+        const why = item.unavailable?.off ? "выключен (miksy mcp off) — пустой сервер"
+          : item.unavailable ? (item.unavailable.quiet ? `${item.unavailable.why} — пустой сервер` : `${item.unavailable.why} — агент покажет эту причину; не нужен на этой машине — miksy mcp off ${item.name}`)
+          : offSet.has(item.name) && item.agents?.[adapter.id] !== "skip" ? `выключен (miksy mcp off), но без секретов и переменных записан в файл проекта как есть и запустится; убрать — exclude: [mcp.${item.name}] в слое проекта`
+          : null;
+        if (!why) continue;
+        const byWhy = idle.get(item.name) ?? new Map<string, Set<string>>();
+        idle.set(item.name, byWhy.set(why, (byWhy.get(why) ?? new Set()).add(adapter.id)));
+      }
       for (const k of rendered.skipped) if (k.why) undeliverable.push({ ...where, detail: `mcp ${k.name}: ${k.why}` });
       for (const a of result.advice ?? []) advice.push({ ...where, detail: a });
       if (result.portable) portableUsed = true;
@@ -349,14 +361,18 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Команда miksy", "ею агенты запускают MCP-серверы проектов", shimProblems);
   section("Нет исполняемого файла обёртки", "обёртка не запустится: программа удалена или обновлена (новый путь)", missingExe);
   if (missing.size) {
-    out.push(`Не заданы переменные (${missing.size}) — local/machine.yaml или local/secrets.env`);
+    out.push(`Не заданы переменные (${missing.size}) — local/machine.yaml или local/secrets.env; сервер на этой машине не нужен — miksy mcp off <имя>`);
     for (const [v, ag] of missing) out.push(`  ${v}  (${[...ag].join(", ")})`);
     out.push("");
   }
+  // Отметка mcp_off для имени, которого нет ни в одном слое: опечатка или сервер убран (круг 11c)
+  const known = new Set(offSet.size ? allLayerMcp().map((s) => s.name) : []);
+  const strayOff = [...offSet].filter((n) => !known.has(n)).map((n) => ({ agent: "—", target: "local/machine.yaml", detail: `mcp_off: ${n} — такого сервера нет ни в одном слое; снять отметку — miksy mcp on ${n}` }));
+  section("Выключен сервер, которого нет в слоях", "опечатка в имени или сервер убран из слоёв", strayOff);
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
-    + emptySecrets.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
+    + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
   // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)
   const bun = oldBun(bunVersion);
@@ -367,6 +383,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (shim.info.length) info.push(`Команда miksy (${shim.info.length}):`, ...shim.info.map((l) => "  " + l));
   const newer = newerLedger(manifest.engine);
   if (newer) info.push(`Версия: ${newer}`);
+  if (idle.size) {
+    info.push(`Серверы, которые на этой машине не запустятся (${idle.size}):`);
+    for (const [name, byWhy] of idle) for (const [why, ag] of byWhy) info.push(`  ${name}  ${why}  (${[...ag].join(", ")})`);
+  }
   const keys = unknownKeys();
   if (keys.length) info.push(`Неизвестные ключи (${keys.length}) — miksy их не читает: опечатка или ключ более новой версии miksy:`, ...keys.map((k) => "  " + k));
   if (persistent.length) {

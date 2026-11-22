@@ -66,11 +66,13 @@ function checkTrust(t: unknown, where: string) {
 export function loadMachine(root = configRoot()): Machine {
   const path = join(root, "local", "machine.yaml");
   if (!existsSync(path)) throw new Error(`Нет ${path}. Машина ещё не настроена — запусти: bun src/cli.ts setup`);
-  const m = yaml<{ workspace?: unknown; vars?: Record<string, string>; agents?: string[]; trust?: Machine["trust"] }>(path);
+  const m = yaml<{ workspace?: unknown; vars?: Record<string, string>; agents?: string[]; trust?: Machine["trust"]; mcp_off?: unknown }>(path);
   checkTrust(m?.trust, path);
   const roots = parseRoots(m?.workspace, slash(path), ledgerRoots(root));
   if (m.agents !== undefined && !(Array.isArray(m.agents) && m.agents.every((a) => typeof a === "string")))
     throw new Error(`${path}: agents — список агентов, например [claude, codex]`);
+  if (m.mcp_off != null && !(Array.isArray(m.mcp_off) && m.mcp_off.every((a) => typeof a === "string" && a)))
+    throw new Error(`${path}: mcp_off — список имён MCP-серверов, выключенных на этой машине, например mcp_off: [gitlab]. Исправьте строку в файле вручную или удалите её`);
   return {
     workspace: roots[0].path,
     roots,
@@ -80,6 +82,7 @@ export function loadMachine(root = configRoot()): Machine {
     // Прежние имена агентов (gemini) — синонимы
     ...(m.agents && { agents: [...new Set(m.agents.map(agentId))] }),
     ...(m.trust && { trust: m.trust }),
+    ...(Array.isArray(m.mcp_off) && m.mcp_off.length && { mcpOff: [...new Set(m.mcp_off as string[])] }),
   };
 }
 
@@ -353,6 +356,23 @@ export function orphanTreeDirs(workspace: string | Root[], root = configRoot()):
   };
   const top = mountsAt("");
   walk(base, "", live(top), top.length > 0, top.some((m) => !rootExists(m)));
+  return out;
+}
+
+// Все определения MCP-серверов во всех слоях конфигурации (каталоги с mcp/), в том числе не подключённых в map.yaml:
+// для miksy mcp off/on и doctor — есть ли имя где-нибудь в слоях. Слой не читается — пропускается (ошибку покажет sync)
+export function allLayerMcp(root = configRoot()): McpServer[] {
+  const out: McpServer[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    if (entries.some((e) => e.isDirectory() && e.name === "mcp")) {
+      try { out.push(...loadLayerDir(dir, slash(relative(join(root, "layers"), dir)) || "layers").mcp); } catch { /* битый слой */ }
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name)))
+      if (e.isDirectory() && !LAYER_PARTS.has(e.name)) walk(join(dir, e.name));
+  };
+  walk(join(root, "layers"));
   return out;
 }
 
