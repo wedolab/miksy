@@ -12,6 +12,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { blockHash, splitInstructions } from "./instructions";
 import { type Manifest, normalizeManifest, sha, type TargetState } from "./manifest";
 import { fold } from "./paths";
+import { excludeText, machinesIn } from "./excludeblocks";
+import { machineId, machineUnknown, noteSkipped } from "./machineid";
 
 export type Move = { from: string; to: string; how: "config" | "files" | "parent" };
 
@@ -82,6 +84,11 @@ export function findMoves(m: Manifest, config: string, candidates: () => string[
     if (dir !== "global") byDir.set(dir, [...(byDir.get(dir) ?? []), st]);
   }
   let pool: string[] | null = null;
+  // Каталог, где блоки miksy в .git/info/exclude — только других машин (общая папка, круг 10z): файлы miksy в нём
+  // записала другая машина, а не переехал проект этой — не кандидат. Без блоков (нет git) и с блоком без метки
+  // (прежняя версия) — как раньше
+  let me: string | null | undefined;
+  const othersOnly = (c: string) => { const ms = machinesIn(excludeText(c)); if (!ms.length) return false; if (machineUnknown(config)) { noteSkipped(config); return true; } if (me === undefined) me = machineId(config); return ms.every((x) => x !== null && x !== me); };
   const forgotten = new Set(Object.keys(m.forgotten ?? {}).map(dirOf).map(fold));
   for (const dir of [...byDir.keys()].sort((a, b) => a.length - b.length)) {
     if (exists(dir)) continue;
@@ -98,7 +105,7 @@ export function findMoves(m: Manifest, config: string, candidates: () => string[
     const taken = new Set([...byDir.keys()].map((d) => fold(movePath(d, moves))).filter((d) => exists(d)));
     // Проект с отметкой «проект забыт» — не кандидат: в нём файлы miksy без учёта по устройству «забыть», а не
     // потому, что сюда переехал другой проект (его разберёт план с отметкой)
-    const hits = pool.filter((c) => !forgotten.has(fold(c)) && !taken.has(fold(c)) && !moves.some((mv) => fold(mv.to) === fold(c)) && ev.every((e) => same(c, e)));
+    const hits = pool.filter((c) => !forgotten.has(fold(c)) && !othersOnly(c) && !taken.has(fold(c)) && !moves.some((mv) => fold(mv.to) === fold(c)) && ev.every((e) => same(c, e)));
     if (hits.length === 1) moves.push({ from: dir, to: hits[0], how: "files" });
   }
   return moves;

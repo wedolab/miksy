@@ -28,9 +28,12 @@ export const COMMANDS: Record<string, Spec> = {
     check: (f, p) => { if ("all" in f && p.length) throw new UsageError("укажите что-то одно: <путь> или --all"); },
   },
   sync: {
-    valued: ["agent", "out"], bool: ["global", "all", "dry-run", "force", "yes"], positional: [0, 1],
+    valued: ["agent", "out", "machine-was", "machine-other"], bool: ["global", "all", "dry-run", "force", "yes"], positional: [0, 1],
     check: (f, p) => {
       if ("out" in f && ("all" in f || "force" in f)) throw new UsageError("--out — одна цель (путь или --global) и без --force");
+      for (const k of ["machine-was", "machine-other"])
+        if (k in f && !/^[0-9a-f]{6,32}$/.test(f[k])) throw new UsageError(`--${k} <номер> — номер из подсказки miksy doctor (знаки 0-9a-f)`);
+      if ("machine-was" in f && "machine-other" in f) throw new UsageError("--machine-was и --machine-other — что-то одно (какое — подскажет miksy doctor)");
       oneTarget(f, p);
     },
   },

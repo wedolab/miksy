@@ -6,7 +6,9 @@ import { type Action, plan, verifyMerges } from "./apply";
 import { caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
-import { emptyState, ManifestError, type Manifest, otherOwners, splitState, strandedPaths } from "./manifest";
+import { splitInstructions } from "./instructions";
+import { blocksOf as blocksWithMachine, machineId, machineUnknown } from "./machineid";
+import { emptyState, ManifestError, type Manifest, type TargetState, otherOwners, splitState, strandedPaths } from "./manifest";
 import type { Move } from "./relocate";
 import { fold, pathKey, quoteArg, slash } from "./paths";
 import { foreignMcp, foreignSkills } from "./foreign";
@@ -66,6 +68,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const unsynced: Finding[] = [];
   const forgottenNow: Finding[] = []; // проект забыт («забыть»), каталог на месте: sync ещё не запускали
   const stale: Finding[] = [];
+  const vanished: Finding[] = [];
   const team: Finding[] = [];
   const manual: Finding[] = [];
   const persistent: Finding[] = [];
@@ -125,7 +128,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       ]);
       for (const c of configs) for (const n of valuesIn(c, secrets, texts)) valueFiles.set(c, (valueFiles.get(c) ?? new Set()).add(n));
       // Права: только то, что sync исправит (chmod); отвергнутые файлы (командный opencode.json) — нет
-      const changes = actions.filter((a) => a.kind !== "conflict" && a.kind !== "chmod");
+      // Снять строки блока exclude другой машины, за которыми нет файлов, — не дело этой машины (круг 10z)
+      const changes = actions.filter((a) => a.kind !== "conflict" && a.kind !== "chmod" && !(a.kind === "exclude" && (a.foreignOnly || a.quiet)));
       for (const a of actions) if (a.kind === "chmod") permissions.push({ ...where, detail: `${a.abs}: права ${a.mode.toString(8).padStart(4, "0")} — открыт группе или не хватает +x` });
       const open = unprotectedSecrets(result, t.target, secrets);
       if (open) exposed.push({ ...where, detail: open });
@@ -143,7 +147,11 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       const teamChanges = changes.filter(isTeam);
       const other = changes.filter((a) => !isTeam(a));
       if (teamChanges.length) team.push({ ...where, detail: summarizeSkills(teamChanges, teamNames) });
-      if (other.length) stale.push({ ...where, detail: summarize(other) });
+      // Только вернуть пропавшее из учёта (файлы и блоки удалены не через miksy — например, другой машиной в общей
+      // папке) — своя причина, а не «слои изменились» (круг 10z)
+      const back = other.filter((a) => missingNow(a, prev));
+      if (back.length && other.every((a) => back.includes(a) || a.kind === "exclude")) vanished.push({ ...where, detail: summarize(other) });
+      else if (other.length) stale.push({ ...where, detail: summarize(other) });
       for (const a of actions)
         if (a.kind === "conflict") (MANUAL.test(a.why) ? manual : persistent).push({ ...where, detail: `${a.abs}: ${a.why}` });
     }
@@ -278,6 +286,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const twins = caseTwins().map((t) => ({ agent: "—", target: t.names.map((n) => `layers/tree/${n}`).join(", "), detail: `применяется только ${t.used}` }));
 
   const out: string[] = [`miksy doctor — версия ${engineVersion()}; агенты: ${adapters.map((a) => a.id).join(", ")}; ${roots.length > 1 ? `корней: ${roots.length}; ` : ""}проектов: ${projects.length}${groups.length ? `; помечено целями (target: true): ${groups.length}` : ""}`, ""];
+  // Номер этой машины сменился, а блоки с прежним номером учёта остались в проектах (круг 10z-2): одна подсказка
+  const was = manifest.machine && !machineUnknown() && manifest.machine !== machineId() ? manifest.machine : null;
+  const renumbered = { was, files: was ? blocksWithMachine(manifest, was) : [] };
   const section = (title: string, hint: string, items: Finding[], grouped = false) => {
     if (!items.length) return;
     out.push(`${title} (${items.length})${hint ? ` — ${hint}` : ""}`);
@@ -301,7 +312,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
     ...pendingText(pendingTrust), agentNote(), "");
   section("Исполняемые настройки в подкаталогах групп без git", `${dialogTitle()} наследует доверие группы на подкаталоги без своего git: эти настройки применятся без вопроса; удалите их, сделайте каталог git-репо или запретите доверие группы (trust: { ${dialogAgentId()}: false })`, inherited);
   section("Не синхронизировано", "sync для них ни разу не запускался: miksy sync --all --agent <id>", unsynced, true);
+  section("Номер этой машины сменился", `в этих проектах блоки .git/info/exclude записаны этим учётом под номером ${renumbered.was}, а у машины теперь другой; пока такие блоки считаются блоками другой машины, clean не убирает файлы под их строками. Переустановили систему или пропал local/state/machine-salt — вернуть их своими: miksy sync --all --machine-was ${renumbered.was}. local/ перенесён с другого компьютера (это блоки той машины) — miksy sync --all --machine-other ${renumbered.was}: учёт перестанет считать номер своим, блоки не тронет`,
+    renumbered.files.map((f) => ({ agent: "—", target: slash(f.replace(/\/\.git\/info\/exclude$/i, "")), detail: "" })));
   section("Проект забыт", "учёт записанного туда забыт (clean --forget или root remove --forget), а каталог на месте: miksy sync <путь> узнает файлы miksy, совпадающие с нынешними, и возьмёт их под учёт (изменённые — с --force); не нужны — затем miksy clean <путь>", forgottenNow, true);
+  section("Пропали файлы miksy", "удалены не через miksy (например, другой машиной в общей папке): miksy sync --all --agent <id> вернёт", vanished);
   section("Устарело", "слои изменились после sync: miksy sync --all --agent <id>", stale);
   section("Импорт командных skills устарел", "в репо изменились skills или агент теперь видит их сам: miksy sync <проект> --agent <id>", team);
   section("Правлено вручную", "sync не перезапишет без --force; перенесите правку в слои или откатите", manual);
@@ -340,7 +354,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
     out.push("");
   }
 
-  const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + stale.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
+  const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
     + emptySecrets.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
@@ -425,6 +439,13 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (info.length) out.push("", "Справочно:", ...info);
 
   return { text: out.join("\n"), problems, added, blocked };
+}
+
+// Действие плана возвращает записанное по учёту, а его нет: файл удалён, блок инструкций убран из файла
+function missingNow(a: Action, prev: TargetState): boolean {
+  if (a.kind === "write") return pathKey(a.abs) in prev.files && !existsSync(a.abs);
+  if (a.kind !== "block" || !a.hash || !(pathKey(a.abs) in (prev.blocks ?? {}))) return false;
+  try { return !existsSync(a.abs) || !splitInstructions(readFileSync(a.abs, "utf8")).block; } catch { return false; }
 }
 
 function summarize(actions: Action[]): string {

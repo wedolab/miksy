@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { Action } from "./apply";
 import type { Inspected, RenderResult, Target, TrustSpec } from "./adapter";
 import type { Machine } from "./types";
@@ -379,7 +379,7 @@ const ADD = "будет добавлено при sync";
 // агента в .git/info/exclude проекта (улика своих одобрений, когда учёт их забыл). mark — отметка «проект забыт»
 // (доверие до «забыть» ставил miksy — ответы пользователя в окне Claude его). renew — «да» прежнего расчёта на новый
 export function trustPlan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, actions: Action[], agent: string,
-  refuse: (path: string) => string | null = (p) => (protectedBy(p) ? "файл отслеживается git" : null), excluded: string[] = [], mark?: ForgottenMark):
+  refuse: (path: string) => string | null = (p) => (protectedBy(p) ? "файл отслеживается git" : null), excluded: string[] = [], mark?: ForgottenMark, otherMachine: (rel: string) => boolean = () => false):
   { actions: Action[]; missing: string[]; pending?: PendingTrust; advice: string[]; renew?: TrustRenew; own?: OwnFiles } {
   const out: Action[] = [], missing: string[] = [], advice: string[] = [];
   let pending: PendingTrust | undefined;
@@ -501,8 +501,13 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       const back = regained.filter((n) => want.includes(n) && enabled.includes(n));
       const ours = [...new Set([...recordedApprovals, ...back])];
       const add = want.filter((n) => !enabled.includes(n));
-      const own = [...new Set([...ours.filter((n) => want.includes(n) && enabled.includes(n)), ...add])].sort();
-      const remove = ours.filter((n) => !want.includes(n) && enabled.includes(n));
+      // Файл одобрений под строкой блока exclude другой машины (общая папка, круг 10z-2): в учёт — только одобренное этой
+      // машиной; своё ненужное она не снимает, пока строка другой машины на файле есть (той машине одобрение может быть
+      // нужно, а различить, кто одобрил, нельзя): sync держит его в учёте и снимет позже, clean оставляет в файле
+      const shared = otherMachine(relative(target.dir, local).replaceAll("\\", "/"));
+      const stale = ours.filter((n) => !want.includes(n) && enabled.includes(n));
+      const own = [...new Set([...ours.filter((n) => want.includes(n) && enabled.includes(n)), ...add, ...(shared && !clean ? stale : [])])].sort();
+      const remove = shared ? [] : stale;
       const refusal = escapes(local, target.dir) || gitWhy;
       if (add.length || remove.length || JSON.stringify([...recordedApprovals].sort()) !== JSON.stringify(own)) {
         if (refusal && (add.length || remove.length)) out.push({ kind: "conflict", abs: local, why: `${refusal} — одобрение серверов ${appr.source} не меняю` });

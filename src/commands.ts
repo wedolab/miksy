@@ -8,6 +8,7 @@ import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
 import { agentNote, decisionTitle, dialogTitle, askTrust, dialogOwn, dialogPrint, ownApprovals, executableSettings, ownFiles, type PendingTrust, pendingText, renewDecision, saveDecision, type TrustAgent, trustedByMiksy, trustMark, trustState, folderId, isReplaced } from "./trust";
+import { blocksOf as blocksWithMachine, ensureMachineId, machineId, machineUnknown, noteMachine, noteSkipped, resetSkipped, restoreSkipped, skippedReason } from "./machineid";
 import { backup, backupRel, KEEP_RUNS, runDir } from "./backup";
 import { parseArgs, UsageError } from "./args";
 import { adoptMcp, adoptSkill, elsewhereText, fromNative, layerDir, mcpYaml } from "./adopt";
@@ -63,6 +64,13 @@ export const USAGE = `miksy — раскладывает ваши правила
     --force                    заменить и файлы, правленные вручную или чужие (с копией)
     --agent <имя>              один агент: ${Object.keys(ADAPTERS).join(", ")}
                                (без флага — агенты из local/machine.yaml)
+    --machine-was <номер>      номер этой машины сменился (переустановили систему, пропал
+                               local/state/machine-salt): блоки .git/info/exclude проектов с
+                               прежним номером — снова свои. Номер подскажет miksy doctor. Не
+                               выполняйте, если local/ перенесён с другого компьютера: это
+                               блоки той машины — тогда --machine-other <номер>: учёт
+                               перестанет считать номер своим, блоки не тронет (отменить —
+                               --machine-was с тем же номером)
 
 Удаление
   miksy clean <путь> | --global | --all
@@ -275,7 +283,10 @@ function runTarget(
   };
   // Файлы других целей: один канонический файл — один владелец (общая ссылка каталогов skills)
   const owners = otherOwners(manifest, id);
-  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners, mark);
+  // sync --machine-was <номер>: блоки exclude с этим номером — свои (прежний номер этой машины; круг 10z-2), только в
+  // целях из учёта этой машины
+  const adopt = cmd === "sync" && flags["machine-was"] && id in manifest.targets ? [flags["machine-was"]] : undefined;
+  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners, mark, adopt);
   let actions: ReturnType<typeof plan>;
   let secrets: Record<string, string> = {};
   try {
@@ -288,6 +299,8 @@ function runTarget(
       result.warnings.push(...groupWarnings(adapter, t, manifest, machine));
     }
     actions = makePlan(prev);
+    // Тихая запись exclude (переход на блок с меткой, уборка блока без метки) в выводе не видна; --dry-run её не делает
+    if ("dry-run" in flags) actions = actions.filter((a) => !(a.kind === "exclude" && a.quiet));
   } catch (e) {
     // Ошибка одной цели (битая ссылка, нет доступа) — её конфликт, остальные цели обрабатываются
     console.log(`${t.title}\n  КОНФЛИКТ             ${(e as Error).message} — цель пропущена`);
@@ -393,7 +406,10 @@ function runTarget(
     if (dirty) saveManifest(manifest);
     return 0;
   }
-  console.log(`${t.title}${isGroup(cmd, t) ? ` (${markedKind(t.target)})` : ""}  [${t.cfg.layers.join(" → ") || "—"}]\n` + [...secretPlan, ...actions.map(describe)].join("\n"));
+  const visible = actions.filter((a) => !(a.kind === "exclude" && a.quiet));
+  if (visible.length || secretPlan.length)
+    console.log(`${t.title}${isGroup(cmd, t) ? ` (${markedKind(t.target)})` : ""}  [${t.cfg.layers.join(" → ") || "—"}]\n` + [...secretPlan, ...visible.map(describe)].join("\n"));
+  else if (!quiet || result.warnings.length) console.log(`${t.title}: изменений нет`);
   for (const w of result.warnings) console.log("  предупреждение: " + w);
   if ("dry-run" in flags) {
     for (const n of wanted) secretsDone.add(n);
@@ -818,8 +834,19 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   // Кеш путей — только командам, которые ничего не пишут: doctor и sync/clean с --dry-run (круг 10k, src/paths.ts).
   // Вложенный запуск (план setup/update — sync --dry-run) кеширует своё и по выходе возвращает внешнее состояние
   const paths = cachePaths(cmd === "doctor" || (["sync", "clean"].includes(cmd) && "dry-run" in flags));
-  try { return command(cmd, flags, positional); }
-  finally { ask = null; observe = null; restorePaths(paths); }
+  const outer = skippedReason();
+  resetSkipped();
+  try {
+    let code = command(cmd, flags, positional);
+    // Номер этой машины не получен (круг 10z-2, src/machineid.ts): проекты с git отложены — одна строка, код не 0
+    const why = skippedReason();
+    if (why) {
+      console.log(`\n${why}: в проекты с git ${cmd === "doctor" ? "проверка не заглядывала" : "ничего не записано и ничего не убрано"} — повторите команду.`);
+      code = code || (cmd === "doctor" ? 1 : 3);
+    }
+    return code;
+  }
+  finally { ask = null; observe = null; restorePaths(paths); restoreSkipped(outer); }
 }
 
 function command(cmd: string, flags: Record<string, string>, positional: string[]): number {
@@ -996,6 +1023,36 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (allMode) for (const n of [...rootNotes(machine, runGroups), ...clashNotes(machine)]) warn(n);
       // Учёт — с переездами каталогов: sync и clean сохраняют перенос до записи целей
       const { manifest, moves, rootsChanged } = loadManifestMoved(machine, "global" in flags ? undefined : runGroups);
+      // Номер машины сменился (круг 10z-3, DESIGN §8.3): --machine-was и --machine-other принимают только номер, под
+      // которым учёт этой машины записывал блоки (Manifest.machine), — номер другой машины из exclude не годится
+      for (const k of ["machine-was", "machine-other"]) {
+        const v = cmd === "sync" ? flags[k] : undefined;
+        if (v === undefined) continue;
+        // Нынешний номер этой машины: менять нечего — ничего не записывается (круг 10z-4)
+        if (!machineUnknown() && v === machineId()) {
+          console.log(`--${k} ${v}: это номер этой машины — менять нечего.`);
+          return 0;
+        }
+        // От номера уже отказались через --machine-other (круг 10z-4): повтор — «уже сделано», --machine-was — отмена отказа
+        const refused = manifest.machineOther?.includes(v) ?? false;
+        if (k === "machine-other" && refused) {
+          console.log(`Номер ${v} учёт уже не считает своим (miksy sync --machine-other) — ничего делать не нужно. Если это была переустановка этой машины — miksy sync --all --machine-was ${v}.\n`);
+          continue;
+        }
+        if (v !== manifest.machine && !(k === "machine-was" && refused)) {
+          console.log(`--${k} ${v}: под этим номером учёт этой машины блоки не записывал${manifest.machine ? ` (его номер — ${manifest.machine})` : ""} — это номер другой машины, её блоки не трогаю. Прежний номер этой машины и команду подскажет miksy doctor.`);
+          return 1;
+        }
+        if (machineUnknown()) { noteSkipped(); return 3; }
+        if (k === "machine-other" && !("dry-run" in flags)) {
+          // local/ перенесён с другого компьютера: номер X — той машины; учёт перестаёт считать его своим, блоки X не
+          // трогаются; номер запоминается — ошибочный отказ отменяет --machine-was X
+          manifest.machine = ensureMachineId();
+          manifest.machineOther = [...new Set([...(manifest.machineOther ?? []), v])].sort();
+          saveManifest(manifest);
+          console.log(`Номер ${v} учёт больше не считает своим: блоки с ним — другой машины, их файлы clean не убирает. Номер этой машины — ${manifest.machine}. Если это была переустановка этой машины — miksy sync --all --machine-was ${v}.\n`);
+        }
+      }
       const newer = newerLedger(manifest.engine);
       if (newer) console.log(`предупреждение: ${newer}\n`);
       // Проект (цель), который стал корнем workspace: записанное в него раньше не висит молча
@@ -1130,6 +1187,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Настоящие пути корней — в учёт, даже если цели не изменились: без них цели корня-ссылки, ставшего
       // недоступным, выглядели бы пропавшими (src/load.ts: parseRoots)
       if (!("dry-run" in flags) && rootsChanged && Object.keys(manifest.targets).length) saveManifest(manifest);
+      // Номер машины, под которым учёт записывает блоки exclude (круг 10z-2)
+      if (!("dry-run" in flags) && noteMachine(manifest, undefined, flags["machine-was"])) saveManifest(manifest);
 
       // Доверие проектам с исполняемыми настройками агента: в терминале — вопрос по каждому (--yes его
       // не снимает); без терминала и в --dry-run — список и указание агенту спросить пользователя
@@ -1456,6 +1515,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const dirs = [...new Set(Object.keys(manifest.targets).map((id) => id.slice(id.indexOf("|") + 1)))]
         .filter((d) => d !== "global" && locate(d, roots)?.root === gone && rootKey(d) !== rootKey(gone.path)).sort();
       const after = rewriteRoots(text, items.filter((_, i) => i !== idx), [...items.keys()].filter((i) => i !== idx));
+      // Номер этой машины неизвестен (круг 10z-3): в проектах корня с git записанное этой машиной не убрать — корень не
+      // убирается (иначе подсказка «повторите» уже ничего бы не дала); одна строка с причиной — в конце (runCommand)
+      if (!("dry-run" in flags) && dirs.length && rootExists(gone) && dirs.some((d) => existsSync(join(d, ".git"))) && machineUnknown()) {
+        noteSkipped();
+        console.log(`Корень ${gone.path} не убран: в его проектах с git нельзя определить, что записала эта машина.`);
+        code = 3;
+        break;
+      }
       console.log(`Убрать корень ${rootText(gone)} из local/machine.yaml (workspace)`);
       if (dirs.length) console.log(`miksy записывал в его проекты (${dirs.length}): ${dirs.map((d) => treeOf(d, roots)).join(", ")}`);
       // Корень недоступен (диск не подключён): тот же вопрос, что у clean, — забыть записанное туда (по

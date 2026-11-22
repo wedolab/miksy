@@ -59,6 +59,13 @@ export interface Manifest {
   // Версия движка, который последним записал учёт (package.json): учёт более новой версии — doctor и
   // sync предупреждают «обновите движок». Поля нет — учёт до 0.1.0
   engine?: string;
+  // Номер машины (src/machineid.ts), под которым этот учёт записывал свои блоки в .git/info/exclude проектов (круг 10z-2).
+  // Номер сменился (переустановили систему, пропала соль), а блоки с прежним остались — doctor подсказывает
+  // miksy sync --all --machine-was <прежний>. Прежние версии поле отбрасывают
+  machine?: string;
+  // Номера, от которых учёт отказался через sync --machine-other (local/ перенесён с другого компьютера; круг 10z-4):
+  // ошибочный отказ отменяет sync --all --machine-was <номер> — он принимает и их; перемеченный номер отсюда уходит
+  machineOther?: string[];
   // Корни workspace: ключ — путь, как записан в machine.yaml (rootMemoryKey), значение — последний известный
   // настоящий путь. Корень-ссылка недоступен — его цели учёта остаются «недоступными», а не «пропавшими»
   roots?: Record<string, string>;
@@ -206,7 +213,10 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
     const folder = m.trustedFolder?.[id];
     if (typeof folder === "string") folders[key] = folder;
   }
-  return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
+  return { version: 1, ...(typeof m.engine === "string" && { engine: m.engine }),
+    ...(typeof m.machine === "string" && /^[0-9a-f]{6,32}$/.test(m.machine) && { machine: m.machine }),
+    ...(Array.isArray(m.machineOther) && m.machineOther.some((x) => typeof x === "string" && /^[0-9a-f]{6,32}$/.test(x))
+      && { machineOther: [...new Set(m.machineOther.filter((x) => typeof x === "string" && /^[0-9a-f]{6,32}$/.test(x)))].sort() }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
     ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }),
     ...(Object.keys(folders).length > 0 && { trustedFolder: folders }) };
 }
