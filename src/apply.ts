@@ -1,12 +1,12 @@
 import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import type { RenderResult, Target } from "./adapter";
+import type { RenderedFile, RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
 import { fold, pathKey, slash } from "./paths";
 import { headerMark, miksyOpencodeJson } from "./marks";
 import { GitError, gitMemo, gitSpawn, gitWhy, protectedBy, trackedPaths } from "./git";
-import { backup, originalBackup, runDir } from "./backup";
-import { blockHash, instructionBlock, joinOutside, splitInstructions } from "./instructions";
+import { backup, neverCopied, originalBackup, runDir } from "./backup";
+import { blockHash, hashMarkers, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
 import { canonicalState, emptyState, type ForgottenMark, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
 import type { Machine } from "./types";
@@ -105,6 +105,17 @@ export function excludeLines(paths: string[], open: string[] = []): string[] {
 //   незаписанный файл под строкой каталога (заметки пользователя в каталоге skill) — чужой. Решает вызывающий.
 // Путь (каталог плагина miksy) и совпадение текста сами по себе — не улика: такой файл мог положить
 // пользователь, он берётся с оригиналом. Неотслеживаемость git проверяет вызывающий
+// Файл MCP в папке проекта, который miksy пишет переносимо («miksy mcp …», круг 10u), а на диске — с путями обёрток
+// или файлов секретов: его переписала машина со старой версией miksy (одна папка на двух машинах) — подсказка к конфликту
+function olderMiksy(f: RenderedFile, path: string): string {
+  if (f.mode !== "own" || !f.mcp || f.base !== "project" || !/"mcp",\s*"/.test(f.content)) return "";
+  let text = "";
+  try { text = readFileSync(path, "utf8"); } catch { return ""; }
+  return /local[\\/]+run[\\/]+|\{file:/.test(text)
+    ? "; похоже, его переписала другая машина со старой версией miksy (в файле — пути её обёрток): обновите miksy там (miksy update), а здесь --force вернёт запись без путей машины"
+    : "";
+}
+
 export function miksyMade(path: string, opts: { rendered?: string; covered?: boolean; block?: boolean } = {}): boolean {
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch { return false; }
@@ -305,7 +316,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         const before = recorded ? "" : parts.before;
         const after = recorded ? "" : parts.after;
         // Файл пересохранён с CRLF — блок пишется так же (иначе каждый sync переписывал бы его)
-        const lf = instructionBlock(f.content, !!before && !before.endsWith("\n"));
+        const lf = instructionBlock(f.content, !!before && !before.endsWith("\n"), hashMarkers(path));
         const block = parts.block.includes("\r\n") ? lf.replace(/\n/g, "\r\n") : lf;
         const content = before + block + after;
         // Блок miksy в файле проекта без учёта (учёт забыт, диск вернулся): тот же, что miksy записал бы
@@ -367,9 +378,9 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     }
     else if (recorded === UNKNOWN_HASH && !force) actions.push({ kind: "conflict", abs: path, why: UNKNOWN_WHY });
     else if (!recorded && !force) actions.push({ kind: "conflict", abs: path, ...(known && { known: true }), why: known
-      ? "файл miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас (--force перезапишет, бэкап будет)"
+      ? `файл miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас${olderMiksy(f, path)} (--force перезапишет, бэкап будет)`
       : "файл существует и создан не miksy (--force перезапишет, бэкап будет)" });
-    else if (recorded && onDisk !== recorded && !force) actions.push({ kind: "conflict", abs: path, why: "изменён вручную после последнего sync (--force перезапишет, бэкап будет)" });
+    else if (recorded && onDisk !== recorded && !force) actions.push({ kind: "conflict", abs: path, why: `изменён вручную после последнего sync${olderMiksy(f, path)} (--force перезапишет, бэкап будет)` });
     else actions.push({ kind: "write", abs: path, content, why: "обновление", ...x });
   }
   for (const [path, recorded] of Object.entries(prev.files)) {
@@ -906,7 +917,7 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
     if ("roots" in a && a.roots) guard(a.abs, ...a.roots);
     if (["write", "adopt", "delete", "restore", "block"].includes(a.kind) && a.beforeHash !== undefined && fileHash(a.abs) !== a.beforeHash)
       throw new StaleError(`${a.abs}: файл изменился после планирования — повторите sync`);
-    if (a.original && !state.originals?.[pathKey(a.abs)]) {
+    if (a.original && !state.originals?.[pathKey(a.abs)] && !neverCopied(a.abs)) {
       const { written, ...copy } = originalBackup(a.abs);
       (state.originals ??= {})[pathKey(a.abs)] = { ...copy, ...(a.restoreBlock && { restoreBlock: true }) };
       note(written ? `  Оригинал сохранён: ${copy.path}` : `  Оригинал: ${copy.path} (та же версия сохранена раньше)`);

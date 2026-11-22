@@ -1,17 +1,23 @@
-// Общий markdown: владеем только одним блоком, текст вокруг сохраняется побайтно.
+// Общий markdown: владеем только одним блоком, текст вокруг сохраняется побайтно. Тот же блок — в файлах, где
+// комментарий — «#» (~/.codex/.env и т. п., круг 10v): маркеры «# miksy:begin …» и «# miksy:end»; вид — по имени файла
+// (hashMarkers), разбор узнаёт оба
 import { createHash } from "node:crypto";
 
 export const INSTRUCTIONS_BEGIN = "<!-- miksy:begin инструкции -->";
 export const INSTRUCTIONS_END = "<!-- miksy:end -->";
 
-const BEGIN_RX = new RegExp(String.raw`^<!-- miksy:begin[^\r\n]*-->(?:\r?\n|$)`, "gm");
-const END_RX = new RegExp(String.raw`^<!-- miksy:end -->(?:\r?\n|$)`, "gm");
+const BEGIN_RX = new RegExp(String.raw`^(?:<!-- miksy:begin[^\r\n]*-->|# miksy:begin[^\r\n]*)(?:\r?\n|$)`, "gm");
+const END_RX = new RegExp(String.raw`^(?:<!-- miksy:end -->|# miksy:end)(?:\r?\n|$)`, "gm");
+
+// Файл, где комментарий — «#» (не markdown): .env, .sh, .toml, .yaml и т. п.
+export const hashMarkers = (path: string) => /(^|[\\/])\.env$|\.(sh|env|toml|ya?ml|conf|ini)$/i.test(path);
 
 // Строка правил, похожая на маркер (правило про сам miksy), сдвигается пробелом: иначе файл
 // перестал бы разбираться (повторные маркеры) после первого же sync
-const escapeMarkers = (s: string) => s.replace(/^(?=<!-- miksy:(?:begin|end))/gm, " ");
+const escapeMarkers = (s: string) => s.replace(/^(?=<!-- miksy:(?:begin|end)|# miksy:(?:begin|end))/gm, " ");
 
-export function instructionBlock(content: string, separator = false): string {
+export function instructionBlock(content: string, separator = false, hash = false): string {
+  if (hash) return `${separator ? "\n" : ""}# miksy:begin${separator ? " separator" : ""} (сгенерировано miksy — не править)\n${escapeMarkers(content).replace(/\n?$/, "\n")}# miksy:end\n`;
   return `${separator ? "\n<!-- miksy:begin инструкции separator -->" : INSTRUCTIONS_BEGIN}\n${escapeMarkers(content).replace(/\n?$/, "\n")}${INSTRUCTIONS_END}\n`;
 }
 
@@ -26,7 +32,7 @@ export function splitInstructions(text: string, hash?: string) {
   if (!starts.length && !ends.length) return { before: text, block: "", after: "" };
   const cut = (s: RegExpMatchArray, e: RegExpMatchArray) => {
     // Служебный перевод строки перед маркером-разделителем (в файле с CRLF — \r\n) принадлежит блоку
-    const sep = s[0].includes(" separator -->") && s.index! > 0 && text[s.index! - 1] === "\n" ? (text[s.index! - 2] === "\r" ? 2 : 1) : 0;
+    const sep = /^(?:<!-- miksy:begin[^\r\n]* separator -->|# miksy:begin separator)/.test(s[0]) && s.index! > 0 && text[s.index! - 1] === "\n" ? (text[s.index! - 2] === "\r" ? 2 : 1) : 0;
     const start = s.index! - sep, end = e.index! + e[0].length;
     return { before: text.slice(0, start), block: text.slice(start, end), after: text.slice(end) };
   };

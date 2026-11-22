@@ -70,10 +70,14 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     expect(claude.mcpServers.plain).toEqual({ type: "stdio", command: "echo", args: ["hi"] });
     // Codex: http_headers_helper
     expect(readFileSync(`${f.home}/.codex/config.toml`, "utf8")).toContain("http_headers_helper");
-    // opencode: форма mcp.<имя>, stdio — command: переносимый запуск обёртки (круг 10u), HTTP — {file:} файла секрета
+    // opencode: форма mcp.<имя>, в проекте — переносимый запуск обёртки (круг 10u) и моста для HTTP (круг 10v);
+    // в глобальном конфиге HTTP — {file:} файла секрета
     const oc = JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8"));
     expect(oc.mcp["stdio-secret"].command).toEqual(["miksy", "mcp", "opencode", "Org/p1", "stdio-secret"]);
-    expect(oc.mcp["http-secret"].headers.Authorization).toMatch(/^Bearer \{file:.*local\/secrets\/HTTP_TOKEN\}$/);
+    expect(oc.mcp["http-secret"]).toEqual({ type: "local", command: ["miksy", "mcp", "opencode", "Org/p1", "http-secret", "--bridge"] });
+    expect(JSON.parse(readFileSync(`${f.home}/.config/opencode/opencode.json`, "utf8")).mcp["http-secret"].headers.Authorization).toMatch(/^Bearer \{file:.*local\/secrets\/HTTP_TOKEN\}$/);
+    // Codex в проекте: HTTP с секретом — мост через miksy (helper остался в домашнем конфиге)
+    expect(readFileSync(`${f.ws}/Org/p1/.codex/config.toml`, "utf8")).toContain('"args" = ["mcp", "codex", "Org/p1", "http-secret", "--bridge"]');
     expect(oc.mcp.servers).toBeUndefined();
     // Antigravity: HTTP с секретом — мост (stdio), в плагине проекта и в обоих глобальных конфигах
     const plugin = JSON.parse(readFileSync(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`, "utf8"));
@@ -217,18 +221,29 @@ describe("п.8: отсутствующий секрет — keep обёртки"
     expect(d.out).toContain("не задан в local/secrets.env");
   }, 60000);
 
-  test("opencode: пропущенный HTTP-сервер с {file:} без файла секрета убирается (иначе opencode не стартует)", () => {
+  // Круг 10v: {file:} остался только в глобальном конфиге; в проекте HTTP с секретом — мост через miksy mcp, без файла
+  // секрета падает только он — сервер остаётся (keep), как stdio
+  test("opencode: пропущенный HTTP-сервер с {file:} без файла секрета убирается из глобального конфига (иначе opencode до 2.1 не стартует); в проекте — мост, остаётся", () => {
     const f = cliFixture({ agents: ["opencode"] });
-    put(`${f.config}/layers/tree/mcp/http.yaml`, 'name: h\nurl: https://x.example/mcp\nheaders:\n  Authorization: "Bearer ${HTTP_TOKEN}"\n');
+    const http = 'name: h\nurl: https://x.example/mcp\nheaders:\n  Authorization: "Bearer ${HTTP_TOKEN}"\n';
+    put(`${f.config}/layers/global/mcp/http.yaml`, http);
+    put(`${f.config}/layers/tree/mcp/http2.yaml`, http.replace("name: h", "name: h2"));
     secretsEnv(f, { HTTP_TOKEN: TOKENS.HTTP_TOKEN });
+    expectCode(f.run(["sync", "--global"]), 0);
     expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
-    expect(JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8")).mcp.h).toBeDefined();
-    // Секрет пропал и файла нет — сервер с {file:} оставлять нельзя
+    const home = () => JSON.parse(readFileSync(`${f.home}/.config/opencode/opencode.json`, "utf8")).mcp ?? {};
+    const project = () => JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8")).mcp ?? {};
+    expect(home().h.headers.Authorization).toMatch(/\{file:/);
+    expect(project().h2.command).toEqual(["miksy", "mcp", "opencode", "Org/p1", "h2", "--bridge"]);
+    // Секрет пропал и файла нет — глобальный сервер с {file:} оставлять нельзя
     put(`${f.config}/local/secrets.env`, "");
     rmSync(`${f.config}/local/secrets/HTTP_TOKEN`);
-    const r = f.run(["sync", `${f.ws}/Org/p1`]);
-    expect(r.out).toContain("убран из конфига opencode");
-    expect(JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8")).mcp?.h).toBeUndefined();
+    const g = f.run(["sync", "--global"]);
+    expect(g.out).toContain("убран из конфига opencode");
+    expect(home().h).toBeUndefined();
+    const p = f.run(["sync", `${f.ws}/Org/p1`]);
+    expect(p.out).not.toContain("убран из конфига opencode");
+    expect(project().h2.command).toEqual(["miksy", "mcp", "opencode", "Org/p1", "h2", "--bridge"]);
   }, 60000);
 });
 

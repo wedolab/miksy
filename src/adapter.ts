@@ -41,6 +41,8 @@ export interface RenderResult {
   secrets?: string[];
   // Секреты по серверам (ставит ядро): доставленные сейчас и оставленные keep-ом — по записанной версии
   servers?: Record<string, string[]>;
+  // Серверы цели запускает команда miksy (miksy mcp) — ставит ядро; doctor тогда проверяет команду
+  portable?: boolean;
   // Предупреждения, которые doctor показывает справочно (действие пользователя в агенте, не miksy)
   advice?: string[];
   // Доверие проекта из слоёв (trust в layer.yaml) — заполняет ядро после рендера адаптера

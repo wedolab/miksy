@@ -6,7 +6,7 @@ import { guard, safeRelative } from "./bounds";
 import { trackedPaths } from "./git";
 import { maskText, redactArgs } from "./secrets";
 import type { Machine, Resolved } from "./types";
-import { instructionBlock } from "./instructions";
+import { hashMarkers, instructionBlock } from "./instructions";
 import { files } from "./plural";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").replace(/[ \t]+$/gm, "").trim();
@@ -39,7 +39,7 @@ export function writeSandbox(out: string, agent: string, result: RenderResult): 
     const path = f.mode === "own" ? join(root, f.base, f.path) : join(root, f.base, `${f.path}.merge.${written.length}.json`);
     guard(path, root);
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, f.mode === "own" ? (f.block ? instructionBlock(f.content) : f.content) : JSON.stringify({ format: f.format, key: f.key, data: f.data }, null, 2) + "\n");
+    writeFileSync(path, f.mode === "own" ? (f.block ? instructionBlock(f.content, false, hashMarkers(f.path)) : f.content) : JSON.stringify({ format: f.format, key: f.key, data: f.data }, null, 2) + "\n");
     written.push(path.replaceAll("\\", "/"));
   }
   return written;

@@ -11,7 +11,8 @@ import { gitEnv, gitSpawn } from "./git";
 import { ENGINE, loadMachine } from "./load";
 import { quoteArg, slash } from "./paths";
 import { agentsFor } from "./registry";
-import { engineBunArgs, planSummary, type Run, setup } from "./setup";
+import { planSummary, type Run, setup } from "./setup";
+import { engineBunArgs } from "./shim";
 import type { Machine } from "./types";
 import { compareVersions, describeEngine, engineRepo, engineVersion, packageVersion, SEMVER } from "./version";
 

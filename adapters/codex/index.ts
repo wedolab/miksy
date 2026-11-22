@@ -9,6 +9,8 @@ import { mcpTables, parseToml, tomlValue } from "../../src/toml";
 import { currentGlobal, currentProject, instructionFile, readConfig } from "./current";
 import { keepOwn } from "../../src/paths";
 import { teamCollection } from "../../src/git";
+import { shimPath, shimState } from "../../src/shim";
+import { splitInstructions } from "../../src/instructions";
 
 export const HEADER = (layers: string[]) =>
   `<!-- Сгенерировано miksy (слои: ${layers.join(" → ")}). Не править вручную — изменения вносить в конфигурацию miksy (слои). -->`;
@@ -43,6 +45,7 @@ export const codex: Adapter = {
   render(cfg, target, machine, ctx) {
     const files: RenderedFile[] = [];
     const warnings: string[] = [];
+    const advice: string[] = [];
     const isGlobal = target.scope === "global";
     const body = cfg.instructions.map(({ item }) => readFileSync(item.path, "utf8").trim()).join("\n\n");
 
@@ -70,6 +73,24 @@ export const codex: Adapter = {
     const servers = nativeServers(cfg.mcp, "codex", nativeMcp, ctx?.launch, warnings);
     const scripts = () => files.push(...(ctx?.launch?.files() ?? []));
     if (isGlobal) {
+      // macOS, Linux: Codex вне терминала (приложение, расширение IDE) PATH оболочки не получает, а MCP проектов
+      // запускает команда miksy (miksy mcp). Codex дописывает окружение из $CODEX_HOME/.env (${PATH} в нём
+      // раскрывается) — блок miksy с каталогом команды. Windows: PATH пользователя из реестра есть у всех программ
+      const shim = shimPath(machine.home, machine.os);
+      const dir = shim.slice(0, shim.lastIndexOf("/"));
+      // В .env бывают ключи: файл со своими строками пользователя miksy не меняет (запись сохранила бы его копию в
+      // бэкапах) — doctor подсказывает строку
+      if (machine.os !== "windows" && ["current", "legacy"].includes(shimState(shim))) {
+        const line = `PATH="${dir}:\${PATH}"`;
+        let foreign = false;
+        try {
+          const parts = splitInstructions(readFileSync(join(machine.home, ".codex", ".env"), "utf8"));
+          foreign = !parts.block && /\S/.test(parts.before + parts.after);
+        } catch { /* файла нет; повреждённые маркеры — блок miksy ниже, apply скажет */ }
+        if (/["$`\\\r\n]/.test(dir)) advice.push(`Codex вне терминала (приложение, IDE) может не найти команду miksy: каталог ${dir} содержит " $ \` или \\ — в ~/.codex/.env не записан`);
+        else if (foreign) advice.push(`Codex вне терминала (приложение, IDE) может не найти команду miksy, которой запускаются MCP-серверы проектов: ~/.codex/.env — ваш файл, miksy его не меняет. Допишите в него строку: ${line}`);
+        else files.push({ base: "home", path: ".codex/.env", mode: "own", block: true, content: line + "\n" });
+      }
       if (Object.keys(servers).length)
         files.push({ base: "home", path: ".codex/config.toml", mode: "merge", format: "toml", key: ["mcp_servers"], data: servers });
       scripts();
@@ -93,6 +114,6 @@ export const codex: Adapter = {
         scripts();
       }
     }
-    return { files, warnings };
+    return { files, warnings, ...(advice.length && { advice }) };
   },
 };

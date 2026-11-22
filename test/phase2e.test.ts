@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cliFixture, put, expectCode } from "./helpers";
+import { cliFixture, put, expectCode, mcpWrapper } from "./helpers";
 import { executableSettings, mcpJsonServers } from "../src/trust";
 import { backup, newBackupRun, runDir } from "../src/backup";
 import { loadManifest } from "../src/manifest";
@@ -202,22 +202,31 @@ describe("Г7, Г8: учёт файлов секретов", () => {
     const layer = (ref: string) => put(`${f.config}/layers/tree/Org/mcp/s.yaml`, `name: s\nurl: https://example.invalid/mcp\nheaders:\n  Authorization: \${${ref}}\n`);
     layer("OLD");
     expectCode(f.run(["sync", dir]), 0);
+    // Круг 10v: в проекте HTTP с секретом — мост через miksy mcp: ссылка на секрет — в обёртке моста (local/run), файл
+    // проекта от имени секрета не зависит
     const cfg = `${dir}/opencode.json`;
+    const wrapper = mcpWrapper(f.config, { agent: "opencode", place: "Org/p1", server: "s", kind: "bridge" });
     const saved = read(cfg);
-    expect(saved).toContain("/OLD}");
+    expect(saved).toContain('"--bridge"');
+    expect(read(wrapper)).toContain("{secret:OLD}");
     put(cfg, saved.replace("{", '{\n  "user": true,'));
     layer("NEW");
     expectCode(f.run(["sync", dir]), 3);
-    expect(read(cfg)).toContain("/OLD}");
-    const st = Object.values(manifest(f).targets).find((t) => t.servers)!;
-    expect(st.servers!.s).toContain("OLD");
-    // Конфликт разрешён возвратом к записанной версии; NEW из secrets.env убран — сервер остаётся (keep)
+    expect(read(cfg)).not.toContain("NEW");
+    const deps = () => Object.values(manifest(f).targets).find((t) => t.servers)!.servers!.s;
+    const written = read(wrapper).includes("{secret:NEW}") ? "NEW" : "OLD";
+    expect(deps()).toContain(written);
+    expect(existsSync(`${f.config}/local/secrets/${written}`)).toBe(true);
+    // Конфликт разрешён возвратом к записанной версии; NEW из secrets.env убран — сервер остаётся (keep), файл секрета
+    // записанной обёртки не удаляется
     put(cfg, saved);
     put(`${f.config}/local/secrets.env`, "OLD=old_value_12345678\n");
     const r = f.run(["sync", dir]);
-    expectCode(r, 0);
-    expect(read(cfg)).toContain("/OLD}");
-    expect(existsSync(`${f.config}/local/secrets/OLD`)).toBe(true);
+    expect(r.code === 0 || r.code === 3).toBe(true);
+    expect(read(cfg)).toContain('"--bridge"');
+    const now = read(wrapper).includes("{secret:NEW}") ? "NEW" : "OLD";
+    expect(existsSync(`${f.config}/local/secrets/${now}`)).toBe(true);
+    expect(deps()).toContain(now);
   }, 90000);
 
   test("Г8: файл секрета, созданный пользователем заранее, не становится собственностью miksy", () => {

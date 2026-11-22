@@ -3,6 +3,7 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { cachePaths, canonical, restorePaths, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { shimNotes } from "./shim";
 import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
@@ -114,6 +115,11 @@ export const USAGE = `miksy — раскладывает ваши правила
                                перепишет настройки агентов прежней версией. --dry-run — только
                                показать, --yes — без вопроса. Обратно — miksy update
   miksy version                версия (то же — miksy --version)
+
+Служебное
+  miksy mcp <агент> <место> <сервер>
+                               так Codex, opencode и Antigravity запускают MCP-серверы проекта:
+                               эту строку sync пишет в файлы проекта, вызывать её не нужно
 
 Примеры
   miksy sync --all --dry-run   поменяли правило в layers/tree — посмотреть план,
@@ -936,6 +942,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         if (unread.length) console.log(`предупреждение: ${ignoredText(unread)}\n`);
         const keys = unknownKeys();
         if (keys.length) console.log(`предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): ${keys.join(", ")}\n`);
+        // Команда miksy старого вида (движок обновили git pull, без update или setup): ею агенты запускают MCP-серверы
+        for (const p of shimNotes(machine.home, machine.os, false).problems) console.log(`предупреждение: ${p}\n`);
       }
 
       // Одна цель sync — проект по пути или (без пути) текущего каталога: проверка до учёта и записи

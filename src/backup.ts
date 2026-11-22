@@ -55,8 +55,13 @@ function rotate(root: string, keep: string) {
     rmSync(join(root, old), { recursive: true, force: true });
 }
 
+// Файл, где у пользователя бывают ключи (.env, *.env: ~/.codex/.env — блок miksy с PATH, круг 10v-2): miksy его не
+// копирует никогда — ни в бэкап запуска, ни в оригиналы. Маскируются только секреты miksy, а чужой ключ лёг бы
+// в local/backups открытым текстом. Блок miksy в таком файле меняется и убирается без копии
+export const neverCopied = (path: string) => /(^|[\\/])\.env(\.[^\\/]*)?$|\.env$/i.test(path);
+
 export function backup(path: string, config = configRoot()) {
-  if (!existsSync(path)) return;
+  if (!existsSync(path) || neverCopied(path)) return;
   const root = join(config, "local", "backups");
   // Ссылка на пути с открытой или несуществующей целью — отказ на каждом вызове, не только первом за процесс; запуск
   // (run) — только после проверки: rotate за такую ссылку не ходит (выпуск 0.2.2, круг 8c, C10)

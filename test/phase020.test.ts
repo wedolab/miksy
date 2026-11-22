@@ -10,7 +10,7 @@ import { environment, opencodeMajor } from "../src/environ";
 import { canonical } from "../src/paths";
 import { rcAddsDir } from "../src/setup";
 import type { Machine, Resolved } from "../src/types";
-import { cliFixture, put, expectCode, mcpWrapper, portableRuns } from "./helpers";
+import { cliFixture, put, expectCode, mcpWrapper, portableRuns, withShim } from "./helpers";
 
 const win = process.platform === "win32";
 const os = win ? "windows" as const : process.platform === "darwin" ? "macos" as const : "linux" as const;
@@ -113,6 +113,7 @@ function asBefore020(f: ReturnType<typeof cliFixture>) {
 describe("агент antigravity (прежнее имя gemini — синоним)", () => {
   test("старая конфигурация и учёт: sync после обновления не считает записанное чужим, переносит учёт, обёртки и блок exclude; doctor подсказывает", () => {
     const f = cliFixture({ agents: ["antigravity"] });
+    withShim(f); // MCP проекта запускает команда miksy — doctor её проверяет (круг 10v)
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/p.yaml`, "name: p\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/skipped.yaml`, "name: skipped\ncommand: echo\nagents:\n  gemini: skip\n");

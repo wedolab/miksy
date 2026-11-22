@@ -17,9 +17,10 @@ import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
-import { deliveredSkillNames, deliveryOrder } from "./registry";
+import { AGENT_NAMES, deliveredSkillNames, deliveryOrder } from "./registry";
 import { files } from "./plural";
 import { AGENT_NOTE, AGENT_TITLE, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
+import { shimNotes } from "./shim";
 
 type Finding = { agent: string; target: string; detail: string };
 // Добавка агента в обход слоёв: что поднимать (miksy adopt) — глобальное или проект (dir, rel)
@@ -76,6 +77,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const undeliverable: Finding[] = []; // секрет есть, но доставить его нельзя (многострочный, символы)
   const texts = new Map<string, string | null>();
   const valueFiles = new Map<string, Set<string>>(); // конфиг агента → секреты, чьи значения в нём лежат
+  let portableUsed = false; // MCP-серверы какой-то цели запускает команда miksy (miksy mcp)
   const advice: Finding[] = []; // нужно действие пользователя в агенте (доверие проекта Claude)
   const trust: Finding[] = [];
   const pendingTrust: PendingTrust[] = []; // нужно решение пользователя (исполняемые настройки агента)
@@ -113,6 +115,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       for (const m of miss) missing.set(m, (missing.get(m) ?? new Set()).add(adapter.id));
       for (const k of rendered.skipped) if (k.why) undeliverable.push({ ...where, detail: `mcp ${k.name}: ${k.why}` });
       for (const a of result.advice ?? []) advice.push({ ...where, detail: a });
+      if (result.portable) portableUsed = true;
       for (const w of result.warnings.filter((w) => /инструкции Claude не записаны/.test(w))) persistent.push({ ...where, detail: w });
       for (const w of result.warnings.filter((w) => /пустой в local\/secrets\.env/.test(w))) emptySecrets.push({ ...where, detail: w });
       // Значения секретов в конфигах агента (записанных до 2а или оставленных keep)
@@ -326,6 +329,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Файлы секретов", "local/secrets/<ИМЯ>: нужны записанным конфигам", secretProblems);
   section("Секрет нельзя доставить", "сервер пропущен; исправьте значение в local/secrets.env или определение в слое", undeliverable);
   section("Пустые значения секретов", "сервер получит пустое значение; задайте его в local/secrets.env", emptySecrets);
+  // Команда miksy: старый вид — всегда; нет её — когда ею запускаются MCP-серверы проектов (src/shim.ts)
+  const shim = shimNotes(machine.home, machine.os, portableUsed, { agents: adapters.filter((x) => x.projectMcp === "portable").map((x) => AGENT_NAMES[x.id] ?? x.id) });
+  const shimProblems = shim.problems.map((detail) => ({ agent: "—", target: "", detail }));
+  section("Команда miksy", "ею агенты запускают MCP-серверы проектов", shimProblems);
   section("Нет исполняемого файла обёртки", "обёртка не запустится: программа удалена или обновлена (новый путь)", missingExe);
   if (missing.size) {
     out.push(`Не заданы переменные (${missing.size}) — local/machine.yaml или local/secrets.env`);
@@ -335,7 +342,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + stale.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
-    + emptySecrets.length + missingExe.length + clashes.length + rooted.length + rootedMain.length + twins.length;
+    + emptySecrets.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
   // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)
   const bun = oldBun(bunVersion);
@@ -343,6 +350,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
 
   // Справочно: не требует действий
   const info: string[] = [];
+  if (shim.info.length) info.push(`Команда miksy (${shim.info.length}):`, ...shim.info.map((l) => "  " + l));
   const newer = newerLedger(manifest.engine);
   if (newer) info.push(`Версия: ${newer}`);
   const keys = unknownKeys();

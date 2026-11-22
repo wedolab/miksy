@@ -3,7 +3,7 @@
 // с верными ожиданиями
 import { expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, withShim } from "./helpers";
 import { ledger, read } from "./rootshelp";
 import { commit, trusted } from "./fixes021b-helpers";
 
@@ -37,6 +37,7 @@ const addedLines = (out: string) => { const i = out.indexOf(ADDED); if (i < 0) r
 
 test("A4′: в opencode.json проекта (файл miksy) пользователь дописал свой сервер — добавка только его; серверы miksy, убранные из слоёв и пропущенные из-за переменной, — нет", () => {
   const f = cliFixture({ agents: ["claude", "codex", "opencode", "antigravity"], projects: ["Org/p1"] });
+  withShim(f); // MCP проекта запускает команда miksy — doctor её проверяет (круг 10v)
   const p1 = `${f.ws}/Org/p1`;
   put(`${f.config}/layers/global/mcp/gsrv.yaml`, "name: gsrv\ncommand: echo\nargs: [g]\n");
   put(`${f.config}/layers/tree/mcp/tsrv.yaml`, "name: tsrv\ncommand: echo\nargs: [t]\n");

@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { cliFixture, put, expectCode, said } from "./helpers";
+import { cliFixture, put, expectCode, said, withShim } from "./helpers";
 import { git, inProcess, ledger, read, rootsFixture, yamlRoots } from "./rootshelp";
 import { applyMoves } from "../src/relocate";
 
@@ -520,6 +520,7 @@ describe("рецензия 6w без находок: подсказки досл
 
   test("C: root remove --forget → «root add …», «sync --all», затем «root remove …» без терминала и «miksy clean …» по списку → ничего от miksy", () => {
     const f = rootsFixture(ALL);
+    withShim(f); // MCP проекта запускает команда miksy — doctor её проверяет (круг 10v)
     const app = `${f.archive}/Acme/app`;
     put(`${f.config}/layers/tree/Archive/skills/sk/SKILL.md`, SKILL);
     expectCode(f.run(["sync", "--all", "--yes"]), 0);

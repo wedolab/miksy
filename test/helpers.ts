@@ -1,9 +1,10 @@
 // Общее для тестов CLI: конфигурация, домашний каталог и workspace во временном каталоге
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { expect } from "bun:test";
 import { placeSlug, scriptName } from "../src/launch";
+import { shimPath, shimText } from "../src/shim";
 
 export const CLI = resolve(import.meta.dir, "..", "src", "cli.ts");
 
@@ -41,6 +42,16 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
     return res;
   };
   return { dir, config, home, ws, run };
+}
+
+// Команда miksy в доме песочницы, как её создаёт setup: ею агенты запускают MCP-серверы проектов (miksy mcp), и
+// doctor считает проблемой, если её нет (круг 10v)
+export function withShim(f: { home: string }): string {
+  const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+  const path = shimPath(f.home, os, {});
+  put(path, shimText(os, process.execPath.replaceAll("\\", "/"), CLI.replaceAll("\\", "/")));
+  if (os !== "windows") chmodSync(path, 0o755);
+  return path;
 }
 
 // Переносимый запуск в файле проекта (круг 10u): «miksy mcp <агент> <место> <сервер> [--bridge]» в TOML или JSON →

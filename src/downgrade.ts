@@ -11,7 +11,7 @@ import { configRoot, ENGINE } from "./load";
 import { writeAtomic } from "./manifest";
 import { quoteArg, slash } from "./paths";
 import { gitIn, lastLine, MAIN, netError, STABLE, versionOf } from "./update";
-import { engineBunArgs } from "./setup";
+import { engineBunArgs } from "./shim";
 import { compareVersions, engineRepo, SEMVER } from "./version";
 
 export const DOWNGRADE_MIN = "0.3.0";

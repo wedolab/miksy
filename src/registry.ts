@@ -18,7 +18,7 @@ import { applyMoves, findMoves, HOW, type Move } from "./relocate";
 import { moveDecisions, saveMovedDecisions } from "./trust";
 import type { Action } from "./apply";
 import type { Below, Layer, Machine, Resolved } from "./types";
-import { bridgeEnv, refsIn, SECRET_MARK, type SkippedMcp, substitute } from "./vars";
+import { bridgeEnv, refsIn, SECRET_MARK, type HttpDelivery, type SkippedMcp, substitute } from "./vars";
 import { readFileSync } from "node:fs";
 import { parseToml } from "./toml";
 import { blockHash, splitInstructions } from "./instructions";
@@ -236,7 +236,7 @@ function belowOf(cfg: Resolved, above: Group[], machine: Machine): Below {
   return { groups, layers, instructions: cfg.instructions.filter((i) => layers.includes(i.layer)), leaked: [...leaked.values()] };
 }
 
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "opencode", antigravity: "Antigravity" };
+export const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "opencode", antigravity: "Antigravity" };
 
 // Канал правил группы доставлен: в учёте группы — блок или own-файл правил (rulesFiles адаптера), и он
 // цел на диске: блок разбирается и его хеш совпадает с учтённым, own-файл — с учтённым хешем. Файл без
@@ -355,8 +355,13 @@ export function teamFor(cfg: Resolved, target: Target, adapter: Adapter): { cfg:
 
 // Доставка секретов цели: обёртки и helper-ы в local/run/<агент>/<цель>/. Bun моста — по стабильному
 // пути (без каталога с версией): обновление Bun не ломает обёртки
+// MCP проектной цели адаптер пишет в папку проекта переносимо (src/adapter.ts projectMcp): «miksy mcp …», HTTP с секретом —
+// мостом (helper заголовков и {file:} ссылались бы на файлы этой машины, а печатать секрет по команде miksy нельзя)
+const portableTarget = (adapter: Adapter, target: Target) => target.scope === "project" && adapter.projectMcp === "portable";
+export const httpFor = (adapter: Adapter, target: Target): HttpDelivery | undefined => (portableTarget(adapter, target) ? "bridge" : adapter.httpSecrets);
+
 export function launcherFor(adapter: Adapter, target: Target, machine: Machine) {
-  const portable = target.scope === "project" && adapter.projectMcp === "portable" ? target.rel : undefined;
+  const portable = portableTarget(adapter, target) && target.scope === "project" ? target.rel : undefined;
   const blocked = portable === undefined ? undefined : sharedPlace(portable, machine);
   return createLauncher({ os: machine.os, local: join(configRoot(), "local"), agent: adapter.id, target, bun: stableBun(process.execPath), engine: ENGINE,
     ...(portable !== undefined && { portable }), ...(blocked && { portableBlocked: blocked }) });
@@ -385,7 +390,7 @@ export function renderFor(
 ): { result: RenderResult; cfg: Resolved; missing: string[]; skipped: SkippedMcp[] } {
   // ${WORKSPACE} — основной (первый) корень у целей любого корня и в глобальных настройках: смысл
   // переменной не зависит от цели. Путь в другой корень — своей переменной в vars local/machine.yaml
-  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(t.cfg, machine, secrets, { agent: adapter.id, http: adapter.httpSecrets });
+  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(t.cfg, machine, secrets, { agent: adapter.id, http: httpFor(adapter, t.target) });
   const team = teamFor(resolved, t.target, adapter);
   const launch = launcherFor(adapter, t.target, machine);
   const ownedFiles = Object.keys(prev?.files ?? {});
@@ -424,11 +429,12 @@ export function renderFor(
     }
     if (f.mcp || values.some((v) => f.content.includes(v) || f.content.includes(JSON.stringify(v).slice(1, -1)))) f.sensitive = true;
   }
-  result.warnings.push(...team.warnings, ...[...argSecretWarnings(team.cfg, adapter.id), ...httpEnvWarnings(team.cfg, adapter)].filter((w) => !result.warnings.includes(w)));
+  result.warnings.push(...team.warnings, ...[...argSecretWarnings(team.cfg, adapter.id), ...httpEnvWarnings(team.cfg, adapter, httpFor(adapter, t.target))].filter((w) => !result.warnings.includes(w)));
   for (const e of empty) result.warnings.push(`mcp ${e.server}: секрет ${e.name} пустой в local/secrets.env — сервер получит пустое значение`);
   // Короткое значение совпадало бы с чем угодно: маскируется только целой строкой (src/mask.ts)
   for (const n of usedSecrets.filter((n) => secrets[n] && secrets[n].length < MASK_MIN))
     result.warnings.push(`секрет ${n} короче ${count(MASK_MIN, "символа", "символов", "символов")}: в бэкапах и выводе моста маскируется, только когда он — целое строковое значение (JSON/TOML, строка ответа); в прочем тексте — нет`);
+  if (launch.runs()) result.portable = true;
   if (team.cfg.trust) result.trust = team.cfg.trust;
   // Сервер без переменной (или с недоставляемым секретом) пропускается сам, остальное генерируется;
   // записанный раньше остаётся как был
@@ -455,9 +461,9 @@ export function renderFor(
 
 // env у HTTP-сервера агент не передаёт никому (удалённому серверу переменные не нужны); мост берёт
 // из него только прокси/TLS. Секрет в таком env — пропуск сервера (vars.ts), без секрета — предупреждение
-export function httpEnvWarnings(cfg: Resolved, adapter: Adapter): string[] {
+export function httpEnvWarnings(cfg: Resolved, adapter: Adapter, http = adapter.httpSecrets): string[] {
   return cfg.mcp.filter(({ item }) => item.url && item.env && item.agents?.[adapter.id] !== "skip").flatMap(({ item }) => {
-    const bridge = adapter.httpSecrets === "bridge" || refsIn(item.url).length > 0;
+    const bridge = http === "bridge" || refsIn(item.url).length > 0;
     const ignored = Object.keys(item.env!).filter((k) => !(bridge && bridgeEnv(k)));
     return ignored.length ? [`mcp ${item.name}: env HTTP-сервера (${ignored.join(", ")}) ${AGENT_NAMES[adapter.id] ?? adapter.id} игнорирует — удалённому серверу переменные окружения не передаются${bridge ? " (мосту — только прокси/TLS)" : ""}`] : [];
   });

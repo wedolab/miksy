@@ -104,7 +104,11 @@ export const opencode: Adapter = {
     // Пропущенный сервер с {file:} оставлять нельзя, если файла секрета нет: отсутствующий файл
     // делает невалидным весь конфиг opencode (не один сервер)
     const noKeep: string[] = [];
-    for (const k of ctx?.skipped ?? []) {
+    // Переносимый проект (HTTP с секретом — мост, круг 10v) {file:} не пишет: оставленный keep-ом сервер — запуск моста,
+    // без файла секрета падает только он. Правило нужно, пока в файле ещё лежит прежняя запись с {file:} (переход),
+    // и глобальному конфигу (opencode до 2.1 с {file:} на отсутствующий файл не запускается целиком)
+    const fileRefs = !ctx?.launch?.portable || (() => { try { return readFileSync(join(anchor, "opencode.json"), "utf8").includes("{file:"); } catch { return false; } })();
+    for (const k of fileRefs ? ctx?.skipped ?? [] : []) {
       const s = k.item;
       if (!s.url || s.agents?.opencode === "skip" || !ctx?.launch) continue;
       const names = [...new Set([...serverSecrets({ name: s.name, headers: s.headers }), ...k.vars])];

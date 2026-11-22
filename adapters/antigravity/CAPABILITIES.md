@@ -38,7 +38,7 @@ MCP, plugins), встроенные руководства CLI
 | MCP глобально, IDE | `~/.gemini/antigravity-ide/mcp_config.json` → `mcpServers` | Merge по именам в этот же файл (одновременно с CLI) | Разбор бандла IDE |
 | MCP проекта | `mcp_config.json` плагина; также `.agents/mcp_config.json` | Own-файл `.agents/plugins/miksy/mcp_config.json` | Вживую: agy (Windows), IDE и 2.0 (Windows), вызов инструмента моделью |
 | Формат сервера | stdio: `command`, `args`, `env`; HTTP (Streamable): `url`, `headers`; `disabled` | Пишет эти поля; `agents.antigravity` слоя может дополнить или выключить (`skip`) | Вживую: `agy mcp list` |
-| stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал) | `command` — обёртка `local/run/antigravity/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []` | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
+| stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал); у плагинов agy 1.5.9 — только `${PLUGIN_ROOT}`/`${PLUGIN_DATA}` в `args`, `env`, `cwd` (не в `command`) | глобально — `command` — обёртка `local/run/antigravity/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []`; в плагине проекта — `miksy mcp` (ниже) | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
 | HTTP с секретом | То же | Мост: `command` — обёртка `<сервер>-bridge-<хеш>.cmd\|.sh` (stdio-сервер, пересылающий на HTTP) | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 и 1.4.7 macOS (`tools/list`); вызов инструмента — Windows; IDE Windows |
 | Каталоги-группы | Без git `AGENTS.md` и плагин читаются только из каталога сессии, вниз не наследуются | Группа получает свой плагин с полным набором слоёв до своего уровня, разности нет | Чтение — вживую agy 1.4.2 Windows; поведение группы заново не проверялось |
 | Реестр проектов | `~/.gemini/projects.json` | Источник `knownDirs` для `sync --all` | По коду |
@@ -219,3 +219,16 @@ OAuth не нужен.
   «Через ACP в Zed»); `agy -p` 1.4.12 и 1.5.9 — то же; IDE 2.6.0 — то же; `antigravity-acp` 1.5.0 — по коду и
   со слов владельца настроек не видит.
 - Базовая проверка адаптера — `bun test/antigravity-live.ts` (все вызовы `agy` с временным HOME).
+
+## MCP проекта без путей машины (`miksy mcp`, круги 10u–10w)
+
+В `.agents/plugins/miksy/mcp_config.json`: `{"command": "miksy", "args": ["mcp", "antigravity", "<место>", "<сервер>"]}`,
+HTTP с секретом — `…, "--bridge"`.
+
+- agy 1.5.9 запускает stdio без оболочки, с поиском по PATH и PATHEXT: `miksy` на Windows находит `miksy.cmd` (10t,
+  опыт). `${PLUGIN_ROOT}` и `${PLUGIN_DATA}` раскрываются только в `args`, `env`, `cwd` — путь обёртки ими не
+  задать, поэтому команда miksy. IDE и Antigravity 2.0 на macOS берут окружение оболочки входа (10t, код).
+- Вживую с серверами проекта в 10w не проверено: без входа в аккаунт agy не открывает сессию (`agy -p` просит
+  авторизацию; `agy acp` на `session/new` — «Authentication required»), а серверы плагина поднимаются только в сессии.
+  На Windows agy берёт вход владельца из хранилища — там запуск в режиме сессии не делался. Форма файла и запуск через
+  `miksy mcp` — те же, что у Codex и opencode (проверены вживую), плюс тесты.

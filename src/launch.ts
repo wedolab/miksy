@@ -29,6 +29,7 @@ export interface Launcher {
   // «miksy mcp <агент> <место> <сервер>», путь обёртки этой машины команда находит сама (src/mcprun.ts)
   portable: boolean;
   run(s: McpServer, kind: "stdio" | "bridge"): Run; // запуск обёртки: путь или (portable) команда miksy
+  runs(): number; // сколько серверов записано переносимо («miksy mcp …»)
   notes: string[]; // предупреждения доставки (имя не передать команде miksy — записан путь этой машины)
   secretsDir: string; // абсолютный каталог файлов секретов
   secretPath(name: string): string; // абсолютный путь файла секрета (прямые слэши)
@@ -250,13 +251,16 @@ export function createLauncher(o: LaunchOptions): Launcher {
     if (!notes.includes(note)) notes.push(note);
     return false;
   };
+  let runs = 0;
   const self = {
     os: o.os,
+    runs: () => runs,
     portable: o.portable !== undefined,
     notes,
     run(s: McpServer, kind: "stdio" | "bridge"): Run {
       const path = kind === "stdio" ? self.stdio(s) : self.bridge(s);
       if (!portableFor(s)) return { command: path, args: [] };
+      runs++;
       return { command: "miksy", args: ["mcp", o.agent, o.portable!, s.name, ...(kind === "bridge" ? ["--bridge"] : [])] };
     },
     secretsDir,
@@ -370,7 +374,8 @@ export function deliver(s: McpServer, launch: Launcher | undefined, http: "helpe
   if (!launch) throw new DeliveryError("секрет без доставки (ошибка вызова адаптера)");
   if (!s.url) return stdio("stdio");
   const inUrl = parts(s.url).some((x) => typeof x !== "string");
-  if (inUrl || http === "bridge") return stdio("bridge");
+  // Переносимая цель — мост и для секрета в заголовке: helper и {file:} ссылались бы на файлы этой машины
+  if (inUrl || http === "bridge" || launch.portable) return stdio("bridge");
   if (http === "helper") return { kind: "helper", url: s.url, helper: launch.helper(s) };
   const headers = Object.fromEntries(Object.entries(s.headers ?? {}).map(([k, v]) =>
     [k, parts(v).map((x) => (typeof x === "string" ? x : `{file:${launch.secretPath(x.secret)}}`)).join("")]));
