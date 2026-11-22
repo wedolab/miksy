@@ -407,10 +407,10 @@ describe("10z: номер компьютера от системы (поддел
     // Через модуль: поддельная система, одна конфигурация — один и тот же номер при повторных вызовах
     const f = cliFixture();
     try {
-      setHardwareSource(fake("linux", {}, { "/etc/machine-id": "abc\n" }));
+      setHardwareSource(fake("linux", {}, { "/etc/machine-id": "pc-xyz\n" }));
       const id1 = ensureMachineId(f.config);
       expect(machineIdOf(f.config)).toBe(id1);
-      setHardwareSource(fake("linux", {}, { "/etc/machine-id": "abc\n" }));
+      setHardwareSource(fake("linux", {}, { "/etc/machine-id": "pc-xyz\n" }));
       expect(machineIdOf(f.config)).toBe(id1);
       // Другой компьютер с той же солью (копия local/) — другой номер
       setHardwareSource(fake("linux", {}, { "/etc/machine-id": "other\n" }));
@@ -421,7 +421,7 @@ describe("10z: номер компьютера от системы (поддел
       expect(z).toMatch(/^[0-9a-f]{12}$/);
       expect(machineIdOf(f.config)).toBe(z);
       // Номер компьютера никуда не записан
-      expect(read(`${f.config}/local/state/machine-salt`)).not.toContain("abc");
+      expect(read(`${f.config}/local/state/machine-salt`)).not.toContain("xyz");
     } finally { setHardwareSource(null); }
   });
 });

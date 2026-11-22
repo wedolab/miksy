@@ -87,12 +87,17 @@ function valueProblem(name: string, value: string, where: "env" | "env-part" | "
 // (local/secrets.env) — ссылками secretRef(ИМЯ): значение в определение не попадает никогда.
 // Сервер, которому не хватает переменной или чей секрет нельзя доставить, исключается из
 // resolved (skipped) — остальное генерируется. agent — серверы со skip для этого агента
-// переменных не требуют; секрет в raw агента не поддерживается (raw подмешивается как есть)
+// переменных не требуют; секрет в raw агента не поддерживается (raw подмешивается как есть).
+// portable — переносимая цель (MCP в файле проекта, «miksy mcp …»): сервер не пропускается, а остаётся в resolved с
+// unavailable — причиной, которую miksy mcp назовёт агенту при запуске (круг 11b): файл проекта не зависит от того,
+// что есть на этой машине (только для имён, которые можно передать команде miksy, — portable(имя); иначе пропуск, как
+// раньше). У сервера с unavailable (другая ОС) и у такого сервера в raw агента подставляются HOME, WORKSPACE и
+// переменные машины, как у работающего; остальное в нём — из слоя
 export function substitute(
   r: Resolved,
   machine: Machine,
   secrets: Record<string, string>,
-  opts: { agent?: string; http?: HttpDelivery } = {},
+  opts: { agent?: string; http?: HttpDelivery; portable?: (name: string) => boolean } = {},
 ): { resolved: Resolved; missing: string[]; skipped: SkippedMcp[]; secretServers: string[]; usedSecrets: string[]; serverUses: Record<string, string[]>; empty: { server: string; name: string }[] } {
   const builtin: Record<string, string> = { HOME: machine.home, WORKSPACE: machine.workspace };
   const missing = new Set<string>();
@@ -116,7 +121,7 @@ export function substitute(
       const whole = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(s);
       return s.replace(REF, (ref, name: string) => {
         if (name in builtin || name in machine.vars) {
-          if (where === "command" || where === "arg" || where === "env") local.add(name);
+          if (where !== "raw") local.add(name);
           return name in builtin ? builtin[name] : machine.vars[name];
         }
         if (!(name in secrets)) {
@@ -143,6 +148,10 @@ export function substitute(
     // raw других агентов этому агенту не нужен: секрет в чужом raw не мешает
     const agents = item.agents && Object.fromEntries(Object.entries(item.agents).map(([id, a]) =>
       [id, a === "skip" || (opts.agent && id !== opts.agent) ? a : deep(a)])) as McpServer["agents"];
+    // raw сервера, который на этой машине не запустится: подстановки машины — как у работающего; ссылка на секрет в нём
+    // в файл не попадает — тогда raw из слоя
+    const rawFor = () => (agents && !JSON.stringify(agents).includes(SECRET_MARK) ? { agents } : {});
+    if (item.unavailable) return [{ item: { ...item, ...rawFor() }, layer }];
     const s: McpServer = {
       ...item,
       command: item.command && sub(item.command, "command"),
@@ -155,6 +164,11 @@ export function substitute(
     if (local.size) s.machineVars = [...local].sort();
     if (lacking.size || problems.length) {
       for (const v of lacking) missing.add(v);
+      if (opts.portable?.(item.name)) {
+        // Определение из слоя (без значений этой машины и ссылок на секреты): в файл идёт только запуск через miksy
+        const why = [...(lacking.size ? [`не заданы переменные ${[...lacking].join(", ")} (local/secrets.env или vars в local/machine.yaml)`] : []), ...new Set(problems)].join("; ");
+        return [{ item: { ...item, ...rawFor(), unavailable: { why } }, layer }];
+      }
       skipped.push({ name: item.name, vars: [...lacking], ...(problems.length && { why: [...new Set(problems)].join("; ") }), item: s });
       return [];
     }

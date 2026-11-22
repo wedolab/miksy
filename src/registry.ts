@@ -15,7 +15,7 @@ import { loadManifest, type Manifest, saveManifest, sha, type TargetState } from
 import { applyMoves, findMoves, HOW, type Move } from "./relocate";
 import { moveDecisions, saveMovedDecisions } from "./trust";
 import type { Action } from "./apply";
-import type { Below, Layer, Machine, Resolved } from "./types";
+import type { Below, Layer, Machine, McpServer, Resolved } from "./types";
 import { bridgeEnv, refsIn, SECRET_MARK, type HttpDelivery, type SkippedMcp, substitute } from "./vars";
 import { readFileSync } from "node:fs";
 import { parseToml } from "./toml";
@@ -368,6 +368,25 @@ function sharedPlace(rel: string, machine: Machine): string | undefined {
   return dirs.length > 1 ? `место проекта «${rel}» в дереве слоёв есть у двух корней (${dirs.map((d) => d.dir).join(" и ")}), и команда miksy mcp не различит их. Чтобы это исправить, смените tree корня или переименуйте папку` : undefined;
 }
 
+// Переносимая цель (круг 11b): у имени есть вариант для отдельной ОС — сервер идёт через miksy на любой ОС (perOs);
+// серверы только для других ОС — тоже в файл проекта (на этой ОС miksy mcp ответит пустым сервером), порядок — по
+// первому появлению имени в слоях: файл одинаков на машинах с разными ОС. Имя, которое нельзя передать команде miksy, —
+// как раньше: сервер своей ОС как есть, другой ОС — нет (заметка merge)
+function withElsewhere(cfg: Resolved, canRun: (name: string) => boolean): Resolved {
+  if (!cfg.mcpOrder) return cfg;
+  const per = new Set((cfg.perOs ?? []).filter(canRun));
+  if (!per.size) return cfg;
+  // Все варианты имени — одинаковые HTTP без секретов и переменных: как есть на любой ОС (merge, perOsDirect)
+  const direct = new Set(cfg.perOsDirect ?? []);
+  const mixed = new Set(cfg.perOsMixed ?? []);
+  const kind = (name: string) => (mixed.has(name) ? { anyKind: true } : {});
+  const mark = (e: Resolved["mcp"][number]) => (per.has(e.item.name) && !direct.has(e.item.name) ? { ...e, item: { ...e.item, perOs: true, ...kind(e.item.name) } } : e);
+  const others = (cfg.elsewhere ?? []).filter((e) => per.has(e.item.name)).map((e) => direct.has(e.item.name) ? e
+    : { ...e, item: { ...e.item, perOs: true, ...kind(e.item.name), unavailable: { why: `только для ${e.item.os!.join(", ")}`, quiet: true } } });
+  const at = (name: string) => cfg.mcpOrder!.indexOf(name);
+  return { ...cfg, mcp: [...cfg.mcp.map(mark), ...others].sort((a, b) => at(a.item.name) - at(b.item.name)) };
+}
+
 // Полная генерация для цели: подстановка переменных, импорт командных skills, рендер адаптера.
 // Секреты адаптер получает ссылками и доставляет через launch; значение в конфиг агента не
 // попадает: метка ссылки или значение секрета в MCP-файле рендера — ошибка цели, не запись
@@ -382,9 +401,10 @@ export function renderFor(
 ): { result: RenderResult; cfg: Resolved; missing: string[]; skipped: SkippedMcp[] } {
   // ${WORKSPACE} — основной (первый) корень у целей любого корня и в глобальных настройках: смысл
   // переменной не зависит от цели. Путь в другой корень — своей переменной в vars local/machine.yaml
-  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(t.cfg, machine, secrets, { agent: adapter.id, http: httpFor(adapter, t.target) });
-  const team = teamFor(resolved, t.target, adapter);
   const launch = launcherFor(adapter, t.target, machine);
+  const portable = portableTarget(adapter, t.target) ? launch.canRun : undefined;
+  const { resolved, missing, skipped, secretServers, usedSecrets, serverUses, empty } = substitute(portable ? withElsewhere(t.cfg, portable) : t.cfg, machine, secrets, { agent: adapter.id, http: httpFor(adapter, t.target), portable });
+  const team = teamFor(resolved, t.target, adapter);
   const ownedFiles = Object.keys(prev?.files ?? {});
   // Ниже группы: агенту, который сам читает правила родительских каталогов, — только отрезок цели.
   // Группа выше правил не получила — её отрезок (до ближайшей доставившей группы) пишется в цель
@@ -454,7 +474,8 @@ export function renderFor(
 // env у HTTP-сервера агент не передаёт никому (удалённому серверу переменные не нужны); мост берёт
 // из него только прокси/TLS. Секрет в таком env — пропуск сервера (vars.ts), без секрета — предупреждение
 export function httpEnvWarnings(cfg: Resolved, adapter: Adapter, http = adapter.httpSecrets): string[] {
-  return cfg.mcp.filter(({ item }) => item.url && item.env && item.agents?.[adapter.id] !== "skip").flatMap(({ item }) => {
+  // Сервер, который на этой машине не запустится (круг 11b), — без предупреждений о доставке: о нём сказано своё
+  return cfg.mcp.filter(({ item }) => item.url && item.env && !item.unavailable && item.agents?.[adapter.id] !== "skip").flatMap(({ item }) => {
     const bridge = http === "bridge" || refsIn(item.url).length > 0;
     const ignored = Object.keys(item.env!).filter((k) => !(bridge && bridgeEnv(k)));
     return ignored.length ? [`mcp ${item.name}: env HTTP-сервера (${ignored.join(", ")}) ${agentTitle(adapter.id)} игнорирует — удалённому серверу переменные окружения не передаются${bridge ? " (мосту — только прокси/TLS)" : ""}`] : [];
@@ -488,7 +509,7 @@ export function literalHints(actions: Action[], secrets: Record<string, string>,
 
 // Секрет в args stdio-сервера: обёртка передаёт значение в argv сервера — его видит список процессов
 export function argSecretWarnings(cfg: Resolved, agent: string): string[] {
-  return cfg.mcp.filter(({ item }) => item.command && !item.url && item.agents?.[agent] !== "skip" && (item.args ?? []).some((x) => refsIn(x).length))
+  return cfg.mcp.filter(({ item }) => item.command && !item.url && !item.unavailable && item.agents?.[agent] !== "skip" && (item.args ?? []).some((x) => refsIn(x).length))
     .map(({ item }) => `mcp ${item.name}: секрет передаётся аргументом — значение видно в списке процессов (ps) другим пользователям машины; лучше env`);
 }
 

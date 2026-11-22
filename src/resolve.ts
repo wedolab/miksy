@@ -14,11 +14,25 @@ export function selectProject(map: MiksyMap, rel: string, os: Os): string[] {
   return map.layers.filter((e) => hit(e) && osMatches(e, os)).map((e) => e.use);
 }
 
+// HTTP-сервер без секретов и переменных: определение одно на всех машинах — в файл проекта пишется как есть (штатная
+// авторизация агента, например OAuth, сохраняется), в том числе на ОС, для которой он не задан (круг 11b-2)
+const fixedHttp = (s: McpServer) => !!s.url && ![s.url, ...Object.values(s.headers ?? {}), ...Object.values(s.env ?? {})].some((v) => /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(String(v)));
+const sorted = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(sorted)
+  : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sorted(x)]))
+  : v;
+const sameDef = (a: McpServer, b: McpServer) => JSON.stringify(sorted({ ...a, os: undefined })) === JSON.stringify(sorted({ ...b, os: undefined }));
+
 // Склейка сверху вниз. exclude слоя действует на всё, что пришло из слоёв выше него
 export function merge(layers: Layer[], os: Os): Resolved {
   let instructions: Resolved["instructions"] = [];
   const skills = new Map<string, Sourced<Layer["skills"][number]>>();
   const mcp = new Map<string, Sourced<McpServer>>();
+  // Только для других ОС (имени нет среди серверов этой ОС) и порядок первого появления имени
+  const elsewhere = new Map<string, Sourced<McpServer>>();
+  const order = new Map<string, true>();
+  const perOs = new Set<string>(); // имена с определением для отдельной ОС: порядок в файле проекта — по первому появлению
+  const variants = new Map<string, McpServer[]>(); // все определения имени (с последнего exclude) — одни и те же на любой ОС
   const notes: string[] = [];
   let importSkills: Resolved["importSkills"];
   const skillExcludes: string[] = [];
@@ -33,7 +47,7 @@ export function merge(layers: Layer[], os: Os): Resolved {
       const [kind, name] = [ex.slice(0, ex.indexOf(".")), ex.slice(ex.indexOf(".") + 1)];
       if (kind === "skill") skillExcludes.push(name);
       const removed =
-        kind === "mcp" ? mcp.delete(name)
+        kind === "mcp" ? [mcp.delete(name), elsewhere.delete(name), variants.delete(name)].some(Boolean)
         : kind === "skill" ? skills.delete(name)
         : kind === "instructions" ? instructions.length !== (instructions = instructions.filter((i) => i.item.file !== name)).length
         : (() => { throw new Error(`${layer.name}/layer.yaml: непонятный exclude «${ex}» (ожидается mcp.*, skill.*, instructions.*)`); })();
@@ -49,21 +63,38 @@ export function merge(layers: Layer[], os: Os): Resolved {
     }
 
     for (const s of layer.mcp) {
+      order.set(s.name, true);
+      variants.set(s.name, [...(variants.get(s.name) ?? []), s]);
+      if (s.os) perOs.add(s.name);
       if (s.os && !s.os.includes(os)) {
         notes.push(`mcp ${s.name} (${layer.name}) пропущен: только для ${s.os.join(", ")}`);
+        if (!mcp.has(s.name)) elsewhere.set(s.name, { item: s, layer: layer.name });
         continue;
       }
       const prev = mcp.get(s.name);
       if (prev) notes.push(`mcp ${s.name}: ${layer.name} перекрывает ${prev.layer}`);
       mcp.set(s.name, { item: s, layer: layer.name });
+      elsewhere.delete(s.name);
     }
   }
+
+  // Имена с os:, которые пишутся как есть на любой ОС: все варианты — HTTP без переменных с одним определением (круг 11b-3)
+  const direct = [...perOs].filter((n) => {
+    const v = variants.get(n) ?? [];
+    return v.length > 0 && v.every((x) => fixedHttp(x) && sameDef(x, v[0]!));
+  });
+  // Имена с os:, у которых есть и HTTP-, и stdio-вариант: команда miksy mcp без --bridge
+  const mixed = [...perOs].filter((n) => new Set((variants.get(n) ?? []).map((x) => !!x.url)).size > 1);
 
   return {
     layers: layers.map((l) => l.name),
     instructions,
     skills: [...skills.values()],
     mcp: [...mcp.values()],
+    ...(elsewhere.size && { elsewhere: [...elsewhere.values()] }),
+    ...(perOs.size && { perOs: [...perOs], mcpOrder: [...order.keys()].filter((n) => mcp.has(n) || elsewhere.has(n)) }),
+    ...(direct.length && { perOsDirect: direct }),
+    ...(mixed.length && { perOsMixed: mixed }),
     ...(importSkills && { importSkills }),
     ...(Object.keys(trust).length && { trust }),
     ...(skillExcludes.length && { skillExcludes }),

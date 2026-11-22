@@ -30,6 +30,9 @@ export interface Launcher {
   portable: boolean;
   run(s: McpServer, kind: "stdio" | "bridge"): Run; // запуск обёртки: путь или (portable) команда miksy
   runs(): number; // сколько серверов записано переносимо («miksy mcp …»)
+  // Сервер с этим именем можно записать переносимо (цель переносимая, место и имя передаются команде miksy) — тогда
+  // сервер, который на этой машине не запустится, всё равно идёт в файл проекта (круг 11b)
+  canRun(name: string): boolean;
   notes: string[]; // предупреждения доставки (имя не передать команде miksy — записан путь этой машины)
   secretsDir: string; // абсолютный каталог файлов секретов
   secretPath(name: string): string; // абсолютный путь файла секрета (прямые слэши)
@@ -71,6 +74,10 @@ export function scriptName(server: string, kind: Kind): string {
   const clean = server.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 40) || "_";
   return `${clean}-${kind}-${sha(`${kind}\0${server}`).slice(0, 8)}`;
 }
+// Причина, по которой сервер на этой машине не запускается (круг 11b): рядом с обёрткой, вместо неё
+export const reasonName = (server: string, kind: "stdio" | "bridge") => `${scriptName(server, kind)}.json`;
+// Флаг вида в команде miksy mcp; у имени со stdio- и HTTP-вариантами (anyKind) его нет — файл проекта одинаков на всех ОС
+const flag = (s: McpServer, kind: "stdio" | "bridge") => (kind === "bridge" && !s.anyKind ? ["--bridge"] : []);
 // Имена до фазы 2г-2 (без хеша): обёртки сохранённых keep-ом серверов, записанные раньше
 const legacyNames = (server: string) => [safeName(server), `${safeName(server)}-headers`, `${safeName(server)}-bridge`];
 
@@ -201,12 +208,12 @@ export function createLauncher(o: LaunchOptions): Launcher {
     const p = slash(join(o.local, rel));
     return win ? p.replaceAll("/", "\\") : p;
   };
-  const put = (file: string, content: string) => {
+  const put = (file: string, content: string, executable = true) => {
     const rel = `${runRel}/${file}`;
     // Файловая система может не различать регистр: два разных скрипта — никогда в один файл
     const clash = made.get(fold(rel));
     if (clash && clash.mode === "own" && clash.content !== content) throw new Error(`${rel}: два разных скрипта получили одно имя файла (ошибка miksy)`);
-    made.set(fold(rel), { base: "local", path: rel, mode: "own", content, executable: true });
+    made.set(fold(rel), { base: "local", path: rel, mode: "own", content, ...(executable && { executable: true }) });
     return native(rel);
   };
 
@@ -255,13 +262,23 @@ export function createLauncher(o: LaunchOptions): Launcher {
   const self = {
     os: o.os,
     runs: () => runs,
+    canRun: (name: string) => placeOk && portableName(name),
     portable: o.portable !== undefined,
     notes,
     run(s: McpServer, kind: "stdio" | "bridge"): Run {
+      if (s.unavailable) {
+        // Не запустится на этой машине: вместо обёртки — причина рядом с ней (miksy mcp ответит ею агенту). Без
+        // переносимой формы записать нечего — сервер пропускается, как раньше
+        if (!portableFor(s)) throw new DeliveryError(s.unavailable.why);
+        put(reasonName(s.name, kind), JSON.stringify({ server: s.name, why: s.unavailable.why, ...(s.unavailable.quiet && { quiet: true }) }, null, 2) + "\n", false);
+        if (!s.unavailable.quiet) notes.push(`mcp ${s.name}: на этой машине не запустится — ${s.unavailable.why}. В файле проекта он есть: агент при запуске покажет эту причину`);
+        runs++;
+        return { command: "miksy", args: ["mcp", o.agent, o.portable!, s.name, ...flag(s, kind)] };
+      }
       const path = kind === "stdio" ? self.stdio(s) : self.bridge(s);
       if (!portableFor(s)) return { command: path, args: [] };
       runs++;
-      return { command: "miksy", args: ["mcp", o.agent, o.portable!, s.name, ...(kind === "bridge" ? ["--bridge"] : [])] };
+      return { command: "miksy", args: ["mcp", o.agent, o.portable!, s.name, ...flag(s, kind)] };
     },
     secretsDir,
     secretPath: (n) => `${secretsDir}/${n}`,
@@ -359,11 +376,24 @@ export function deliver(s: McpServer, launch: Launcher | undefined, http: "helpe
     const r = launch!.run(s, kind);
     return { kind: "stdio", ...r, ...(r.command === "miksy" && { portable: true }) };
   };
+  // Переносимая цель (круг 11b): сервер, который на этой машине не запустится (unavailable), и сервер, у имени которого
+  // есть вариант для отдельной ОС (perOs), — всегда через miksy, как на машине, где он работает: файл проекта одинаков.
+  // HTTP — способом моста (на этой машине — причина вместо обёртки, src/mcprun.ts). Обёртка не передаёт значение
+  // работающего сервера (кавычка в аргументе .cmd и т. п.) — как в ветке ниже: без секрета — как есть, с заметкой
+  if (launch?.portable && (s.unavailable || s.perOs)) {
+    try { return stdio(s.url ? "bridge" : "stdio"); }
+    catch (e) {
+      if (!(e instanceof DeliveryError) || s.unavailable || serverSecrets(s).length) throw e;
+      launch.notes.push(`mcp ${s.name}: ${e.message} — сервер записан в файл проекта как есть${s.machineVars?.length ? " (со значениями этой машины)" : ""}: если папка проекта общая с машиной на другой ОС, там будет конфликт файлов miksy`);
+      return { kind: "plain", server: s };
+    }
+  }
   if (!serverSecrets(s).length) {
-    // Переносимая цель: подставленные пути и переменные машины — тоже через обёртку (в файле проекта — без них)
+    // Переносимая цель: подставленные пути и переменные машины — тоже через обёртку (в файле проекта — без них): stdio —
+    // обёрткой, HTTP (переменная в url или заголовке) — мостом.
     // Обёртка не передаёт значение (кавычка в аргументе .cmd и т. п.) — как раньше, значения этой машины в файле
-    if (launch?.portable && !s.url && s.machineVars?.length) {
-      try { return stdio("stdio"); }
+    if (launch?.portable && s.machineVars?.length) {
+      try { return stdio(s.url ? "bridge" : "stdio"); }
       catch (e) {
         if (!(e instanceof DeliveryError)) throw e;
         launch.notes.push(`mcp ${s.name}: ${e.message} — сервер записан в файл проекта со значениями этой машины, как раньше: если папка проекта общая с другой машиной, там будет конфликт файлов miksy`);

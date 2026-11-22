@@ -24,12 +24,14 @@ for (const id of ["codex", "opencode", "antigravity"]) for (const last of [false
   const next = apply(plan(second.result, target, machine, state, false, id), state).state;
   const path = id === "codex" ? ".codex/config.toml" : id === "opencode" ? "opencode.json" : ".agents/plugins/miksy/mcp_config.json";
   const text = readFileSync(`${target.dir}/${path}`, "utf8");
-  // Пропущенный сервер остаётся обёрткой (значения в конфиге нет), обёртка — на месте (круг 10u: в файле проекта —
-  // переносимый запуск miksy mcp, обёртка этой машины — в local/run по месту проекта)
+  // Сервер без секрета остаётся в файле проекта (значения в конфиге нет; круг 10u: переносимый запуск miksy mcp). Круг
+  // 11b: вместо обёртки этой машины — причина рядом с ней (miksy mcp назовёт её агенту)
   expect(text).not.toContain("artificial-value");
   const runs = portableRuns(text);
   expect(runs.map((r) => [r.agent, r.place, r.server])).toEqual([[id, "Org/p1", "secret"]]);
-  expect(existsSync(mcpWrapper(configRoot(), runs[0], machine.os))).toBe(true); // обёртки — в local/ конфигурации процесса
+  const wrapper = mcpWrapper(configRoot(), runs[0], machine.os); // обёртки — в local/ конфигурации процесса
+  expect(existsSync(wrapper)).toBe(false);
+  expect(readFileSync(wrapper.replace(/\.(sh|cmd)$/, ".json"), "utf8")).toContain("не заданы переменные TOKEN");
   if (!last) { expect(text).toContain("new"); expect(text).not.toContain('"old"'); }
   expect(plan(second.result, target, machine, next, false, id)).toEqual([]);
 }, 30000);

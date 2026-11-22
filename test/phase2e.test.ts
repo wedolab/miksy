@@ -218,16 +218,16 @@ describe("Г7, Г8: учёт файлов секретов", () => {
     const written = read(wrapper).includes("{secret:NEW}") ? "NEW" : "OLD";
     expect(deps()).toContain(written);
     expect(existsSync(`${f.config}/local/secrets/${written}`)).toBe(true);
-    // Конфликт разрешён возвратом к записанной версии; NEW из secrets.env убран — сервер остаётся (keep), файл секрета
-    // записанной обёртки не удаляется
+    // Конфликт разрешён возвратом к записанной версии; NEW из secrets.env убран. Круг 11b: в переносимом проекте сервер
+    // без секрета не пропускается — файл проекта тот же, вместо обёртки на этой машине причина (miksy mcp назовёт её)
     put(cfg, saved);
     put(`${f.config}/local/secrets.env`, "OLD=old_value_12345678\n");
     const r = f.run(["sync", dir]);
     expect(r.code === 0 || r.code === 3).toBe(true);
-    expect(read(cfg)).toContain('"--bridge"');
-    const now = read(wrapper).includes("{secret:NEW}") ? "NEW" : "OLD";
-    expect(existsSync(`${f.config}/local/secrets/${now}`)).toBe(true);
-    expect(deps()).toContain(now);
+    expect(read(cfg)).toBe(saved);
+    expect(r.out).toContain("на этой машине не запустится — не заданы переменные NEW");
+    expect(existsSync(wrapper)).toBe(false);
+    expect(read(wrapper.replace(/\.(sh|cmd)$/, ".json"))).toContain("не заданы переменные NEW");
   }, 90000);
 
   test("Г8: файл секрета, созданный пользователем заранее, не становится собственностью miksy", () => {

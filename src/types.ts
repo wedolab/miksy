@@ -15,6 +15,15 @@ export interface McpServer {
   // Ставит подстановка (src/vars.ts): в command, args или env подставлены HOME, WORKSPACE или переменные
   // machine.yaml — значения этой машины (в файл проекта такой сервер идёт через обёртку, src/launch.ts)
   machineVars?: string[];
+  // Ставит подстановка для переносимой цели (src/vars.ts, круг 11b): сервер записан в файл проекта, но на этой машине
+  // не запустится — why (нет переменной, значение секрета не доставить, другая ОС); quiet — без ошибки (пустой сервер)
+  unavailable?: { why: string; quiet?: boolean };
+  // Ставит renderFor для переносимой цели: у имени в слоях есть вариант для отдельной ОС (os:) — сервер идёт через miksy
+  // на любой ОС, чтобы файл проекта был одинаков (кроме HTTP без секретов и переменных — он одинаков и так)
+  perOs?: boolean;
+  // Ставит renderFor: среди вариантов имени есть и HTTP, и stdio — команда miksy mcp без --bridge (одна на всех ОС),
+  // miksy mcp сам находит, что записано на этой машине (круг 11b-3)
+  anyKind?: boolean;
 }
 
 export interface Instruction {
@@ -92,6 +101,14 @@ export interface Resolved {
   instructions: Sourced<Instruction>[];
   skills: Sourced<Skill>[];
   mcp: Sourced<McpServer>[];
+  // Серверы только для других ОС (os: в слое) и порядок всех серверов по слоям: переносимая цель пишет их в файл
+  // проекта (на этой ОС — пустой сервер), чтобы файл на машинах с разными ОС был одинаковым (круг 11b)
+  elsewhere?: Sourced<McpServer>[];
+  mcpOrder?: string[];
+  perOs?: string[]; // имена, у которых в слоях есть определение с os:
+  // Из них — имена, все определения которых одинаковые HTTP без секретов и переменных: пишутся как есть (круг 11b-3)
+  perOsDirect?: string[];
+  perOsMixed?: string[]; // из них — имена, у которых есть и HTTP-, и stdio-вариант (круг 11b-3)
   importSkills?: Sourced<ImportSkills>;
   // Доверие по агентам — самый конкретный слой, где оно задано
   trust?: Record<string, Sourced<boolean>>;

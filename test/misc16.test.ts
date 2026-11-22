@@ -11,12 +11,18 @@ const none = { layers: [], instructions: [], skills: [], notes: [], mcp: [] };
 const secretMcp = { layer: "x", item: { name: "s", command: "echo", env: { TOKEN: "${TOKEN}" } } };
 const machineOf = (f: { home: string; ws: string }) => ({ home: f.home, workspace: f.ws, os: "linux" as const, vars: {} });
 
-test("С16: пропущенный сервер на первом sync не создаёт пустой own-файл Codex/Antigravity", () => {
+test("С16: сервер без секрета в проекте Codex/Antigravity записан через miksy, на этой машине — причина (круг 11b)", () => {
   const f = cliFixture();
   const target = { scope: "project" as const, dir: `${f.ws}/Org/p1`, rel: "Org/p1" };
   for (const id of ["codex", "antigravity"]) {
-    const { result } = renderFor(ADAPTERS[id], { cfg: { ...none, mcp: [secretMcp] }, target, title: "t" }, machineOf(f), {});
-    expect(result.files).toEqual([]);
+    const { result, skipped } = renderFor(ADAPTERS[id], { cfg: { ...none, mcp: [secretMcp] }, target, title: "t" }, machineOf(f), {});
+    expect(skipped).toEqual([]);
+    const reason = result.files.find((x) => x.base === "local" && x.path.endsWith(".json"));
+    expect(reason?.mode === "own" && reason.content).toContain("не заданы переменные TOKEN");
+    expect(result.files.some((x) => x.base === "local" && /\.(sh|cmd)$/.test(x.path))).toBe(false);
+    const project = result.files.filter((x) => x.base === "project" && x.mode === "own").map((x) => (x.mode === "own" ? x.content : "")).join("\n");
+    expect(project).toContain('"mcp"');
+    expect(project).toContain("Org/p1");
   }
 });
 

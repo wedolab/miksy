@@ -297,8 +297,10 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     expect(read(`${p1}/.codex/config.toml`)).toContain(`"args" = ["mcp", "codex", "Org/p1", "tool"]`);
     const ledgerA = read(manifest);
     const exA = exclude(p1);
-    // Машина B: своя конфигурация (тот же репо слоёв), свой учёт — без записей об этом проекте, переменной TOOL нет
+    // Машина B: своя конфигурация, свой учёт — без записей об этом проекте; сервера tool в её слоях нет (круг 11b: сервер
+    // без переменной машины B записала бы так же, как A, — файл был бы и её)
     put(`${f.config}/local/machine.yaml`, yamlB);
+    rmSync(`${f.config}/layers/tree/Org/mcp/tool.yaml`);
     rmSync(manifest);
     rmSync(`${manifest}.bak`, { force: true });
     const b = f.run(["sync", p1]);
@@ -308,6 +310,7 @@ describe("B.2: отметка «проект забыт» и файлы miksy б
     const afterCleanB = { file: existsSync(`${p1}/.codex/config.toml`), exclude: exclude(p1) === exA };
     // Снова машина A
     put(`${f.config}/local/machine.yaml`, yamlA);
+    put(`${f.config}/layers/tree/Org/mcp/tool.yaml`, "name: tool\ncommand: ${TOOL}\nargs: []\n");
     put(manifest, ledgerA);
     const a = f.run(["sync", p1]);
     expect({ deletedByB, bSays: b.out.includes("больше не нужен"), exB: exB === exA, cleanB: cleanB.out.includes("больше не нужен"), afterCleanB, aRecreates: a.out.includes("записать (новый)"), aChanged: changed(a.out), git: status(p1) })
