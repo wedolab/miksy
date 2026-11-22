@@ -6,7 +6,7 @@ import { cliFixture, expectCode, put } from "./helpers";
 import { cachePaths, canonical, restorePaths } from "../src/paths";
 import { cacheGit, repoOf } from "../src/git";
 import { miksyExcludeLines } from "../src/apply";
-import { scanTeamSkills } from "../src/teamskills";
+import { scan0 as scanTeamSkills } from "./teamskills-readers"; // читатели — явно (круг 10x-2)
 import { runCommand } from "../src/commands";
 
 const win = process.platform === "win32";

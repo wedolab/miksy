@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { claude } from "../adapters/claude";
-import { withTeamSkills } from "../src/teamskills";
+import { withTeam0 as withTeamSkills } from "./teamskills-readers"; // читатели — явно (круг 10x-2)
 import type { Resolved } from "../src/types";
 
 const skill = (name: string) => `---\nname: ${name}\ndescription: Team skill\n---\nBody\n`;

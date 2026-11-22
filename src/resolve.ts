@@ -27,7 +27,7 @@ export function merge(layers: Layer[], os: Os): Resolved {
 
   for (const layer of layers) {
     if (layer.importSkills !== undefined) importSkills = { item: layer.importSkills, layer: layer.name };
-    for (const [agent, value] of Object.entries(layer.trust ?? {}) as ["codex" | "claude", boolean][])
+    for (const [agent, value] of Object.entries(layer.trust ?? {}))
       trust[agent] = { item: value, layer: layer.name };
     for (const ex of layer.exclude) {
       const [kind, name] = [ex.slice(0, ex.indexOf(".")), ex.slice(ex.indexOf(".") + 1)];

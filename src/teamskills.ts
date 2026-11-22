@@ -6,18 +6,12 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Resolved, Skill } from "./types";
 import { count } from "./plural";
+import { ADAPTERS } from "./agents";
 
 export type AgentId = string;
 
-// Где агент сам находит skills проекта: <каталог>/<имя>/SKILL.md.
-// По умолчанию; адаптер уточняет через skillDirs. opencode — проверено вживую (адаптер);
-// antigravity — уточняет адаптер (.agents/skills, проверено вживую).
-export const DEFAULT_READERS: Record<AgentId, string[]> = {
-  claude: [".claude/skills"],
-  codex: [".agents/skills"],
-  opencode: [".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill"],
-  antigravity: [".gemini/skills"],
-};
+// Где агент сам находит skills проекта (<каталог>/<имя>/SKILL.md) — читатели: id агента → каталоги. Боевые — skillDirs
+// адаптеров (src/registry.ts: READERS); тесты разбора передают свои
 
 export interface SkillCopy {
   path: string; // каталог skill относительно проекта
@@ -44,17 +38,18 @@ export interface TeamCommand {
   location: string;
 }
 
-// Приоритет источника для импорта — порядок в списке
-const PRIORITY = [".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill", ".gemini/skills"];
+// Соглашения о местах командных skills — из адаптеров (teamScan). Приоритет источника для импорта — меньше раньше
+const scans = () => Object.values(ADAPTERS).flatMap((a) => (a.teamScan ? [a.teamScan] : []));
+const priority = (location: string) => scans().reduce((p, s) => s.priority?.[location] ?? p, -1);
 // Частые нестандартные места — для понятных сообщений
-const NONSTANDARD: { id: string; rx: RegExp }[] = [
+const nonstandard = (): { id: string; rx: RegExp }[] => [
   { id: "двойная вложенность", rx: /\/skills\/skills\/[^/]+$/ },
-  { id: ".agents/<имя>", rx: /^\.agents\/(?!skills\/)[^/]+$/ },
-  { id: ".codex/skills", rx: /^\.codex\/skills\/[^/]+$/ },
-  { id: ".claude/commands/<имя>", rx: /^\.claude\/commands\/.+$/ },
+  ...scans().flatMap((s) => s.nonstandard ?? []),
 ];
-
-const ROOTS = [".agents", ".claude", ".codex", ".gemini", ".opencode"];
+// Корневые каталоги агентов в репо (по алфавиту)
+const roots = () => [...new Set(scans().flatMap((s) => s.roots))].sort();
+// Файлы команд (слэш-команды агентов)
+const commandsRx = () => new RegExp(`^(${scans().flatMap((s) => (s.commands ? [s.commands] : [])).join("|")})\\/.+\\.md$`);
 const NAME_RX = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 function frontmatter(text: string): Record<string, unknown> | null {
@@ -72,7 +67,7 @@ function classify(dir: string, readers: Record<AgentId, string[]>) {
   const parent = dir.slice(0, dir.lastIndexOf("/"));
   const seenBy = Object.keys(readers).filter((a) => readers[a].includes(parent));
   if (seenBy.length) return { id: parent, seenBy, standard: true };
-  return { id: NONSTANDARD.find((l) => l.rx.test(dir))?.id ?? parent, seenBy, standard: false };
+  return { id: nonstandard().find((l) => l.rx.test(dir))?.id ?? parent, seenBy, standard: false };
 }
 
 // Файлы команды в агентных каталогах: путь → симлинк ли (git mode 120000)
@@ -82,12 +77,13 @@ function trackedFiles(dir: string): Map<string, boolean> {
   const modes = (() => { try { return indexModes(dir); } catch { return new Map<string, string>(); } })();
   if (modes) {
     const out = new Map<string, boolean>();
-    for (const [p, mode] of modes) if (ROOTS.some((r) => p === r || p.startsWith(r + "/"))) out.set(p, mode === "120000");
+    const rs = roots();
+    for (const [p, mode] of modes) if (rs.some((r) => p === r || p.startsWith(r + "/"))) out.set(p, mode === "120000");
     return out;
   }
   // Через gitSpawn: потерянный ответ (код ≠ 0 без строки ошибки; Bun < 1.4.3) — повтор. Пустой вывод законен (файлов в
   // агентных каталогах нет) — needOut не ставится (круг 10m)
-  const r = gitSpawn(["-C", dir, "ls-files", "-s", "-z", "--", ...ROOTS], { readOnly: true });
+  const r = gitSpawn(["-C", dir, "ls-files", "-s", "-z", "--", ...roots()], { readOnly: true });
   const out = new Map<string, boolean>();
   if (r.code !== 0) return out;
   for (const entry of r.out.split("\0")) {
@@ -98,7 +94,7 @@ function trackedFiles(dir: string): Map<string, boolean> {
 }
 
 // Один разбор на проект за команду CLI (gitMemo): его спрашивает каждый агент
-export const scanTeamSkills = (dir: string, readers: Record<AgentId, string[]> = DEFAULT_READERS) =>
+export const scanTeamSkills = (dir: string, readers: Record<AgentId, string[]>) =>
   gitMemo(`scan|${dir}|${JSON.stringify(readers)}`, () => scan(dir, readers));
 
 function scan(
@@ -141,7 +137,7 @@ function scan(
       }
       continue;
     }
-    const cmd = file.match(/^(\.claude\/commands|\.opencode\/commands?)\/.+\.md$/);
+    const cmd = file.match(commandsRx());
     if (cmd) commands.push({ path: file, location: cmd[1] });
   }
 
@@ -190,7 +186,7 @@ function scan(
   }
   // Источник для импорта — настоящие файлы: без битых ссылок и не через симлинк, затем по месту
   const rank = (c: SkillCopy) => {
-    const i = PRIORITY.indexOf(c.location);
+    const i = priority(c.location);
     const unreadable = c.issues.some((x) => x.startsWith("битый") || x.startsWith("SKILL.md") || x.startsWith("нет frontmatter") || x.startsWith("симлинк выгружен"));
     return (unreadable ? 1000 : 0) + (c.symlink ? 100 : 0) + (i < 0 ? 50 : i);
   };
@@ -245,7 +241,7 @@ function lsTreeQuery(dir: string, paths: string[]): TreeEntry[] | null {
 function blobs(dir: string, shas: string[]): Map<string, Buffer> {
   if (!gitCaching()) return blobsQuery(dir, shas);
   const known = gitMemo(`blobs|${dir}`, () =>
-    blobsQuery(dir, (lsTree(dir, ROOTS) ?? []).filter((e) => e.type === "blob").map((e) => e.sha)));
+    blobsQuery(dir, (lsTree(dir, roots()) ?? []).filter((e) => e.type === "blob").map((e) => e.sha)));
   const missing = shas.filter((s) => !known.has(s));
   if (missing.length) for (const [k, v] of blobsQuery(dir, missing)) known.set(k, v);
   return new Map(shas.filter((s) => known.has(s)).map((s) => [s, known.get(s)!]));
@@ -372,7 +368,7 @@ export function withTeamSkills(
   cfg: Resolved,
   projectDir: string,
   agent: string,
-  readers: Record<AgentId, string[]> = DEFAULT_READERS,
+  readers: Record<AgentId, string[]>,
 ): { cfg: Resolved; warnings: string[] } {
   const setting = cfg.importSkills;
   if (!setting || setting.item === false) return { cfg, warnings: [] };

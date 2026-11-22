@@ -48,7 +48,8 @@ export interface Layer {
   mcp: McpServer[];
 }
 
-export type TrustSetting = { codex?: boolean; claude?: boolean };
+// id агента с доверием проектам (адаптер: trust) → ставить ли его доверие
+export type TrustSetting = Record<string, boolean>;
 
 export interface MapEntry {
   use: string;
@@ -93,7 +94,7 @@ export interface Resolved {
   mcp: Sourced<McpServer>[];
   importSkills?: Sourced<ImportSkills>;
   // Доверие по агентам — самый конкретный слой, где оно задано
-  trust?: { codex?: Sourced<boolean>; claude?: Sourced<boolean> };
+  trust?: Record<string, Sourced<boolean>>;
   skillExcludes?: string[]; // exclude: skill.* — действует и на импорт командных skills
   below?: Below; // цель ниже цели-группы: что агенты, читающие родительские каталоги, получат от групп
   notes: string[];

@@ -10,7 +10,7 @@ import { agentId } from "./agentid";
 import { clashText, dirsOf, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, treeAbove, treeClashes, treeJoin, treeOf } from "./roots";
 import { containsProjects, ENGINE, listProjects, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers } from "./load";
 import { merge, selectGlobal, selectProject } from "./resolve";
-import { type AgentId, DEFAULT_READERS, scanTeamSkills, withTeamSkills } from "./teamskills";
+import { type AgentId, scanTeamSkills, withTeamSkills } from "./teamskills";
 import { loadManifest, type Manifest, saveManifest, sha, type TargetState } from "./manifest";
 import { applyMoves, findMoves, HOW, type Move } from "./relocate";
 import { moveDecisions, saveMovedDecisions } from "./trust";
@@ -23,11 +23,8 @@ import { blockHash, splitInstructions } from "./instructions";
 import { MIN as MASK_MIN } from "./mask";
 import { count } from "./plural";
 
-// Где каждый агент сам находит skills проекта: объявления адаптеров поверх таблицы ядра
-export const READERS: Record<AgentId, string[]> = {
-  ...DEFAULT_READERS,
-  ...Object.fromEntries(Object.values(ADAPTERS).filter((a) => a.skillDirs).map((a) => [a.id, a.skillDirs!])),
-};
+// Где каждый агент сам находит skills проекта (адаптер: skillDirs)
+export const READERS: Record<AgentId, string[]> = Object.fromEntries(Object.values(ADAPTERS).filter((a) => a.skillDirs).map((a) => [a.id, a.skillDirs!]));
 
 
 // Агенты для команды: --agent, иначе список машины (local/machine.yaml), иначе все. Прежние имена

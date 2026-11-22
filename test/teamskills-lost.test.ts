@@ -4,7 +4,8 @@
 import { expect, test } from "bun:test";
 import { cliFixture, put } from "./helpers";
 import { setGitSpawnForTest } from "../src/git";
-import { committedSkill, scanTeamSkills } from "../src/teamskills";
+import { committedSkill } from "../src/teamskills";
+import { scan0 as scanTeamSkills } from "./teamskills-readers"; // читатели — явно (круг 10x-2)
 import { commit } from "./fixes021b-helpers";
 
 const lost = { exitCode: 128, stdout: Buffer.from(""), stderr: Buffer.from("") };

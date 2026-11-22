@@ -55,6 +55,7 @@ export const opencode: Adapter = {
   collections: [".opencode/skills"],
   // Пропускает skills, уже доставленные этим sync в .claude/skills или .agents/skills (render ниже)
   deliverLast: true,
+  teamScan: { roots: [".opencode"], priority: { ".opencode/skills": 2, ".opencode/skill": 3 }, commands: "\\.opencode\\/commands?" },
   ownFile: (path, text) => /(^|\/)opencode\.json$/.test(slash(path)) && miksyOpencodeJson(text),
   restore: {
     everCopied: [".config/opencode/opencode.json", ".config/opencode/opencode.jsonc", ".config/opencode/AGENTS.md", ".config/opencode/skills"],

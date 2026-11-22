@@ -13,6 +13,7 @@ import { quoteArg, slash } from "./paths";
 import { gitIn, lastLine, MAIN, netError, STABLE, versionOf } from "./update";
 import { engineBunArgs } from "./shim";
 import { compareVersions, engineRepo, SEMVER } from "./version";
+import { dialogTitle } from "./trust";
 
 export const DOWNGRADE_MIN = "0.3.0";
 export const OLD_RECIPE = "https://github.com/wedolab/miksy/blob/v0.3.5/docs/update.md#откатиться-на-прежнюю-версию";
@@ -199,7 +200,7 @@ export function downgrade(o: DowngradeOptions): number {
   const steps = o.ask ? all : all.slice(0, 1);
   for (const [i, a] of steps.entries()) {
     if (a[1] === "--global")
-      log("\nЕсли sync спросит о доверии Claude проекту, где вы сами отвечали Claude «да, больше не спрашивать», и в вопросе только ваши ответы в окне Claude, — отвечайте «да».");
+      log(`\nЕсли sync спросит о доверии ${dialogTitle()} проекту, где вы сами отвечали ${dialogTitle()} «да, больше не спрашивать», и в вопросе только ваши ответы в окне ${dialogTitle()}, — отвечайте «да».`);
     log(`\n$ ${cmd(a)}   (miksy ${target})`);
     let code: number;
     try { code = step(engine, a); }

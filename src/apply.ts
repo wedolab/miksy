@@ -128,6 +128,11 @@ function fallbackMove(owner: string | undefined, result: RenderResult, path: str
   return !!f && !result.clean && path.includes(`/${f.from}/`) && result.files.some((x) => x.base === "project" && x.path.startsWith(`${f.to}/`));
 }
 
+// Агент по файлу доверия в доме (адаптер: trust.file) — его название; ключ одобренных серверов по личному файлу проекта
+// (адаптер: trust.approvals)
+const trustTitle = (abs: string) => Object.values(ADAPTERS).find((x) => x.trust && abs.endsWith(`/${x.trust.file}`))?.title ?? abs;
+const approvalsKey = (file: string) => Object.values(ADAPTERS).find((x) => x.trust?.approvals && file.endsWith(`/${x.trust.approvals.file}`))?.trust?.approvals?.keys.enabled ?? "";
+
 export function miksyMade(path: string, opts: { rendered?: string; covered?: boolean; block?: boolean } = {}): boolean {
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch { return false; }
@@ -546,7 +551,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       if (leaks.has(name)) {
         // Записанный раньше остаётся как был (и в учёте); новое значение секрета не пишем
         if (owned.includes(name) && name in current) own.push(name);
-        actions.push({ kind: "conflict", abs: `${path} ${JSON.stringify(key)}.${name}`, why: "сервер с секретом не сливаю в чужой файл проекта: он виден git (exclude скрывает только файлы miksy), git add отправил бы в репо команды ссылки на обёртки и файлы секретов этой машины (у остальных opencode не запустится). Удалите или переименуйте этот файл — miksy создаст свой, скрытый exclude; либо уберите секрет из определения сервера" });
+        actions.push({ kind: "conflict", abs: `${path} ${JSON.stringify(key)}.${name}`, why: "сервер с секретом не сливаю в чужой файл проекта: он виден git (exclude скрывает только файлы miksy), git add отправил бы в репо команды ссылки на обёртки и файлы секретов этой машины (у остальных ${ADAPTERS[owner]?.title ?? owner} не запустится). Удалите или переименуйте этот файл — miksy создаст свой, скрытый exclude; либо уберите секрет из определения сервера" });
         continue;
       }
       if (name in current && !owned.includes(name)) {
@@ -858,8 +863,8 @@ export function describe(a: Action): string {
     case "delete": return `  удалить              ${a.abs}${a.known ? " (файл miksy, которого не было в учёте, — больше не нужен)" : ""}`;
     case "restore": return `  восстановить оригинал ${a.abs} ← ${a.source}`;
     case "block": return `  блок инструкций     ${a.abs} (${a.known ? (a.hash ? "взять под учёт — блок miksy, которого не было в учёте" : "убрать только блок — блок miksy, которого не было в учёте, больше не нужен") : a.hash ? "обновить" : "убрать только блок"})`;
-    case "trust": return `  доверие ${a.format === "toml" ? "Codex" : "Claude"}     ${a.key[1]} (${a.remove ? "снять своё" : "добавить"})`;
-    case "approve": return `  одобрение .mcp.json  ${a.abs}: ${[...a.add.map((n) => `+ ${n}`), ...a.remove.map((n) => `- ${n} (снять своё)`)].join(", ") || (a.known ? `взять под учёт — одобрения miksy, которых не было в учёте (${a.own.join(", ")})` : "учёт")}`;
+    case "trust": return `  доверие ${trustTitle(a.abs)}     ${a.key[1]} (${a.remove ? "снять своё" : "добавить"})`;
+    case "approve": return `  одобрение ${a.source}  ${a.abs}: ${[...a.add.map((n) => `+ ${n}`), ...a.remove.map((n) => `- ${n} (снять своё)`)].join(", ") || (a.known ? `взять под учёт — одобрения miksy, которых не было в учёте (${a.own.join(", ")})` : "учёт")}`;
     case "release": return `  снять с учёта        ${a.abs} (файлом владеет и цель ${a.owner} — не удаляю)`;
     case "merge":
       return [
@@ -1020,10 +1025,10 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
     if (a.add.length || a.remove.length) {
       backup(a.abs);
       const doc = readJson(a.abs);
-      const list: string[] = (Array.isArray(doc.enabledMcpjsonServers) ? doc.enabledMcpjsonServers : []).filter((n: string) => !a.remove.includes(n));
+      const list: string[] = (Array.isArray(doc[a.key]) ? doc[a.key] : []).filter((n: string) => !a.remove.includes(n));
       for (const n of a.add) if (!list.includes(n)) list.push(n);
-      if (list.length) doc.enabledMcpjsonServers = list;
-      else delete doc.enabledMcpjsonServers;
+      if (list.length) doc[a.key] = list;
+      else delete doc[a.key];
       if (Object.keys(doc).length) writeAtomic(a.abs, JSON.stringify(doc, null, 2) + "\n");
       else if (existsSync(a.abs)) removeFile(a.abs);
     }
@@ -1186,8 +1191,9 @@ export function verifyMerges(state: TargetState, written?: Action[]): string[] {
   for (const [file, names] of Object.entries(state.approvals ?? {})) {
     if (written && !written.some((a) => a.kind === "approve" && a.add.length && pathKey(a.abs) === file)) continue;
     try {
-      const list = readJson(file).enabledMcpjsonServers;
-      for (const n of names) if (!Array.isArray(list) || !list.includes(n)) lost.push(`${file} enabledMcpjsonServers.${n}`);
+      const key = approvalsKey(file);
+      const list = readJson(file)[key];
+      for (const n of names) if (!Array.isArray(list) || !list.includes(n)) lost.push(`${file} ${key}.${n}`);
     } catch { lost.push(`${file} не разбирается как JSON`); }
   }
   return lost;

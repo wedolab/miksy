@@ -17,7 +17,8 @@ import { dirname, join, relative, resolve, win32 } from "node:path";
 import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { ADAPTERS } from "./registry";
 import { homeDir, slash } from "./paths";
-import { loadManifest, type Manifest, writeAtomic } from "./manifest";
+import { loadManifest, type Manifest } from "./manifest";
+import type { HomeItem, HomeMerge } from "./adapter";
 import { agentId } from "./agentid";
 import { UsageError } from "./args";
 import type { Ask } from "./ask";
@@ -34,8 +35,10 @@ const EVER_COPIED = Object.values(ADAPTERS).flatMap((a) => a.restore?.everCopied
 // Каталоги настроек агентов: папка каждого скопированного пути (.claude, .codex, .agents, .config/opencode, .gemini).
 // Всё внутри — настройки агента, даже если мастер такой файл не копировал (копия, собранная руками, архив tar)
 export const AGENT_DIRS = [...new Set([...EVER_COPIED, ...Object.values(ADAPTERS).flatMap((a) => a.homeConfig ?? [])]
-  .map((r) => r.split("/").slice(0, r.startsWith(".config/") ? 2 : 1).join("/")).filter((d) => d !== ".claude.json"))];
-const CLAUDE_JSON = ".claude.json";
+  .map((r) => r.split("/").slice(0, r.startsWith(".config/") ? 2 : 1).join("/")).filter((d) => !Object.values(ADAPTERS).some((a) => a.restoreHome?.file === d)))];
+// Домашний файл агента, куда restore дописывает недостающее, а не возвращает целиком (адаптер: restoreHome — Claude:
+// ~/.claude.json)
+const homeAgent = () => Object.values(ADAPTERS).find((a) => a.restoreHome);
 // Не возвращаются никогда, как и ~/.claude.json: файлы входа и рабочее состояние агентов (адаптер: restore.notRestored) —
 // то, что агент пишет сам во время работы (история, сессии, кэши, служебные номера, логи), а не настройки. Старое
 // затёрло бы нынешний вход, историю и сессии. Мастер их не копирует (его пути — EVER_COPIED, ни один сюда не попадает;
@@ -66,21 +69,7 @@ export type Plan = {
   blocked: (Item & { why: string })[]; // не вернётся (на месте папка)
   skipped: string[]; // не настройки агентов
   notRestored: string[]; // файлы входа и рабочее состояние агентов: не возвращаются
-  claude: ClaudePlan | null; // MCP-серверы Claude из .claude.json копии
-};
-
-// MCP-серверы Claude: переносятся только недостающие имена (общие — mcpServers верхнего уровня, проекта —
-// projects["<путь>"].mcpServers); то же имя с тем же определением — «уже на месте», с другим — не трогаем, называем.
-// Проекта нет в нынешнем файле — запись проекта создаётся только с mcpServers (Claude дополняет остальное сам, как у
-// проекта, который он ещё не открывал); нынешнего ~/.claude.json нет или его не прочитать — перенос не идёт
-export type ClaudeServer = { project?: string; name: string; liveKey?: string };
-export type ClaudePlan = {
-  add: (ClaudeServer & { newProject?: boolean })[];
-  same: ClaudeServer[];
-  clash: ClaudeServer[];
-  problem?: string; // перенос не идёт: почему (исправимо — код 1)
-  warning?: string; // перенос не идёт, исправлять нечего (копия повреждена) — предупреждение, код по остальному
-  data?: { global: Record<string, unknown>; projects: Record<string, Record<string, unknown>> }; // определения из копии
+  home: HomeMerge | null; // что дописать в домашний файл агента (адаптер: restoreHome) из копии
 };
 
 // Копии в local/backups: before-miksy-*, по метке (самая ранняя — первая)
@@ -123,7 +112,7 @@ function sameBytes(a: string, b: string): boolean {
 }
 
 export function planRestore(copy: string, home: string): Plan {
-  const plan: Plan = { copy, add: [], overwrite: [], same: [], blocked: [], skipped: [], notRestored: [], claude: null };
+  const plan: Plan = { copy, add: [], overwrite: [], same: [], blocked: [], skipped: [], notRestored: [], home: null };
   const items: Item[] = [];
   // Папку или файл копии не прочитать (права) — «не вернётся» с причиной, остальное — дальше (как прежняя команда)
   const unreadable = "в копии не прочитать: проверьте права на папку копии (откройте её владельцу) и повторите";
@@ -135,7 +124,8 @@ export function planRestore(copy: string, home: string): Plan {
       const src = join(dir, name), r = rel ? `${rel}/${name}` : name;
       let st: ReturnType<typeof lstatSync>;
       try { st = lstatSync(src); } catch { plan.blocked.push({ rel: r, src, why: unreadable }); continue; }
-      if (!rel && name === CLAUDE_JSON) { plan.claude = claudePlan(src, join(home, CLAUDE_JSON)); continue; }
+      const rh = homeAgent()?.restoreHome;
+      if (!rel && rh && name === rh.file) { plan.home = rh.plan(src, join(home, rh.file)); continue; }
       const isDir = st.isDirectory() && !st.isSymbolicLink();
       if (agentPath(r) && notRestored(r, !isDir)) { plan.notRestored.push(isDir ? r + "/" : r); continue; }
       if (st.isDirectory() && !st.isSymbolicLink()) {
@@ -183,101 +173,6 @@ export function planRestore(copy: string, home: string): Plan {
     }
   }
   return plan;
-}
-
-type ClaudeDoc = { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> } & Record<string, unknown>> } & Record<string, unknown>;
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-const readDoc = (path: string): ClaudeDoc => {
-  const j = JSON.parse(readFileSync(path, "utf8").replace(/^﻿/, ""));
-  if (!isObj(j)) throw new Error("не объект JSON");
-  return j as ClaudeDoc;
-};
-const sameDef = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-// Своё свойство с любым именем (и __proto__: обычное присваивание его не создаёт; повторная проверка 10c-2)
-const own = (o: Record<string, unknown>, k: string, v: unknown) => Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
-
-// Что перенести из .claude.json копии в нынешний (значения в вывод не идут: в env и заголовках бывают токены)
-export function claudePlan(copyJson: string, liveJson: string): ClaudePlan {
-  const plan: ClaudePlan = { add: [], same: [], clash: [] };
-  let copy: ClaudeDoc;
-  // Копия повреждена — исправлять нечего: предупреждение, не ошибка (рецензия 10c-2, С4); текст разбора в вывод не идёт:
-  // в нём кусок файла (М3)
-  try { copy = readDoc(copyJson); }
-  catch (e) {
-    // Повреждён (не JSON) — исправлять нечего: предупреждение; не прочитать (права, папка) — исправимо: код 1
-    if (e instanceof SyntaxError || (e as Error).message === "не объект JSON")
-      return { ...plan, warning: "серверы Claude из копии не прочитать — файл копии .claude.json повреждён; нужны — добавьте их Claude заново (claude mcp add)" };
-    return { ...plan, problem: "файл копии .claude.json не прочитать (нет доступа или это не файл) — проверьте права на него и повторите miksy restore" };
-  }
-  const global = isObj(copy.mcpServers) ? copy.mcpServers : {};
-  const projects: Record<string, Record<string, unknown>> = {};
-  for (const [p, v] of Object.entries(isObj(copy.projects) ? copy.projects : {}))
-    if (isObj(v) && isObj(v.mcpServers) && Object.keys(v.mcpServers).length) projects[p] = v.mcpServers;
-  plan.data = { global, projects };
-  if (!Object.keys(global).length && !Object.keys(projects).length) return plan;
-  if (!existsSync(liveJson)) return { ...plan, problem: "~/.claude.json нет: запустите Claude один раз, закройте его и повторите miksy restore" };
-  let live: ClaudeDoc;
-  try { live = readDoc(liveJson); } catch { return { ...plan, problem: "~/.claude.json не прочитать (испорчен или занят): закройте Claude и повторите miksy restore" }; }
-  const sort = (here: Record<string, unknown> | undefined, from: Record<string, unknown>, project?: string, liveKey?: string, newProject?: boolean) => {
-    for (const [name, def] of Object.entries(from)) {
-      const s: ClaudeServer = { ...(project !== undefined && { project, liveKey }), name };
-      // Object.hasOwn: имена вроде constructor не путаются со свойствами объекта (рецензия 10c-2, М1)
-      if (!here || !Object.hasOwn(here, name)) plan.add.push({ ...s, ...(newProject && { newProject }) });
-      else (sameDef(here[name], def) ? plan.same : plan.clash).push(s);
-    }
-  };
-  sort(isObj(live.mcpServers) ? live.mcpServers : undefined, global);
-  const liveProjects = isObj(live.projects) ? live.projects : {};
-  // Ключ проекта в нынешнем файле: тот же путь; на Windows — без учёта регистра и вида косых (C:/Users/X = c:\users\x)
-  const norm = (k: string) => (win ? k.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase() : k);
-  for (const [p, servers] of Object.entries(projects)) {
-    const lk = Object.hasOwn(liveProjects, p) ? p : Object.keys(liveProjects).find((k) => norm(k) === norm(p)) ?? p;
-    const lp = liveProjects[lk];
-    sort(isObj(lp) && isObj(lp.mcpServers) ? lp.mcpServers : undefined, servers, p, lk, !isObj(lp));
-  }
-  return plan;
-}
-
-// Дописать недостающие серверы в ~/.claude.json: перечитать файл перед записью (Claude мог его переписать), только
-// недостающие имена, остальное — как было; запись — как у sync (JSON с отступом 2, атомарно, сквозь ссылку)
-export function applyClaude(plan: ClaudePlan, liveJson: string, save: (path: string) => void): { added: ClaudeServer[]; error?: string } {
-  if (!plan.add.length || !plan.data) return { added: [] };
-  try {
-    const text = readFileSync(liveJson, "utf8");
-    const doc = readDoc(liveJson);
-    const added: ClaudeServer[] = [];
-    for (const s of plan.add) {
-      const from = s.project === undefined ? plan.data.global : plan.data.projects[s.project];
-      let holder: Record<string, unknown>;
-      if (s.project === undefined) holder = doc;
-      else {
-        if (!isObj(doc.projects)) doc.projects = {};
-        const ps = doc.projects as Record<string, Record<string, unknown>>;
-        const k = s.liveKey ?? s.project;
-        if (!isObj(ps[k])) own(ps, k, {});
-        holder = ps[k];
-      }
-      if (!isObj(holder.mcpServers)) holder.mcpServers = {};
-      const servers = holder.mcpServers as Record<string, unknown>;
-      if (Object.hasOwn(servers, s.name)) continue; // появился между планом и записью — не трогаем
-      own(servers, s.name, from[s.name]);
-      added.push(s);
-    }
-    if (!added.length) return { added };
-    // Бэкап не вышел — файл не трогаем; причину (в ней нет содержимого файла) — в вывод
-    try { save(liveJson); } catch (e) { return { added: [], error: `~/.claude.json не сохранить в бэкап — файл не тронут (${(e as Error).message})` }; }
-    writeAtomic(liveJson, JSON.stringify(doc, null, 2) + (text.endsWith("\n") ? "\n" : ""), { sensitive: true });
-    return { added };
-  } catch (e) {
-    // Ошибка разбора — без текста: в нём кусок файла, а там вход и токены (рецензия 10c-2, М3); ошибки файловой системы —
-    // по коду, без содержимого
-    const code = (e as NodeJS.ErrnoException)?.code;
-    const why = e instanceof SyntaxError || (e as Error).message === "не объект JSON"
-      ? "не прочитать (повреждён или изменился во время работы): закройте Claude и повторите miksy restore"
-      : code === "EBUSY" || code === "EPERM" || code === "EACCES" ? "занят или нет доступа: закройте Claude и повторите miksy restore"
-      : `не записан (${code ?? "ошибка записи"}): закройте Claude и повторите miksy restore`;
-    return { added: [], error: `~/.claude.json ${why}` };
-  }
 }
 
 // Путь в одинарных кавычках оболочки пользователя: PowerShell удваивает ' и ‘ ’ ‚ ‛ ($ и ` в них буквальны), sh — '\''
@@ -416,16 +311,15 @@ export function applyRestore(plan: Plan, home: string, save: (path: string) => s
 // Учёт miksy. Домашние цели (sync --global любого агента) — отказ: копия легла бы под файлы miksy, и clean убрал бы её как
 // свою. Цели проектов в домашние файлы не пишут, кроме Claude: его серверы проектов — в ~/.claude.json
 // (projects["<путь>"].mcpServers) — их перенос ждёт clean --all (рецензия 10c, №1); остальное копии не мешает
-export function ledgerBlock(manifest: Manifest): { home: string[]; projects: number; claudeProjects: number } {
+export function ledgerBlock(manifest: Manifest): { home: string[]; projects: number; homeProjects: number } {
   const ids = Object.keys(manifest.targets);
   const agentOf = (id: string) => agentId(id.slice(0, id.indexOf("|")));
   const home = [...new Set(ids.filter((id) => id.endsWith("|global")).map(agentOf))].sort();
   const projects = ids.filter((id) => !id.endsWith("|global"));
-  return { home, projects: projects.length, claudeProjects: projects.filter((id) => agentOf(id) === "claude").length };
+  return { home, projects: projects.length, homeProjects: projects.filter((id) => agentOf(id) === homeAgent()?.id).length };
 }
 
 const tilde = (rel: string) => `~/${rel}`;
-const where = (s: ClaudeServer) => (s.project === undefined ? s.name : `${s.name} (проект ${slash(s.project)})`);
 const stampOf = (c: string) => c.slice(c.lastIndexOf("/before-miksy-") + "/before-miksy-".length);
 
 // Затираемое — точной копией (без замены секретов заглушками, вне ротации запусков) в
@@ -484,11 +378,12 @@ export function runRestore(arg: string | undefined, flags: Record<string, string
   }
 
   const plan = planRestore(picked.copy, home);
-  const c = plan.claude;
-  // Серверы проектов Claude, записанные miksy, ещё в ~/.claude.json: перенос — после clean --all
-  // Общие серверы переносятся, серверов проектов не касаемся (рядом могут быть серверы miksy — не «ваши»)
-  let later: ClaudeServer[] = [];
-  if (c && ledger.claudeProjects && !c.problem) {
+  const c = plan.home;
+  const rh = homeAgent()?.restoreHome;
+  // Записи проектов агента, записанные miksy, ещё в домашнем файле (Claude: серверы проектов в ~/.claude.json): перенос —
+  // после clean --all. Общие переносятся, записей проектов не касаемся (рядом могут быть записи miksy — не «ваши»)
+  let later: HomeItem[] = [];
+  if (c && ledger.homeProjects && !c.problem) {
     later = [...c.add, ...c.clash, ...c.same].filter((s) => s.project !== undefined);
     c.add = c.add.filter((s) => s.project === undefined);
     c.clash = c.clash.filter((s) => s.project === undefined);
@@ -509,20 +404,12 @@ export function runRestore(arg: string | undefined, flags: Record<string, string
   if (plan.same.length) log(`Уже на месте: ${files(plan.same.length)}.`);
   if (plan.notRestored.length) log(`Не возвращается — файлы входа и рабочее состояние агентов (история, сессии; старое затёрло бы нынешнее): ${plan.notRestored.join(", ")}`);
   if (plan.skipped.length) log(`Пропущено — не настройки агентов (${plan.skipped.length}): ${plan.skipped.join(", ")}`);
-  if (c && (c.add.length || c.clash.length || c.same.length || c.problem || c.warning || later.length)) {
-    log("\n~/.claude.json целиком не возвращается: в нём Claude хранит вход и список проектов.");
-    if (c.add.length && !c.problem) log(`  Допишу MCP-серверы Claude из копии (${c.add.length}): ${c.add.map((s) => where(s) + (s.newProject ? " — проекта нет в списке Claude, запись проекта появится" : "")).join(", ")}`);
-    if (c.clash.length) log(`  Не трогаю — на месте сервер с тем же именем, но другой (${c.clash.length}): ${c.clash.map(where).join(", ")}`);
-    if (c.same.length) log(`  Уже на месте: ${c.same.map(where).join(", ")}`);
-    if (c.problem) log(`  MCP-серверы Claude не перенесу: ${c.problem}.`);
-    if (c.warning) log(`  Предупреждение: ${c.warning}. Остальное это не задерживает.`);
-    if (later.length) log(`  Серверы проектов Claude перенесу после miksy clean --all (в ~/.claude.json ещё серверы проектов, записанные miksy): ${later.map(where).join(", ")}`);
-  }
+  if (c && rh && (c.add.length || c.clash.length || c.same.length || c.problem || c.warning || later.length)) for (const l of rh.describe(c, later)) log(l);
   const work = plan.add.length + plan.overwrite.length + (c && !c.problem ? c.add.length : 0);
   const known = plan.blocked.length > 0 || !!c?.problem || later.length > 0; // не всё вернётся — уже по плану
   if (!work) {
     if (known) log("\nИсправьте то, что названо выше, и запустите miksy restore ещё раз — повторять безопасно. Ничего не записано.");
-    else log(`\nВсё из копии уже на месте${c?.clash.length ? " (кроме серверов Claude с тем же именем — они ваши)" : ""}${c?.warning ? " (кроме серверов Claude — см. предупреждение)" : ""}. Ничего не записано.`);
+    else log(`\nВсё из копии уже на месте${c && rh ? rh.doneNote(c) : ""}. Ничего не записано.`);
     return known ? 1 : 0;
   }
   if (dry) { log("\n--dry-run: ничего не записано."); return known ? 1 : 0; }
@@ -532,16 +419,16 @@ export function runRestore(arg: string | undefined, flags: Record<string, string
   }
   const saver = exactSaver(config, home);
   const res = applyRestore(plan, home, saver.save);
-  const cl = c && !c.problem ? applyClaude(c, join(home, CLAUDE_JSON), saver.save) : { added: [] as ClaudeServer[] };
+  const cl: { added: HomeItem[]; error?: string } = c && rh && !c.problem ? rh.apply(c, join(home, rh.file), saver.save) : { added: [] };
   log("");
   if (res.done.length) log(`✓ вернулось: ${files(res.done.length)}`);
-  if (cl.added.length) log(`✓ MCP-серверы Claude дописаны в ~/.claude.json: ${cl.added.map(where).join(", ")}`);
+  if (cl.added.length && rh) log(rh.added(cl.added));
   if (saver.dir()) log(`  прежние версии затёртых файлов — в ${saver.dir()}/`);
   if (res.replacedLinks.length) log(`  заменённые ссылки (в бэкап не сохраняются) вели на: ${res.replacedLinks.map((l) => `${tilde(l.rel)} → ${l.to}`).join(", ")}`);
   for (const f of res.failed) log(`не возвращён: ${tilde(f.rel)} — ${f.why}`);
-  if ("error" in cl && cl.error) log(`не перенесены MCP-серверы Claude — ${cl.error}`);
+  if (cl.error && rh) log(rh.failed(cl.error));
   if (res.done.length || cl.added.length) log("Перезапустите агентов (и редактор, если агент в нём) — они прочитают возвращённые настройки.");
-  const bad = res.failed.length > 0 || !!("error" in cl && cl.error) || !!c?.problem || later.length > 0;
+  const bad = res.failed.length > 0 || !!cl.error || !!c?.problem || later.length > 0;
   if (bad) log("Исправьте то, что названо выше, и запустите miksy restore ещё раз — повторять безопасно.");
   return bad ? 1 : 0;
 }

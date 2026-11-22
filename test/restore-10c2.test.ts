@@ -4,7 +4,8 @@ import { expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cliFixture, expectCode, said } from "./helpers";
-import { applyClaude, applyRestore, claudePlan, planRestore, quotePath, readOnlyHint, reason } from "../src/restore";
+import { applyRestore, planRestore, quotePath, readOnlyHint, reason } from "../src/restore";
+import { applyClaude, claudePlan } from "../adapters/claude/restore";
 
 const win = process.platform === "win32";
 const put = (p: string, s: string) => { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, s); };

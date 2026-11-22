@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { safeName, scanTeamSkills, withTeamSkills } from "../src/teamskills";
+import { safeName } from "../src/teamskills";
+import { scan0 as scanTeamSkills, withTeam0 as withTeamSkills } from "./teamskills-readers"; // читатели — явно (круг 10x-2)
 import type { Resolved } from "../src/types";
 
 const cfg = (over: Partial<Resolved> = {}): Resolved => ({ layers: ["l"], instructions: [], skills: [], mcp: [], notes: [], ...over });

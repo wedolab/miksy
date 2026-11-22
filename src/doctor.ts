@@ -19,7 +19,7 @@ import { environment } from "./environ";
 import { stableBun } from "./launch";
 import { ADAPTERS, agentTitle, deliveredSkillNames, deliveryOrder } from "./registry";
 import { files } from "./plural";
-import { AGENT_NOTE, AGENT_TITLE, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
+import { agentNote, decisionTitle, dialogAgentId, dialogTitle, approvalsSource, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
 import { shimNotes } from "./shim";
 
 type Finding = { agent: string; target: string; detail: string };
@@ -116,7 +116,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       for (const k of rendered.skipped) if (k.why) undeliverable.push({ ...where, detail: `mcp ${k.name}: ${k.why}` });
       for (const a of result.advice ?? []) advice.push({ ...where, detail: a });
       if (result.portable) portableUsed = true;
-      for (const w of result.warnings.filter((w) => /инструкции Claude не записаны/.test(w))) persistent.push({ ...where, detail: w });
+      for (const w of result.persistent ?? []) persistent.push({ ...where, detail: w });
       for (const w of result.warnings.filter((w) => /пустой в local\/secrets\.env/.test(w))) emptySecrets.push({ ...where, detail: w });
       // Значения секретов в конфигах агента (записанных до 2а или оставленных keep)
       const configs = new Set([
@@ -154,18 +154,18 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
       if (!targets.some((t) => t.target.scope === "project" && fold(pathKey(t.target.dir)) === fold(f.dir)))
         former.push({ agent: adapter.id, target: f.rel, detail: "записанное осталось (у группы — действует на цели ниже)" });
 
-  // Группы без git: Claude наследует их доверие на подкаталоги без своего git — исполняемые настройки
-  // там (распакованный архив и т. п.) применились бы без вопроса
+  // Группы без git: агент с ответами в своём окне (адаптер: trust.dialog — Claude) наследует их доверие на подкаталоги
+  // без своего git — исполняемые настройки там (распакованный архив и т. п.) применились бы без вопроса
   const inherited: Finding[] = [];
-  if (adapters.some((a) => a.id === "claude"))
+  for (const heir of adapters.filter((a) => a.trust?.dialog))
     for (const g of groups.filter((x) => !x.git)) {
       // Доверие группы запрещено (слой или machine.yaml) — наследовать нечего. Ответы в окне Claude в подкаталоге
       // (permissions.allow и т. п.) — не предмет этого раздела: их пишет Claude по ответу того, кто там работает;
       // здесь — хуки, env и прочее, что выполнится без вопроса
-      const layer = targets.find((t) => t.target.scope === "project" && fold(pathKey(t.target.dir)) === fold(pathKey(g.abs)))?.cfg.trust?.claude?.item;
-      if (layer === false || machine.trust?.claude === false) continue;
+      const layer = targets.find((t) => t.target.scope === "project" && fold(pathKey(t.target.dir)) === fold(pathKey(g.abs)))?.cfg.trust?.[heir.id]?.item;
+      if (layer === false || machine.trust?.[heir.id] === false) continue;
       for (const s of inheritedExec(g.abs, groups.filter((x) => x !== g).map((x) => x.abs), true))
-        inherited.push({ agent: "claude", target: s.dir, detail: `доверие группы ${g.rel} действует и здесь: ${s.lines.join("; ")}` });
+        inherited.push({ agent: heir.id, target: s.dir, detail: `доверие группы ${g.rel} действует и здесь: ${s.lines.join("; ")}` });
     }
 
   const localAccess = checkLocalAccess();
@@ -229,7 +229,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
     const hits = new Map<string, Set<string>>();
     for (const [id, st] of Object.entries(manifest.targets)) {
       const dir = id.slice(id.indexOf("|") + 1), agent = id.slice(0, id.indexOf("|"));
-      if (enabled.has(agent) && Object.keys(st.trust ?? {}).length && [...dirs].some((d) => fold(d) === fold(dir))) (hits.get(dir) ?? hits.set(dir, new Set()).get(dir)!).add(AGENT_TITLE[agent as keyof typeof AGENT_TITLE] ?? agent);
+      if (enabled.has(agent) && Object.keys(st.trust ?? {}).length && [...dirs].some((d) => fold(d) === fold(dir))) (hits.get(dir) ?? hits.set(dir, new Set()).get(dir)!).add(decisionTitle(agent));
     }
     if (!hits.size) return "";
     const who = [...new Set([...hits.values()].flatMap((s) => [...s]))].join(" и ");
@@ -297,9 +297,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Конфликты первого sync", "файлы не записаны", blocked);
   section("Небезопасные права", "открытые пути local/ и права файлов miksy исправит sync/setup; о ссылках — в самих строках", permissions);
   section("Проекты без доверия", "причина для каждого агента; чужое доверие не меняется", trust);
-  if (pendingTrust.length) out.push(`Нужно решение пользователя о доверии (${pendingTrust.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне Claude, чужие файлы); без решения miksy доверие не ставит:`,
-    ...pendingText(pendingTrust), AGENT_NOTE, "");
-  section("Исполняемые настройки в подкаталогах групп без git", "Claude наследует доверие группы на подкаталоги без своего git: эти настройки применятся без вопроса; удалите их, сделайте каталог git-репо или запретите доверие группы (trust: { claude: false })", inherited);
+  if (pendingTrust.length) out.push(`Нужно решение пользователя о доверии (${pendingTrust.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне ${dialogTitle()}, чужие файлы); без решения miksy доверие не ставит:`,
+    ...pendingText(pendingTrust), agentNote(), "");
+  section("Исполняемые настройки в подкаталогах групп без git", `${dialogTitle()} наследует доверие группы на подкаталоги без своего git: эти настройки применятся без вопроса; удалите их, сделайте каталог git-репо или запретите доверие группы (trust: { ${dialogAgentId()}: false })`, inherited);
   section("Не синхронизировано", "sync для них ни разу не запускался: miksy sync --all --agent <id>", unsynced, true);
   section("Проект забыт", "учёт записанного туда забыт (clean --forget или root remove --forget), а каталог на месте: miksy sync <путь> узнает файлы miksy, совпадающие с нынешними, и возьмёт их под учёт (изменённые — с --force); не нужны — затем miksy clean <путь>", forgottenNow, true);
   section("Устарело", "слои изменились после sync: miksy sync --all --agent <id>", stale);
@@ -385,7 +385,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (leftTargets.size) info.push(`Учёт целей вне workspace без каталога (${leftTargets.size}; ${ownFiles(leftTargets)}): ${[...leftTargets].join(", ")} — каталога нет: диск не подключён или папку удалили. Убрать записанное туда: диск вернётся — miksy clean "<путь>"; папки больше нет — miksy clean "<путь>" (спросит, забыть ли; без терминала — --forget)${othersNote(leftTargets)}${trustNote(leftTargets) ? `. ${trustNote(leftTargets)}` : ""}`);
   // Прежние имена агентов в конфигурации работают как синонимы — подсказка переименовать
   const legacy = legacyAgentNames();
-  if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: gemini теперь antigravity (Antigravity — агент, Gemini — модель):`, ...legacy.map((l) => "  " + l));
+  const renamed = Object.values(ADAPTERS).flatMap((a) => (a.aliases ?? []).map((old) => `${old} теперь ${a.id}${a.aliasNote ? ` ${a.aliasNote}` : ""}`)).join("; ");
+  if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: ${renamed}:`, ...legacy.map((l) => "  " + l));
   if (skippedDirs.length) info.push(`Пропущено при поиске проектов (${skippedDirs.length}):`, ...skippedDirs.map((w) => "  " + w));
   const unread = ignoredLayerParts();
   if (unread.length) info.push(`Не читается: ${ignoredText(unread)}`);
@@ -415,7 +416,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   }
   if (secretFiles.info.length) info.push(`Файлы секретов (${secretFiles.info.length}):`, ...secretFiles.info.map((l) => "  " + l));
   if (declined.length) info.push(`Доверие отклонено пользователем (${declined.length}) — miksy его не ставит; пересмотреть: miksy trust <проект>:`,
-    ...declined.map((p) => `  ${AGENT_TITLE[p.agent]}  ${p.rel || p.dir}`));
+    ...declined.map((p) => `  ${decisionTitle(p.agent)}  ${p.rel || p.dir}`));
   if (advice.length) {
     info.push(`Нужно действие в агенте (${advice.length}):`);
     for (const f of (verbose ? advice : advice.slice(0, 8))) info.push(`  ${f.agent}  ${f.target}  ${f.detail}`);
@@ -432,7 +433,7 @@ function summarize(actions: Action[]): string {
     n("write") && `файлов: ${n("write")}`,
     n("block") && `блоков инструкций: ${n("block")}`,
     n("trust") && `доверие: ${n("trust")}`,
-    n("approve") && `одобрение серверов .mcp.json: ${n("approve")}`,
+    n("approve") && `одобрение серверов ${approvalsSource()}: ${n("approve")}`,
     n("delete") && `удалить: ${n("delete")}`,
     (n("merge") || n("toml")) && `ключей MCP: ${n("merge") + n("toml")}`,
     n("exclude") && "git exclude",

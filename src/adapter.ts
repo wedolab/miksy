@@ -44,6 +44,8 @@ export interface RenderResult {
   servers?: Record<string, string[]>;
   // Серверы цели запускает команда miksy (miksy mcp) — ставит ядро; doctor тогда проверяет команду
   portable?: boolean;
+  // Предупреждения, которые doctor считает проблемой: сами не уйдут (Claude: инструкции не записаны — их версионирует команда)
+  persistent?: string[];
   // Предупреждения, которые doctor показывает справочно (действие пользователя в агенте, не miksy)
   advice?: string[];
   // Доверие проекта из слоёв (trust в layer.yaml) — заполняет ядро после рендера адаптера
@@ -106,8 +108,10 @@ export interface Adapter {
   // ---- Особенности агента для общего кода (круг 10x): данные — полями, поведение — методами ----
   // Название в сообщениях («Claude», «Codex»)
   title: string;
-  // Прежние имена — рабочие синонимы во входных данных и учёте (src/agentid.ts)
+  // Прежние имена — рабочие синонимы во входных данных и учёте (src/agentid.ts); aliasNote — пояснение к подсказке
+  // переименовать (doctor)
   aliases?: string[];
+  aliasNote?: string;
   // Как найти агента на машине: команда в PATH или (агент только в редакторе) каталог настроек в доме
   detect: { commands: string[]; dirs: string[] };
   // Программа для сводки окружения (несколько установок — doctor, мастер): название и команды
@@ -124,6 +128,10 @@ export interface Adapter {
   homeSkillsDir?: string;
   // Импорт командных skills проекта проверен для агента
   teamImport?: boolean;
+  // Разбор командных skills в репо проекта (src/teamskills.ts): корневые каталоги агента (git ls-files), приоритет
+  // места как источника импорта (меньше — раньше), нестандартные места агента с понятным названием, каталоги команд
+  // (слэш-команды, не skills) — частью регулярного выражения
+  teamScan?: { roots: string[]; priority?: Record<string, number>; nonstandard?: { id: string; rx: RegExp }[]; commands?: string };
   // Каталоги-коллекции в проекте, куда агент пишет skills или плагины (<каталог>/<имя>/…): exclude — каталогом,
   // командная коллекция — по ним
   collections?: string[];
@@ -139,4 +147,72 @@ export interface Adapter {
   restore?: { everCopied: string[]; notRestored: string[] };
   // Перенести ручной сервер из домашнего конфига агента под учёт miksy при adopt --global (Codex: таблица TOML)
   adoptGlobal?(manifest: Manifest, machine: Machine, name: string, def: unknown, dryRun?: boolean): void;
+  // Доверие проектам (src/trust.ts): у агента есть «доверенные проекты», и доверие загружает исполняемые настройки проекта
+  trust?: TrustSpec;
+  // Домашний файл агента, который miksy restore не возвращает целиком (в нём вход, список проектов), а дописывает в него
+  // недостающее из копии «до миksy» (Claude: MCP-серверы в ~/.claude.json): план, запись и тексты вывода
+  restoreHome?: RestoreHome;
+}
+
+// Запись, которую restore дописывает в домашний файл агента: project — запись проекта (её перенос ждёт clean --all, если
+// в учёте есть проекты агента), liveKey — ключ проекта в нынешнем файле, newProject — проекта в нём нет
+export type HomeItem = { project?: string; name: string; liveKey?: string; newProject?: boolean };
+// add — недостающие (допишутся), same — уже на месте, clash — на месте другое с тем же именем (не трогается); problem —
+// перенос не идёт, исправимо (код 1); warning — не идёт, исправлять нечего; data — что дописывать (адаптеру)
+export type HomeMerge = { add: HomeItem[]; same: HomeItem[]; clash: HomeItem[]; problem?: string; warning?: string; data?: unknown };
+export interface RestoreHome {
+  file: string; // относительно ~ (и копии)
+  plan(copyFile: string, liveFile: string): HomeMerge;
+  apply(m: HomeMerge, liveFile: string, save: (path: string) => void): { added: HomeItem[]; error?: string };
+  describe(m: HomeMerge, later: HomeItem[]): string[]; // раздел плана в выводе
+  doneNote(m: HomeMerge): string; // дополнение к «Всё из копии уже на месте»
+  added(items: HomeItem[]): string; // строка итога: что дописано
+  failed(error: string): string; // строка итога: что не перенесено
+}
+
+// Учтённый файл исполняемых настроек: строки показа и данные отпечатка (null — исполняемого нет)
+export type Inspected = { lines: string[]; data: unknown } | null;
+
+// Доверие проектам агента. Ядро (src/trust.ts) решает, ставить ли доверие, спрашивает пользователя, помнит решения
+// (local/trust.json) и отпечатки; адаптер говорит, где и как агент его хранит и что доверие выполнит без вопроса
+export interface TrustSpec {
+  // Файл доверия (относительно ~), формат, поле записи проекта и значение «доверяю»
+  file: string;
+  format: "json" | "toml";
+  field: string;
+  value: true | "trusted";
+  // Значение поля, которое значит «вопрос ещё не задавался» (Claude: false — по умолчанию новой записи проекта): его
+  // miksy меняет и при clean возвращает (previous). Другие значения пользователя — его решение, не меняются
+  unasked?: false;
+  // Ключи записи проекта в файле доверия: первый — канонический, остальные — те же каталоги в другом написании
+  keys(dir: string, machine: Machine, existing: string[]): string[];
+  // Файлы проекта, которые доверие загружает без вопроса (относительно цели). shared — без git считается командным
+  // (целиком); personal — личный файл агента: в нём ответы пользователя в окне агента (dialog) и одобрения miksy
+  // (approvals); read — строки показа и данные отпечатка (skip — убрать из документа своё)
+  settings: { rel: string; read(file: string, rel: string, skip?: (doc: any) => any): Inspected; shared?: boolean; personal?: boolean }[];
+  // Основание поставить доверие — только этот свой файл проекта (Codex: .codex/config.toml); без поля — любой файл
+  // проекта или свои ключи проекта в домашнем конфиге агента (merge под projects)
+  projectFile?: string;
+  // Ответы пользователя в окне агента (Claude: «да, больше не спрашивать», одобрения серверов) в личном файле проекта:
+  // strip — убрать их из документа; print — отпечаток ответов (own — свои одобрения miksy, не входят); title —
+  // заголовок в вопросе. Агент с ними помнит, что доверие ставил miksy (отметки в учёте), и наследует доверие группы
+  // на подкаталоги без git (groupSkip — каталог агента, который обход пропускает)
+  dialog?: { file: string; strip(doc: any): any; print(dir: string, own: string[]): string; title: string; groupSkip: string };
+  // Одобрение серверов командного файла (Claude: .mcp.json) в личном файле проекта: servers — серверы команды
+  // (имена, строки показа, отпечаток); title — название решения; ask — вопрос; also — дополнение к вопросу о доверии;
+  // advice — тексты справки (без доступа к файлу одобрений; проект не доверенный)
+  approvals?: {
+    file: string;
+    source: string;
+    // Ключи личного файла: одобренные серверы, отклонённые, «одобрить все» (Claude: enabledMcpjsonServers и т. п.)
+    keys: { enabled: string; disabled: string; all: string };
+    servers(dir: string, git: boolean): { names: string[]; lines: string[]; fingerprint: string } | null;
+    title: string;
+    ask: string;
+    also: string;
+    adviceRefused(where: string, why: string): string;
+    adviceUntrusted(where: string, names: string[]): string;
+  };
+  // Справка, когда проект останется без доверия (Claude: headersHelper не выполнится — сервер получит 401)
+  untrustedAdvice?(result: RenderResult): string | null;
 }

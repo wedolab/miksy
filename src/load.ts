@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { canonical, child, fold, homeDir, inside, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import { nakedSecrets } from "./secrets";
 import { agentId } from "./agentid";
+import { ADAPTERS } from "./agents";
 import { innerRoots, locate, type Root, rootExists, rootKey, treeAbove, treeJoin } from "./roots";
 import type { MiksyMap, Instruction, Layer, Machine, McpServer, Os, Skill } from "./types";
 
@@ -54,10 +55,12 @@ export function currentOs(): Os {
   return "linux";
 }
 
-// trust в machine.yaml и layer.yaml: { codex?: boolean, claude?: boolean }
+// trust в machine.yaml и layer.yaml: { <агент>: boolean } — агенты с доверием проектам (адаптер: trust). В сообщении —
+// в обратном порядке списка адаптеров: так оно выглядело до круга 10x-2 ({ codex: boolean, claude: boolean })
 function checkTrust(t: unknown, where: string) {
-  if (t !== undefined && (!t || typeof t !== "object" || Array.isArray(t) || Object.entries(t).some(([k, v]) => !["codex", "claude"].includes(k) || typeof v !== "boolean")))
-    throw new Error(`${where}: trust — объект { codex: boolean, claude: boolean }`);
+  const ids = Object.values(ADAPTERS).filter((a) => a.trust).map((a) => a.id);
+  if (t !== undefined && (!t || typeof t !== "object" || Array.isArray(t) || Object.entries(t).some(([k, v]) => !ids.includes(k) || typeof v !== "boolean")))
+    throw new Error(`${where}: trust — объект { ${[...ids].reverse().map((id) => `${id}: boolean`).join(", ")} }`);
 }
 
 export function loadMachine(root = configRoot()): Machine {

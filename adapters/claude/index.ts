@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { claudeTrust } from "./trust";
+import { claudeRestoreHome } from "./restore";
 import type { Adapter, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
 import { skillFiles } from "../../src/skillfiles";
@@ -31,6 +33,9 @@ export const claude: Adapter = {
   envVars: [{ name: "CLAUDE_CONFIG_DIR", title: "Claude Code", std: (h) => join(h, ".claude"), replace: true }],
   homeSkillsDir: ".claude/skills",
   teamImport: true,
+  trust: claudeTrust,
+  restoreHome: claudeRestoreHome,
+  teamScan: { roots: [".claude"], priority: { ".claude/skills": 1 }, nonstandard: [{ id: ".claude/commands/<имя>", rx: /^\.claude\/commands\/.+$/ }], commands: "\\.claude\\/commands" },
   collections: [".claude/skills"],
   restore: {
     // Что мастер копировал в before-miksy (с первой версии мастера по 0.2.3; прежние пути остаются, даже если homeConfig изменится)
@@ -69,6 +74,7 @@ export const claude: Adapter = {
   render(cfg, target, machine, ctx) {
     const files: RenderedFile[] = [];
     const warnings: string[] = [];
+    const persistent: string[] = [];
     const isGlobal = target.scope === "global";
 
     // Инструкции: глобально — ~/.claude/CLAUDE.md, в проекте — CLAUDE.local.md (не коммитится).
@@ -83,6 +89,7 @@ export const claude: Adapter = {
       if (!isGlobal && trackedPaths(target.dir, [path]).length) {
         if (teamCollection(target.dir, ".claude/rules")) {
           warnings.push("инструкции Claude не записаны: CLAUDE.local.md и .claude/rules версионирует команда");
+          persistent.push("инструкции Claude не записаны: CLAUDE.local.md и .claude/rules версионирует команда");
           path = "";
         } else path = ".claude/rules/miksy.md";
       }
@@ -128,6 +135,6 @@ export const claude: Adapter = {
     }
     files.push(...(ctx?.launch?.files() ?? []));
 
-    return { files, warnings };
+    return { files, warnings, ...(persistent.length && { persistent }) };
   },
 };

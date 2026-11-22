@@ -34,12 +34,14 @@ export const antigravity: Adapter = {
   title: "Antigravity",
   // Прежнее имя агента (Antigravity — агент, Gemini — модель): рабочий синоним во входных данных и учёте
   aliases: ["gemini"],
+  aliasNote: "(Antigravity — агент, Gemini — модель)",
   // Агент бывает только в редакторе (Zed) — без команды в PATH, с каталогом настроек
   detect: { commands: ["agy", "antigravity"], dirs: [".gemini/antigravity-cli", ".gemini/antigravity-ide", ".gemini/antigravity"] },
   program: { name: "Antigravity (agy)", commands: ["agy"] },
   envVars: [{ name: "GEMINI_CLI_HOME", title: "Antigravity", std: (h) => h, replace: true, dir: (v) => join(v, ".gemini"), stdDir: (h) => join(h, ".gemini") }],
   homeSkillsDir: ".gemini/config/skills",
   teamImport: true,
+  teamScan: { roots: [".gemini"], priority: { ".gemini/skills": 4 } },
   collections: [".agents/plugins"],
   restore: {
     everCopied: [".gemini/GEMINI.md", ".gemini/config", ".gemini/antigravity-ide/mcp_config.json", ".gemini/antigravity-cli/mcp_config.json"],

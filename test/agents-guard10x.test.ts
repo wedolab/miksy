@@ -1,8 +1,9 @@
 // Круг 10x: особенности агентов — только в adapters/<агент>/ (CLAUDE.local.md движка, «Особенности агентов — только в
-// адаптерах»). Страж: в src/ нет сравнений с id агента, литералов id, путей файлов агентов, их переменных окружения и
-// импортов адаптеров — кроме разрешённых мест. Строки с комментарием целиком не проверяются.
-// ALLOWED — сколько находок допускается в файле. Пометка «10x-2» — временно: переносится в круге 10x-2, после него
-// таких строк не остаётся
+// адаптерах»). Страж: в src/ нет сравнений с id агента, литералов id, обращений к свойствам и ключей с id агента, названий
+// агентов, путей и имён файлов агентов, их переменных окружения и импортов адаптеров — кроме разрешённых мест. Строки с
+// комментарием целиком и комментарии в конце строки не проверяются. Круг 10x-3: правила усилены (рецензия 10x-2)
+// ALLOWED — сколько находок допускается в файле: список адаптеров и тексты для человека, где агенты названы как
+// пример или пояснение (не знание, по которому работает код)
 import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,21 +12,21 @@ const ID = "claude|codex|opencode|antigravity|gemini";
 const RULES: [string, RegExp][] = [
   ["сравнение с id агента", new RegExp(`[!=]==\\s*["'\`](?:${ID})["'\`]`)],
   ["литерал — id агента", new RegExp(`["'\`](?:${ID})["'\`]`)],
+  ["свойство — id агента", new RegExp(`[\\w)\\]]\\??\\.(?:${ID})\\b(?![/\\w-])`)],
+  ["ключ — id агента", new RegExp(`[{,]\\s*(?:${ID})\\s*:`)],
+  ["название агента", /\b(?:Claude|Codex|Antigravity|Gemini)\b|\bopencode\b/],
   ["путь файлов агента", /["'`]\/?\.(?:claude|codex|gemini|opencode|agents)(?:[/."'`])|["'`]\.config\/opencode|["'`]opencode\.jsonc?["'`]|["'`]\.claude\.json/],
+  ["файл агента", /\.mcp\.json|settings\.local\.json|config\.toml|\.claude\.json/],
   ["регулярка с путём агента", /\/[^/\n]*\\\.(?:claude|codex|gemini|opencode|agents)\b[^\n]*\/[gimsuy]*/],
   ["переменная окружения агента", /["'`](?:CLAUDE_CONFIG_DIR|CODEX_HOME|OPENCODE_\w*|GEMINI_\w*)["'`]/],
-  ["импорт адаптера", /from\s+["']\.\.\/adapters\//],
+  ["импорт адаптера", /from\s+["']\.\.\/adapters\/|require\(["']\.\.\/adapters\//],
 ];
 
 const ALLOWED: Record<string, { count: number; why: string }> = {
   "agents.ts": { count: 4, why: "список адаптеров — единственное место" },
-  "trust.ts": { count: 33, why: "10x-2: доверие Claude и Codex, одобрения .mcp.json — в адаптеры (trust?)" },
-  "commands.ts": { count: 12, why: "10x-2: ветки доверия Claude (отметка «доверие ставил miksy»), miksy trust" },
-  "doctor.ts": { count: 2, why: "10x-2: наследуемое доверие группы (Claude)" },
-  "restore.ts": { count: 3, why: "10x-2: возврат серверов в ~/.claude.json — в адаптер Claude" },
-  "load.ts": { count: 1, why: "10x-2: допустимые ключи trust: в слоях и machine.yaml — из адаптеров с доверием" },
-  "resolve.ts": { count: 1, why: "10x-2: тип ключей trust: из слоёв" },
-  "teamskills.ts": { count: 10, why: "10x-2: таблица разбора командных skills по умолчанию — снять вместе с правкой тестов разбора (читатели — явно)" },
+  "commands.ts": { count: 7, why: "справка (USAGE): перечень агентов, пример файлов и ключа trust; текст о файлах, которые остаются после «забыть»; строка explain о правилах родительских каталогов" },
+  "registry.ts": { count: 2, why: "пояснения в предупреждениях о корнях: как агенты читают родительские каталоги" },
+  "setup.ts": { count: 2, why: "пример файла с путями машины в тексте мастера о смене основного корня" },
 };
 
 function findings(file: string): string[] {
@@ -53,3 +54,18 @@ test("разрешённые места не пустуют: снятое из �
   const stale = Object.entries(ALLOWED).filter(([f, a]) => findings(join(dir, f)).length < a.count).map(([f, a]) => `${f}: ${findings(join(dir, f)).length} < ${a.count}`);
   expect(stale).toEqual([]);
 });
+
+// Круг 10x-3 (рецензия 10x-2): адаптер, загруженный первым, не ломается о цикл импортов адаптер → ядро → список
+// адаптеров (src/agents.ts — ленивый). Каждый — в отдельном процессе
+test("каждый адаптер импортируется первым без ошибки; список адаптеров после этого полный", () => {
+  const root = join(import.meta.dir, "..").replaceAll("\\", "/");
+  const ids = readdirSync(join(root, "adapters"), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  const res = ids.map((id) => {
+    const code = `const m = await import(${JSON.stringify(`${root}/adapters/${id}/index.ts`)}); const { ADAPTERS } = await import(${JSON.stringify(`${root}/src/agents.ts`)}); ` +
+      `console.log(JSON.stringify({ own: Object.values(m).filter((x) => x && x.id).map((x) => x.id), all: Object.values(ADAPTERS).map((a) => a.id) }))`;
+    const r = Bun.spawnSync([process.execPath, "-e", code], { stdout: "pipe", stderr: "pipe" });
+    return { id, code: r.exitCode, err: r.stderr.toString().trim().split("\n")[0] ?? "", out: r.stdout.toString().trim() };
+  });
+  const all = JSON.stringify({ own: [], all: ["claude", "codex", "opencode", "antigravity"] });
+  expect(res.map((r) => ({ id: r.id, code: r.code, err: r.err, out: r.out }))).toEqual(ids.map((id) => ({ id, code: 0, err: "", out: all.replace("[]", JSON.stringify([id])) })));
+}, 60000);

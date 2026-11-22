@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cliFixture, put, expectCode, mcpWrapper } from "./helpers";
-import { executableSettings, mcpJsonServers } from "../src/trust";
+import { executableSettings } from "../src/trust";
+import { mcpJsonServers } from "../adapters/claude/trust";
 import { backup, newBackupRun, runDir } from "../src/backup";
 import { loadManifest } from "../src/manifest";
 import { aclProblem } from "../src/secretfiles";

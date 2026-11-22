@@ -12,6 +12,7 @@ import { teamCollection } from "../../src/git";
 import { shimPath, shimState } from "../../src/shim";
 import { splitInstructions } from "../../src/instructions";
 import { adoptCodexTable } from "./adopt";
+import { codexTrust } from "./trust";
 
 export const HEADER = (layers: string[]) =>
   `<!-- Сгенерировано miksy (слои: ${layers.join(" → ")}). Не править вручную — изменения вносить в конфигурацию miksy (слои). -->`;
@@ -38,6 +39,12 @@ export const codex: Adapter = {
   envVars: [{ name: "CODEX_HOME", title: "Codex", std: (h) => join(h, ".codex"), replace: true }],
   homeSkillsDir: ".agents/skills",
   teamImport: true,
+  trust: codexTrust,
+  teamScan: {
+    roots: [".agents", ".codex"],
+    priority: { ".agents/skills": 0 },
+    nonstandard: [{ id: ".agents/<имя>", rx: /^\.agents\/(?!skills\/)[^/]+$/ }, { id: ".codex/skills", rx: /^\.codex\/skills\/[^/]+$/ }],
+  },
   collections: [".agents/skills", ".codex/skills"],
   // Командная коллекция в .agents/skills — skills проекта в .codex/skills (render ниже)
   skillsFallback: { from: ".agents/skills", to: ".codex/skills" },

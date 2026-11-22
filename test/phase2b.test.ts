@@ -9,7 +9,8 @@ import { cliFixture, put, expectCode } from "./helpers";
 import { instructionBlock } from "../src/instructions";
 import { KEEP_RUNS, newBackupRun, backup } from "../src/backup";
 import { TOML_END } from "../src/toml";
-import { codexProjectKey, trustPlan } from "../src/trust";
+import { trustPlan } from "../src/trust";
+import { codexProjectKey } from "../adapters/codex/trust";
 import { claude } from "../adapters/claude";
 
 function blockFixture(text = "") {

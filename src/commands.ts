@@ -7,7 +7,7 @@ import { shimNotes } from "./shim";
 import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
-import { AGENT_NOTE, AGENT_TITLE, askTrust, dialogOwn, dialogPrint, ownApprovals, executableSettings, mcpJsonServers, ownFiles, type PendingTrust, pendingText, renewDecision, saveDecision, type TrustAgent, trustedByMiksy, trustMark, trustState, folderId, isReplaced } from "./trust";
+import { agentNote, decisionTitle, dialogTitle, askTrust, dialogOwn, dialogPrint, ownApprovals, executableSettings, ownFiles, type PendingTrust, pendingText, renewDecision, saveDecision, type TrustAgent, trustedByMiksy, trustMark, trustState, folderId, isReplaced } from "./trust";
 import { backup, backupRel, KEEP_RUNS, runDir } from "./backup";
 import { parseArgs, UsageError } from "./args";
 import { adoptMcp, adoptSkill, elsewhereText, fromNative, layerDir, mcpYaml } from "./adopt";
@@ -356,7 +356,7 @@ function runTarget(
     // clean без действий (например, забытый проект, где файлов miksy уже нет): отметка «доверие ставил miksy» — до
     // снятия отметки «проект забыт» (рецензия 0.2.1 A, п. 6)
     let dirty = false;
-    if (cmd === "clean" && forget === undefined && !("dry-run" in flags) && adapter.id === "claude" && t.target.scope === "project" && trustedByMiksy(whole, mark))
+    if (cmd === "clean" && forget === undefined && !("dry-run" in flags) && remembersTrust(adapter) && t.target.scope === "project" && trustedByMiksy(whole, mark))
       dirty = rememberTrust(manifest, id, t.target.dir);
     // clean недоступной папки: доверие — отметкой с отпечатком последнего sync (без него — один вопрос), не everTrusted
     if (cmd === "clean" && forget === false && !("dry-run" in flags) && st && (st.everTrusted || st.dialog)) {
@@ -370,8 +370,8 @@ function runTarget(
     // Доверие ставил miksy — и по записи доверия без everTrusted (учёт 0.1.x/0.2.0; рецензия 7c A, п. 2)
     // И отпечаток папки (круг 10l). Подменённой — только если доверие miksy после этого запуска стоит (план его не снял:
     // ваше «да» этой папке или исполняемых настроек и ответов в окне Claude в ней нет); иначе её ответы не ваши
-    if (cmd === "sync" && st && reached && !("dry-run" in flags) && adapter.id === "claude" && trustedByMiksy(st) && (!isReplaced(whole) || Object.keys(st.trust ?? {}).length > 0)) {
-      const print = dialogPrint(t.target.dir, ownApprovals(st, t.target.dir));
+    if (cmd === "sync" && st && reached && !("dry-run" in flags) && remembersTrust(adapter) && trustedByMiksy(st) && (!isReplaced(whole) || Object.keys(st.trust ?? {}).length > 0)) {
+      const print = dialogPrint(adapter.id, t.target.dir, ownApprovals(st, t.target.dir));
       if (st.dialog !== print) { st.dialog = print; dirty = true; }
       const folder = folderId(t.target.dir);
       if (folder && st.folder !== folder) { st.folder = folder; dirty = true; }
@@ -451,10 +451,10 @@ function runTarget(
     delete state.everTrusted;
     delete state.dialog;
     delete state.folder;
-  } else if (adapter.id === "claude" && t.target.scope === "project" && (trustedByMiksy(prev, mark) || Object.keys(state.trust ?? {}).length > 0)) {
+  } else if (remembersTrust(adapter) && t.target.scope === "project" && (trustedByMiksy(prev, mark) || Object.keys(state.trust ?? {}).length > 0)) {
     state.everTrusted = true;
     if (reached) {
-      state.dialog = dialogPrint(t.target.dir, ownApprovals(state, t.target.dir));
+      state.dialog = dialogPrint(adapter.id, t.target.dir, ownApprovals(state, t.target.dir)) ?? undefined;
       const folder = folderId(t.target.dir);
       if (folder) state.folder = folder;
     }
@@ -463,7 +463,7 @@ function runTarget(
   if (hasRecords(state) || (cmd === "sync" && conflicts) || (cmd === "clean" && conflicts && state.group))
     manifest.targets[id] = state;
   else delete manifest.targets[id];
-  if (cmd === "clean" && forget === undefined && adapter.id === "claude" && t.target.scope === "project" && trustedByMiksy(whole, mark))
+  if (cmd === "clean" && forget === undefined && remembersTrust(adapter) && t.target.scope === "project" && trustedByMiksy(whole, mark))
     rememberTrust(manifest, id, t.target.dir);
   else if (cmd === "sync" && manifest.targets[id]?.everTrusted) dropTrustedBefore(manifest, id);
   if (forget) markForgotten(manifest, id, adapter, whole, parts!.far);
@@ -476,7 +476,7 @@ function runTarget(
 // с отпечатком, снятым последним sync (TargetState.dialog). Отпечатка нет (учёт прежней версии) — отметки нет: на
 // следующем sync ответы в окне Claude — в вопросе, один раз (проверка 7b, A №1)
 function strandTrust(manifest: Manifest, id: string, adapter: Adapter, t: TargetSpec, whole: TargetState, mark?: ForgottenMark) {
-  if (adapter.id !== "claude" || t.target.scope !== "project" || !trustedByMiksy(whole, mark)) return;
+  if (!remembersTrust(adapter) || t.target.scope !== "project" || !trustedByMiksy(whole, mark)) return;
   if (whole.dialog) (manifest.trustedBefore ??= {})[id] = whole.dialog;
   if (whole.dialog && whole.folder) (manifest.trustedFolder ??= {})[id] = whole.folder;
 }
@@ -537,11 +537,16 @@ function setOwnMcp(st: TargetState, v: Record<string, string[]> | undefined) {
   if (v && Object.keys(v).length) st.ownMcp = v;
   else delete st.ownMcp;
 }
+// Файлы доверия агентов (адаптер: trust — файл доверия в доме, свой файл проекта, файл одобрений)
+const trustFiles = () => Object.values(ADAPTERS).flatMap((a) => (a.trust ? [a.trust.file, a.trust.projectFile, a.trust.approvals?.file].filter((f): f is string => !!f) : []));
+// Агент помнит, что доверие ставил miksy: у его доверия есть ответы пользователя в окне агента (адаптер: trust.dialog — Claude)
+const remembersTrust = (adapter: Adapter) => !!adapter.trust?.dialog;
+
 // Отметка «доверие ставил miksy» после clean: отпечаток ответов в окне Claude, оставшихся после уборки miksy (его
 // одобрений там уже нет). true — учёт изменился
 // И отпечаток папки (круг 10l): подменят после clean — отметка не действует
 function rememberTrust(manifest: Manifest, id: string, dir: string): boolean {
-  const print = dialogPrint(dir, ownApprovals(manifest.targets[id], dir));
+  const print = dialogPrint(id.slice(0, id.indexOf("|")), dir, ownApprovals(manifest.targets[id], dir));
   const folder = folderId(dir);
   if (manifest.trustedBefore?.[id] === print && manifest.trustedFolder?.[id] === folder) return false;
   (manifest.trustedBefore ??= {})[id] = print;
@@ -561,7 +566,7 @@ function dropTrustedBefore(manifest: Manifest, id: string) {
 // пользователя в окне Claude — его, trust.ts: dialogOwn) — если на недоступном диске было что забывать
 function markForgotten(manifest: Manifest, id: string, adapter: Adapter, whole: TargetState, far: TargetState) {
   if (!hasRecords(far)) return;
-  (manifest.forgotten ??= {})[id] = adapter.id === "claude" && trustedByMiksy(whole) ? { trusted: true, ...(whole.folder && { folder: whole.folder }) } : {};
+  (manifest.forgotten ??= {})[id] = remembersTrust(adapter) && trustedByMiksy(whole) ? { trusted: true, ...(whole.folder && { folder: whole.folder }) } : {};
 }
 
 // Цели clean, чей каталог недоступен (src/registry.ts: stranded), сколько записанного miksy лежит внутри и у скольких
@@ -679,22 +684,22 @@ function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest:
     : r.result.trust?.[agent]?.item === false ? `в слое ${r.result.trust[agent]!.layer} (его layer.yaml)` : null;
   const ban = where && answer === "yes" ? `запрет trust: { ${agent}: false } ${where}; решение записано — доверие поставит следующий miksy sync после снятия запрета` : null;
   const planned = plan(r.result, t.target, machine, prev, false, adapter.id, otherOwners(manifest, id), trustMark(manifest, id));
-  const actions = planned.filter((a) => a.kind === "trust" || a.kind === "approve" || (a.kind === "conflict" && /\/(\.codex\/config\.toml|\.claude\.json|\.claude\/settings\.local\.json)$/.test(a.abs)));
+  const actions = planned.filter((a) => a.kind === "trust" || a.kind === "approve" || (a.kind === "conflict" && trustFiles().some((f) => a.abs.endsWith(`/${f}`))));
   // Файл одобрений скрыт от git вместе с одобрением — до его создания (Г10)
   const ex = t.target.scope === "project" ? approvalExclude(planned, t.target.dir) : null;
   if (ex) actions.push(ex);
   if (!actions.length) {
-    console.log(`  ${AGENT_TITLE[agent]} ${t.title}: доверие не меняется${ban ? ` — ${ban}` : ""}`);
+    console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не меняется${ban ? ` — ${ban}` : ""}`);
     return 0;
   }
   console.log(actions.map(describe).join("\n"));
-  if (ban) console.log(`  ${AGENT_TITLE[agent]} ${t.title}: доверие не ставится — ${ban}`);
+  if (ban) console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не ставится — ${ban}`);
   try {
     const { state } = apply(actions, prev);
     // Доверие ставил miksy (сейчас, раньше или до «забыть») — помнится и после отказа (trust --deny)
-    if (adapter.id === "claude" && t.target.scope === "project" && (trustedByMiksy(prev, trustMark(manifest, id)) || Object.keys(state.trust ?? {}).length > 0)) state.everTrusted = true;
+    if (remembersTrust(adapter) && t.target.scope === "project" && (trustedByMiksy(prev, trustMark(manifest, id)) || Object.keys(state.trust ?? {}).length > 0)) state.everTrusted = true;
     // «Да» и доверие поставлено — эта папка теперь своя: отпечаток нынешней (в том числе после подмены; круг 10l)
-    if (adapter.id === "claude" && t.target.scope === "project" && answer === "yes" && Object.keys(state.trust ?? {}).length > 0) {
+    if (remembersTrust(adapter) && t.target.scope === "project" && answer === "yes" && Object.keys(state.trust ?? {}).length > 0) {
       const folder = folderId(t.target.dir);
       if (folder) state.folder = folder;
     }
@@ -1130,9 +1135,9 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // не снимает); без терминала и в --dry-run — список и указание агенту спросить пользователя
       if (pendingTrust.size) {
         const list = [...pendingTrust.values()];
-        console.log(`\nНужно решение пользователя о доверии (${list.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне Claude, чужие файлы); без решения miksy доверие не ставит:`);
+        console.log(`\nНужно решение пользователя о доверии (${list.length}) — у проектов исполняемые настройки агента, которые ставил не miksy (команда проекта, ответы в окне ${dialogTitle()}, чужие файлы); без решения miksy доверие не ставит:`);
         if (!("dry-run" in flags) && ask) conflicts += decideTrust(list, machine, manifest);
-        else console.log(`${pendingText(list.map((x) => x.p)).join("\n")}\n${AGENT_NOTE}`);
+        else console.log(`${pendingText(list.map((x) => x.p)).join("\n")}\n${agentNote()}`);
       }
 
       // План root remove --forget --dry-run по проектам (regainRoot): итог печатает он сам
@@ -1250,7 +1255,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       saveMoves(manifest, moves);
       const secrets = loadSecrets();
       const list: { p: PendingTrust; adapter: Adapter; t: TargetSpec }[] = [];
-      for (const adapter of agentsFor(machine, flags.agent).filter((a) => a.id === "claude" || a.id === "codex"))
+      for (const adapter of agentsFor(machine, flags.agent).filter((a) => a.trust))
         for (const t of targets) {
           if (t.target.scope !== "project") continue;
           const id = targetId(adapter, t.target);
@@ -1260,10 +1265,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           let p = r.result.trustPending;
           // Названный проект — решение можно пересмотреть, даже если оно уже есть
           if (!p && positional[0]) {
-            const dialog = adapter.id === "claude" && dialogOwn(prev, t.target.dir, r.result.trust?.claude?.item === true, trustMark(manifest, id));
+            const dialog = remembersTrust(adapter) && dialogOwn(prev, t.target.dir, r.result.trust?.[adapter.id]?.item === true, trustMark(manifest, id));
             // Свои файлы — те же, что у sync в этом состоянии (с узнанными планом после «забыть»)
             const exec = executableSettings(t.target.dir, !!t.target.git, adapter.id as TrustAgent, { ...(r.result.trustOwn ?? ownFiles(prev, t.target.dir)), dialog });
-            const mcp = adapter.id === "claude" ? mcpJsonServers(t.target.dir, !!t.target.git) : null;
+            const mcp = adapter.trust?.approvals ? adapter.trust.approvals.servers(t.target.dir, !!t.target.git) : null;
             if (exec) p = { dir: t.target.dir, rel: t.target.rel, agent: adapter.id as TrustAgent, ...exec, ...(mcp && { mcp: { fingerprint: mcp.fingerprint } }) };
           }
           if (p && (!p.declined || positional[0])) list.push({ p, adapter, t });
