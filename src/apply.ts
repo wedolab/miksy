@@ -13,7 +13,7 @@ import { canonicalState, emptyState, type ForgottenMark, pruneState, rememberPat
 import type { Machine } from "./types";
 import { configRoot } from "./load";
 import { ensurePrivateLocal } from "./secretfiles";
-import { aliasesOf } from "./agentid";
+import { agentId, aliasesOf } from "./agentid";
 import { allMiksyLines, blocksOf, coveredBy, type ExcludeBlock, lineAlive, removeBlock, setBlock } from "./excludeblocks";
 import { ensureMachineId, machineId, machineUnknown, noteSkipped } from "./machineid";
 import { definitionHash, mcpTables, ownedTomlParts, parseToml, replaceOwnedMcp, splitToml } from "./toml";
@@ -120,12 +120,35 @@ export function excludeLines(paths: string[], open: string[] = []): string[] {
 // Файл MCP в папке проекта, который miksy пишет переносимо («miksy mcp …», круг 10u), а на диске — с путями обёрток
 // или файлов секретов: его переписала машина со старой версией miksy (одна папка на двух машинах) — подсказка к конфликту
 function olderMiksy(f: RenderedFile, path: string): string {
+  return olderCause(f, path)
+    ? "; похоже, его переписала другая машина со старой версией miksy (в файле — пути её обёрток): обновите miksy там (miksy update), а здесь --force вернёт запись без путей машины"
+    : "";
+}
+function olderCause(f: RenderedFile, path: string): string {
   if (f.mode !== "own" || !f.mcp || f.base !== "project" || !/"mcp",\s*"/.test(f.content)) return "";
   let text = "";
   try { text = readFileSync(path, "utf8"); } catch { return ""; }
-  return /local[\\/]+run[\\/]+|\{file:/.test(text)
-    ? "; похоже, его переписала другая машина со старой версией miksy (в файле — пути её обёрток): обновите miksy там (miksy update), а здесь --force вернёт запись без путей машины"
-    : "";
+  return /local[\\/]+run[\\/]+|\{file:/.test(text) ? "на ней старая версия miksy (в файле — пути её обёрток)" : "";
+}
+
+// MCP-файл другой машины: какие серверы есть только там и только здесь — слои различаются (круг 11d)
+function mcpDiff(f: RenderedFile, path: string, content: string): string {
+  if (f.mode !== "own" || !f.mcp) return "";
+  const names = (text: string): string[] | null => {
+    try {
+      const doc = f.mcp!.format === "json" ? JSON.parse(text) : parseToml(text);
+      const v = doc?.[f.mcp!.key];
+      return v && typeof v === "object" ? Object.keys(v) : [];
+    } catch { return null; }
+  };
+  let disk: string[] | null = null;
+  try { disk = names(readFileSync(path, "utf8")); } catch { /* не читается */ }
+  const here = names(content);
+  if (!disk || !here) return "";
+  const onlyThere = disk.filter((n) => !here.includes(n));
+  const onlyHere = here.filter((n) => !disk!.includes(n));
+  if (!onlyThere.length && !onlyHere.length) return "";
+  return `разные MCP-серверы (${[onlyThere.length ? `только там: ${onlyThere.join(", ")}` : "", onlyHere.length ? `только здесь: ${onlyHere.join(", ")}` : ""].filter(Boolean).join("; ")}): слои конфигурации разные или устарели`;
 }
 
 // Адаптер перенёс skills проекта в запасной каталог (командная коллекция в основном): файлы основного --force не
@@ -299,6 +322,26 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
   // Файл проекта под строкой блока другой машины (по логическому пути и по физическому)
   const otherMachine = (rel: string, path: string) => target.scope === "project" && !!foreign.length
     && (coveredBy(foreign, rel) || (inside(pathKey(path), target.dir) && coveredBy(foreign, relOf(pathKey(path)))));
+  // Конфликт файла под строкой блока другой машины (общая папка, круг 11d): его переписала она — причина, где её видно,
+  // и что сделать, вместо «изменён вручную» / «нет в учёте»; null — файл не другой машины
+  const rewrittenBy = (f: RenderedFile, path: string, content: string): string | null => {
+    if (!otherMachine(f.path, path)) return null;
+    const rel = f.path;
+    const owners = [...new Set(foreignBlocks.filter((b) => coveredBy(b.lines, rel) || coveredBy(b.lines, relOf(pathKey(path)))).map((b) => b.owner.split("@")[0]))];
+    const mine = blockOwner.split("@")[0];
+    const causes = [
+      olderCause(f, path),
+      owners.length && !owners.some((o) => agentId(o) === agentId(mine))
+        ? `там этот файл пишет другой агент (${owners.join(", ")}) — у машин разные agents в local/machine.yaml` : "",
+      mcpDiff(f, path, content),
+    ].filter(Boolean);
+    // Файл покрыт строками обеих машин — без видимой причины это может быть и ручная правка: текст мягче
+    return (causes.length
+      ? `файл переписала другая машина (общая папка): конфигурации различаются — ${causes.join("; ")}. Приведите их к одной`
+      : "файл изменён после последнего sync — вероятно, вручную или другой машиной (общая папка): правку вручную перенесите в слои, а конфигурации машин приведите к одной")
+      + ": одна версия miksy (miksy update на обеих), те же слои (git pull в каталоге конфигурации на обеих) и та же ветка корня (tree в local/machine.yaml), затем miksy sync на обеих. "
+      + "--force здесь перезапишет файл версией этой машины (бэкап будет), но та машина при своём sync перепишет его снова";
+  };
   // Учёт ничего не помнит о файлах цели в проекте (учёт забыт — clean --forget, диск вернулся; или цель новая):
   // только тогда строка блока exclude — улика для файла без метки (miksyMade)
   const fresh = target.scope === "project" && !Object.keys(prev.files).some((p) => inside(p, target.dir)) && !Object.keys(prev.blocks ?? {}).length;
@@ -357,10 +400,10 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         const text = exists ? readFileSync(path, "utf8") : "";
         const old = prev.blocks?.[pathKey(path)];
         const parts = splitInstructions(text, old);
-        if (recorded && exists && onDisk !== recorded && !force) throw new Error("инструкции: файл изменён вручную после последнего sync — миграция в блок остановлена");
+        if (recorded && exists && onDisk !== recorded && !force) throw new Error(`инструкции: ${rewrittenBy(f, path, "") ?? "файл изменён вручную после последнего sync — миграция в блок остановлена"}`);
         // Файла нет (удалён) — пишется заново, как own-файл; блок пропал из существующего файла или изменён — конфликт
         if (old && exists && !parts.block && !force) throw new Error("инструкции: управляемый блок удалён из файла вручную (--force вернёт блок)");
-        if (old && parts.block && blockHash(parts.block) !== old && !force) throw new Error("инструкции: управляемый блок изменён вручную (--force перезапишет только блок)");
+        if (old && parts.block && blockHash(parts.block) !== old && !force) throw new Error(`инструкции: ${rewrittenBy(f, path, "") ?? "управляемый блок изменён вручную (--force перезапишет только блок)"}`);
         // Прежний own-файл совпал с учётом: его содержимое теперь принадлежит блоку.
         // При --force пользователь явно разрешил замену прежнего own-файла; оригинал сохраняем.
         const before = recorded ? "" : parts.before;
@@ -373,7 +416,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         // сейчас, — берётся обратно сам, без оригинала; другой — конфликт, --force перезапишет только блок
         const known = !!parts.block && !old && !recorded && f.base === "project" && target.scope === "project";
         if (parts.block && !old && !recorded && !force && !(known && blockHash(parts.block) === sha(lf)))
-          throw new Error(known ? "инструкции: блок miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас (--force перезапишет только блок, бэкап будет)" : "инструкции: блок создан не miksy (--force возьмёт под учёт)");
+          throw new Error(known ? `инструкции: ${rewrittenBy(f, path, "") ?? "блок miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас (--force перезапишет только блок, бэкап будет)"}` : "инструкции: блок создан не miksy (--force возьмёт под учёт)");
         if (content !== text || old !== sha(lf)) actions.push({ kind: "block", abs: path, content, hash: sha(lf), beforeHash: sha(text), roots,
           ...(known && { known: true }),
           ...(recorded && onDisk !== recorded && { restoreBlock: true }),
@@ -430,9 +473,9 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     }
     else if (recorded === UNKNOWN_HASH && !force) actions.push({ kind: "conflict", abs: path, why: UNKNOWN_WHY });
     else if (!recorded && !force) actions.push({ kind: "conflict", abs: path, ...(known && { known: true }), why: known
-      ? `файл miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас${olderMiksy(f, path)} (--force перезапишет, бэкап будет)`
+      ? rewrittenBy(f, path, content) ?? `файл miksy, которого нет в учёте, отличается от того, что miksy записал бы сейчас${olderMiksy(f, path)} (--force перезапишет, бэкап будет)`
       : "файл существует и создан не miksy (--force перезапишет, бэкап будет)" });
-    else if (recorded && onDisk !== recorded && !force) actions.push({ kind: "conflict", abs: path, why: `изменён вручную после последнего sync${olderMiksy(f, path)} (--force перезапишет, бэкап будет)` });
+    else if (recorded && onDisk !== recorded && !force) actions.push({ kind: "conflict", abs: path, why: rewrittenBy(f, path, content) ?? `изменён вручную после последнего sync${olderMiksy(f, path)} (--force перезапишет, бэкап будет)` });
     else actions.push({ kind: "write", abs: path, content, why: "обновление", ...x });
   }
   for (const [path, recorded] of Object.entries(prev.files)) {
