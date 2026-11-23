@@ -47,6 +47,8 @@ export const COMMANDS: Record<string, Spec> = {
     },
   },
   doctor: { valued: ["agent"], bool: ["verbose"], positional: [0, 0] },
+  // secret <ИМЯ> — значение в трубу; --show — человеку в терминал
+  secret: { bool: ["show"], positional: [1, 1] },
   target: { bool: ["remove", "dry-run"], positional: [0, 1] },
   // root — список корней; root add [<путь>] [--tree <ветка>]; root remove <путь>
   root: {

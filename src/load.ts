@@ -380,10 +380,11 @@ export function allLayerMcp(root = configRoot()): McpServer[] {
 export function loadLayerDir(dir: string, name: string): Layer {
   const metaPath = join(dir, "layer.yaml");
   const meta = existsSync(metaPath)
-    ? yaml<{ description?: string; exclude?: string[]; import_skills?: unknown; trust?: unknown; target?: unknown }>(metaPath) ?? {}
+    ? yaml<{ description?: string; exclude?: string[]; import_skills?: unknown; trust?: unknown; target?: unknown; skill_secrets?: unknown }>(metaPath) ?? {}
     : {};
   checkTrust(meta.trust, `${name}/layer.yaml`);
   checkTarget(meta.target, `${name}/layer.yaml`);
+  const skillSecrets = checkSkillSecrets(meta.skill_secrets, `${name}/layer.yaml`);
   const imp = meta.import_skills;
   if (imp !== undefined && imp !== "auto" && imp !== "all" && imp !== false && !(Array.isArray(imp) && imp.every((x) => typeof x === "string")))
     throw new Error(`${name}/layer.yaml: import_skills — auto, all, false или список имён`);
@@ -409,14 +410,14 @@ export function loadLayerDir(dir: string, name: string): Layer {
     });
 
   return { name, dir, description: meta.description, exclude: meta.exclude ?? [], importSkills: imp as Layer["importSkills"],
-    ...(meta.trust !== undefined && { trust: meta.trust as Layer["trust"] }), ...(meta.target === true && { target: true }), instructions, skills, mcp };
+    ...(meta.trust !== undefined && { trust: meta.trust as Layer["trust"] }), ...(meta.target === true && { target: true }), ...(skillSecrets.length && { skillSecrets }), instructions, skills, mcp };
 }
 
 // Ключи, которые miksy читает: остальные — опечатка или ключ более новой версии (sync и doctor
 // предупреждают; значения не проверяются здесь — это делают loadMap и loadLayerDir)
 const MAP_KEYS = ["global", "layers", "skill_prefix", "tools"];
 const MAP_ENTRY_KEYS = ["use", "match", "os"];
-const LAYER_KEYS = ["description", "exclude", "import_skills", "trust", "target"];
+const LAYER_KEYS = ["description", "exclude", "import_skills", "trust", "target", "skill_secrets"];
 
 // Неизвестные ключи map.yaml (и его привязок) и всех layer.yaml в layers/: «файл: ключ». Файл, который не
 // разбирается, пропускается — об ошибке скажет загрузка
@@ -468,6 +469,35 @@ export function legacyAgentNames(root = configRoot()): string[] {
           for (const k of Object.keys(s.agents)) if (agentId(k) !== k) out.push(`${slash(relative(root, join(dir, e.name, f)))}: agents.${k} → agents.${agentId(k)}`);
       }
     }
+  };
+  walk(join(root, "layers"));
+  return out;
+}
+
+// skill_secrets в layer.yaml: имена секретов из local/secrets.env, которые skills этого места получают через
+// miksy secret (круг 11k) — список имён переменных
+export function checkSkillSecrets(v: unknown, where: string): string[] {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v) || !v.every((x) => typeof x === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(x)))
+    throw new Error(`${where}: skill_secrets — список имён секретов из local/secrets.env, например [ACME_TOKEN]`);
+  return [...new Set(v as string[])];
+}
+
+// Все объявления skill_secrets в слоях конфигурации: файл layer.yaml (от конфигурации) и имя — для doctor (объявлен, а
+// значения в local/secrets.env нет). Ошибки разбора здесь не важны — их покажет загрузка слоя
+export function declaredSkillSecrets(root = configRoot()): { file: string; name: string }[] {
+  const out: { file: string; name: string }[] = [];
+  const walk = (dir: string) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    const meta = join(dir, "layer.yaml");
+    if (existsSync(meta)) {
+      try {
+        const doc = yaml<{ skill_secrets?: unknown }>(meta);
+        for (const name of checkSkillSecrets(doc?.skill_secrets, meta)) out.push({ file: slash(relative(root, meta)), name });
+      } catch { /* покажет загрузка слоя */ }
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) if (e.isDirectory() && !LAYER_PARTS.has(e.name)) walk(join(dir, e.name));
   };
   walk(join(root, "layers"));
   return out;

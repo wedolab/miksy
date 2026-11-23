@@ -36,6 +36,7 @@ export function merge(layers: Layer[], os: Os): Resolved {
   const notes: string[] = [];
   let importSkills: Resolved["importSkills"];
   const skillExcludes: string[] = [];
+  const skillSecrets = new Map<string, string>();
 
   const trust: NonNullable<Resolved["trust"]> = {};
 
@@ -55,6 +56,7 @@ export function merge(layers: Layer[], os: Os): Resolved {
     }
 
     for (const i of layer.instructions) instructions.push({ item: i, layer: layer.name });
+    for (const n of layer.skillSecrets ?? []) if (!skillSecrets.has(n)) skillSecrets.set(n, layer.name);
 
     for (const s of layer.skills) {
       const prev = skills.get(s.name);
@@ -98,6 +100,7 @@ export function merge(layers: Layer[], os: Os): Resolved {
     ...(importSkills && { importSkills }),
     ...(Object.keys(trust).length && { trust }),
     ...(skillExcludes.length && { skillExcludes }),
+    ...(skillSecrets.size && { skillSecrets: [...skillSecrets].map(([item, layer]) => ({ item, layer })) }),
     notes,
   };
 }

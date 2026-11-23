@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, declaredSkillSecrets, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -81,6 +81,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const permissions: Finding[] = [];
   const exposed: Finding[] = []; // секреты в файлах каталогов без git
   const skillLinks: Finding[] = [];
+  // Секреты для skills (skill_secrets), которых нет в local/secrets.env: miksy secret их не выдаст (круг 11k)
+  const secretsNow = loadSecrets();
+  const skillSecretsMissing: Finding[] = declaredSkillSecrets().filter((d) => !(d.name in secretsNow)).map((d) => ({ agent: "—", target: d.file, detail: `skill_secrets: ${d.name} — нет в local/secrets.env` }));
   // Копии файлов-секретов skills по целям (круг 11i-2): «<skill>/<файл>» → места (агент, цель, путь)
   const secretCopies = new Map<string, Set<string>>();
   const undeliverable: Finding[] = []; // секрет есть, но доставить его нельзя (многострочный, символы)
@@ -366,6 +369,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Значения секретов в конфигах агентов", "miksy sync заменит серверы на обёртки (записанные keep-ом остаются, пока секрет не задан)", values);
   section("Значение секрета в ключе вне учёта", "sync оставляет такой ключ как есть (конфликт) — возьмите его под учёт", literals);
   section("Файлы секретов", "local/secrets/<ИМЯ>: нужны записанным конфигам", secretProblems);
+  section("Секреты для skills не заданы", `miksy secret их не выдаст; впишите ИМЯ=значение в ${slash(join(configRoot(), "local", "secrets.env"))}`, skillSecretsMissing);
   section("Файлы skills не доставлены", "ссылка ведёт за пределы слоёв конфигурации или никуда; положите в skill сам файл или уберите ссылку", skillLinks);
   section("Секрет нельзя доставить", "сервер пропущен; исправьте значение в local/secrets.env или определение в слое", undeliverable);
   section("Пустые значения секретов", "сервер получит пустое значение; задайте его в local/secrets.env", emptySecrets);
@@ -385,7 +389,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Выключен сервер, которого нет в слоях", "опечатка в имени или сервер убран из слоёв", strayOff);
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + nakedSkills.length + missing.size
-    + values.length + secretProblems.length + undeliverable.length + skillLinks.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
+    + values.length + secretProblems.length + undeliverable.length + skillLinks.length + skillSecretsMissing.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
     + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
   // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)

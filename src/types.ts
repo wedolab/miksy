@@ -53,6 +53,7 @@ export interface Layer {
   importSkills?: ImportSkills;
   trust?: TrustSetting; // доверие проектов слоя: false — miksy не ставит (и снимает своё)
   target?: boolean; // слой дерева: его каталог workspace — цель-группа (target: true в layer.yaml)
+  skillSecrets?: string[]; // секреты, которые skills этого места могут получить через miksy secret (skill_secrets; круг 11k)
   instructions: Instruction[];
   skills: Skill[];
   mcp: McpServer[];
@@ -105,6 +106,8 @@ export interface Resolved {
   instructions: Sourced<Instruction>[];
   skills: Sourced<Skill>[];
   mcp: Sourced<McpServer>[];
+  // Секреты для skills места (skill_secrets слоёв, объединение; слой — первый, где объявлен; круг 11k)
+  skillSecrets?: Sourced<string>[];
   // Серверы только для других ОС (os: в слое) и порядок всех серверов по слоям: переносимая цель пишет их в файл
   // проекта (на этой ОС — пустой сервер), чтобы файл на машинах с разными ОС был одинаковым (круг 11b)
   elsewhere?: Sourced<McpServer>[];

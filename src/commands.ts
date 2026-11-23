@@ -27,6 +27,7 @@ import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners,
 import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
 import { merge, selectGlobal } from "./resolve";
 import { builtinCopies, builtinCopyText, builtinHash } from "./builtin";
+import { placeSkillSecrets, secretValue } from "./secretcmd";
 import { clashText, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, suggestTree, treeClashes, treeOf } from "./roots";
 import { type RootItem, rootItems, rewriteRoots } from "./rootfile";
 import { rewriteList } from "./machinefile";
@@ -100,6 +101,10 @@ export const USAGE = `miksy — раскладывает ваши правила
                                miksy root remove <путь> — убрать (--forget — как у clean);
                                miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
+  miksy secret <ИМЯ>           для skills: значение секрета из local/secrets.env — в трубу
+                               (miksy secret ИМЯ | <команда>), без перевода строки. Только
+                               секреты, объявленные для места текущей папки: skill_secrets в
+                               layer.yaml слоя. В терминал — только с --show
 
 MCP-серверы на этой машине
   miksy mcp off <имя>          сервер из слоёв на этой машине не нужен (например, его секрета
@@ -874,6 +879,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
     }
   }
   switch (cmd) {
+    case "secret": {
+      // Значение — в stdout без перевода строки и больше ничего (труба); ошибка — исключение без значения (stderr, код 1)
+      const name = positional[0];
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError(`имя секрета — буквы, цифры и «_», как в local/secrets.env: miksy secret <ИМЯ>`);
+      process.stdout.write(secretValue(name, process.cwd(), loadMachine(), !!process.stdout.isTTY, "show" in flags));
+      break;
+    }
+
     case "explain": {
       const machine = loadMachine();
       const roots = machineRoots(machine);
@@ -928,7 +941,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       }
       title.unshift(["Конфигурация", configRoot().replaceAll("\\", "/")]);
       title.unshift(["Движок miksy", ENGINE.replaceAll("\\", "/")]);
-      console.log(formatResolved(title, cfg, machine, loadSecrets()));
+      const known = loadSecrets();
+      console.log(formatResolved(title, cfg, machine, known));
+      // Секреты, которые skills этого места получают через miksy secret (круг 11k): имена и слой, без значений
+      const forSkills = abs ? placeSkillSecrets(abs, machine).names : cfg.skillSecrets ?? [];
+      if (forSkills.length) {
+        console.log("\nСекреты для skills (miksy secret; значения — в local/secrets.env)");
+        for (const s of forSkills) console.log(`  ${s.item.padEnd(24)}${s.layer}${s.item in known ? "" : "   НЕТ в local/secrets.env"}`);
+      }
       if (place) console.log("\n(+ глобальные слои — см. `miksy explain --global`)");
       break;
     }
