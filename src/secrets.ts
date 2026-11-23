@@ -1,6 +1,7 @@
 // Поиск секретов в определениях MCP: значения env/headers, аргументы командной строки, URL
 // (user:pass@, ?token=), строки подключения БД, raw агента. Общий для adopt (вынести в
 // local/secrets.env), compare (маскировать) и проверки слоёв (секреты открытым текстом).
+import { readFileSync, statSync } from "node:fs";
 
 // Имя ключа/флага, по которому значение — секрет целиком
 export const SECRET_KEY = /(token|secret|password|passwd|pwd|credential|authorization|api[_-]?key|apikey|auth)/i;
@@ -119,3 +120,45 @@ export function envLine(name: string, value: string): string {
   const esc = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r");
   return `${name}="${esc}"`;
 }
+
+// Файлы, которые в слой (и в git конфигурации) не переносятся: похожие на секреты — по имени, без учёта регистра.
+// Окружение и ключи (.env*, .envrc direnv, *.pem, *.key, PKCS#12, Java keystore, SSH-ключи без .pub), учётные данные программ
+// (.npmrc, .pypirc, .netrc, .pgpass, .git-credentials, .htpasswd), JSON с учётными данными (credentials*.json,
+// client_secret*.json, service-account*.json), хранилища паролей (*.kdbx), secrets.env самого miksy.
+// Образцы .env (.example, .sample, .template, .dist) — переносятся: в них нет значений
+const SECRET_FILE = new RegExp(
+  "^(\\.env(\\..+)?|.+\\.(pem|key|p12|pfx|jks|keystore|kdbx)|id_(rsa|dsa|ecdsa|ed25519)(_sk)?(\\..+)?|" +
+  "[._]netrc|\\.envrc|\\.npmrc|\\.pypirc|\\.pgpass|\\.git-credentials|\\.htpasswd|secrets\\.env|" +
+  "(credentials|client_secret|service[-_]account)[^/]*\\.json)$", "i");
+const SECRET_SAMPLE = /^\.env\.(example|sample|template|dist)$|\.pub$/i;
+// Служебное: файлы ОС и каталоги программ — skill они не нужны
+const JUNK_FILE = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+const JUNK_DIR = /^(\.git|node_modules|__pycache__)$/i;
+
+export function skillFileKind(name: string, dir: boolean): "secret" | "junk" | null {
+  if (dir) return JUNK_DIR.test(name) ? "junk" : null;
+  if (JUNK_FILE.test(name)) return "junk";
+  return SECRET_FILE.test(name) && !SECRET_SAMPLE.test(name) ? "secret" : null;
+}
+
+// Секреты открытым текстом в файле skill: строки с распознанными частями (URL с паролем, ?token=, Bearer, токены
+// с префиксом) и KEY=значение, где имя похоже на секрет, а значение — на случайный токен. Значения замаскированы
+const ASSIGN = /^(\s*(?:export\s+)?["']?([A-Za-z_][\w.-]*)["']?\s*[:=]\s*["']?)([^"'\s#,]+)/;
+export function nakedInText(text: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  text.split(/\r?\n/).forEach((l, i) => {
+    let masked = redact(l, () => "<secret>");
+    const a = masked.match(ASSIGN);
+    if (a && SECRET_KEY.test(a[2]) && suspicious(a[3])) masked = a[1] + "<secret>" + masked.slice(a[0].length);
+    if (masked !== l) out.push({ line: i + 1, text: masked.trim().slice(0, 160) });
+  });
+  return out;
+}
+
+// Текст файла для поиска секретов; null — больше 1 МБ (размер — до чтения) или бинарный (NUL в первых 8 КБ)
+export const textFile = (path: string): string | null => {
+  if (statSync(path).size > 1 << 20) return null;
+  const b = readFileSync(path);
+  if (b.subarray(0, 8192).includes(0)) return null;
+  return b.toString("utf8");
+};

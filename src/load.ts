@@ -1,7 +1,8 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { canonical, child, fold, homeDir, inside, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
-import { nakedSecrets } from "./secrets";
+import { nakedInText, nakedSecrets, skillFileKind, textFile } from "./secrets";
+import { gitSpawn } from "./git";
 import { agentId } from "./agentid";
 import { ADAPTERS } from "./agents";
 import { innerRoots, locate, type Root, rootExists, rootKey, treeAbove, treeJoin } from "./roots";
@@ -498,10 +499,42 @@ export function treeGroups(root = configRoot()): string[] {
   return out;
 }
 
-// Секреты открытым текстом в MCP слоёв (вместо ссылок ${ИМЯ}): файл и место, без значений.
-// Слои лежат в git конфигурации — значение уйдёт в репо
-export function layerSecrets(root = configRoot()): string[] {
-  const out: string[] = [];
+// Секреты открытым текстом в слоях — слои лежат в git конфигурации, значение уйдёт в репо. Файл и место, без значений.
+// mcp — значения в определениях MCP вместо ссылок ${ИМЯ}; skills — в файлах skills слоёв (круг 11h): файлы, похожие на
+// секрет по имени (skillFileKind), и секреты в тексте (nakedInText; бинарные и больше 1 МБ — пропуск). Ссылки не
+// разыменовываются, служебные каталоги (.git, node_modules) не обходятся. Файл, который git конфигурации игнорирует,
+// не сообщается — в репо он не попадёт; git спрашивается один раз на весь список и только если что-то нашлось
+export function layerSecrets(root = configRoot()): { mcp: string[]; skills: string[] } {
+  const mcp: string[] = [];
+  const found: { rel: string; line: string }[] = [];
+  const skillWalk = (dir: string) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!skillFileKind(e.name, true)) skillWalk(p);
+        continue;
+      }
+      if (!e.isFile()) continue; // ссылки не разыменовываем: в git уходит ссылка, а не то, куда она ведёт
+      const rel = slash(relative(root, p));
+      if (skillFileKind(e.name, false) === "secret") {
+        found.push({ rel, line: `${rel} — файл с секретами (по имени)` });
+        continue;
+      }
+      let text: string | null = null;
+      try {
+        text = textFile(p);
+      } catch {
+        continue;
+      }
+      if (text) for (const n of nakedInText(text)) found.push({ rel, line: `${rel}:${n.line}: ${n.text}` });
+    }
+  };
   const walk = (dir: string) => {
     let entries;
     try {
@@ -509,11 +542,15 @@ export function layerSecrets(root = configRoot()): string[] {
     } catch {
       return;
     }
-    for (const e of entries) {
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!e.isDirectory()) continue;
       const p = join(dir, e.name);
+      if (e.name === "skills") {
+        skillWalk(p);
+        continue;
+      }
       if (e.name !== "mcp") {
-        if (!["instructions", "skills", "hooks", "policies"].includes(e.name)) walk(p);
+        if (!["instructions", "hooks", "policies"].includes(e.name)) walk(p);
         continue;
       }
       for (const f of readdirSync(p).filter((x) => /\.ya?ml$/.test(x)).sort()) {
@@ -525,12 +562,31 @@ export function layerSecrets(root = configRoot()): string[] {
         }
         if (!def || typeof def !== "object") continue;
         const where = nakedSecrets(def as Record<string, unknown>);
-        if (where.length) out.push(`${slash(relative(root, join(p, f)))}: ${where.join(", ")}`);
+        if (where.length) mcp.push(`${slash(relative(root, join(p, f)))}: ${where.join(", ")}`);
       }
     }
   };
   walk(join(root, "layers"));
-  return out;
+  const ignored = gitIgnored(root, [...new Set(found.map((f) => f.rel))]);
+  return { mcp, skills: found.filter((f) => !ignored.has(f.rel)).map((f) => f.line) };
+}
+
+// Совет для секретов в skills слоёв: подстановки ${ИМЯ} в файлах skill нет (DESIGN §8.4) — совет MCP тут не годится
+export const SKILL_SECRETS_ADVICE =
+  "значения храните в local/secrets.env, а skill пусть получает их от MCP-сервера или из переменной окружения; файл с секретами уберите из слоя или добавьте в .gitignore конфигурации";
+
+// Какие из путей (относительно root, через «/») git игнорирует: .gitignore, info/exclude, глобальный excludesFile.
+// Отслеживаемый файл игнорируемым не считается — он уже в репо. Один запуск git на весь список (-z: любые имена).
+// root не git-репо или git сбоит — пустое множество: лучше сообщить лишнее, чем промолчать о секрете
+export function gitIgnored(root: string, rels: string[]): Set<string> {
+  if (!rels.length) return new Set();
+  try {
+    const r = gitSpawn(["-C", root, "check-ignore", "-z", "--stdin"], { stdin: Buffer.from(rels.join("\0") + "\0") });
+    if (r.code !== 0) return new Set(); // 1 — ничего не игнорируется, 128 — не репо или сбой
+    return new Set(r.out.split("\0").filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 export const SKIP_DIRS = new Set(["node_modules", "worktrees", "dist", "build", "vendor"]);

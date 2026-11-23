@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -287,7 +287,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   }
 
   // Каталоги дерева слоёв без соответствующего каталога workspace — опечатка или переименование
-  const naked = layerSecrets().map((l) => ({ agent: "—", target: "", detail: l }));
+  const layerNaked = layerSecrets();
+  const naked = layerNaked.mcp.map((l) => ({ agent: "—", target: "", detail: l }));
+  const nakedSkills = layerNaked.skills.map((l) => ({ agent: "—", target: "", detail: l }));
   const roots = machineRoots(machine);
   const treeUnused = orphanTreeDirs(roots);
   const typos = treeUnused.filter((d) => d.suggestion && !d.other).map((d) => ({ agent: "—", target: `layers/tree/${d.path}`, detail: `↔ в workspace есть ${d.suggestion}` }));
@@ -349,6 +351,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Ветка корня совпадает с папкой другого корня", "слои у них общие", clashes);
   section("Пометка target: true не действует", "target: true в layer.yaml; слой остаётся обычным промежуточным", badGroups.map((detail) => ({ agent: "—", target: "", detail })));
   section("Секреты открытым текстом в слоях", "уйдут в git конфигурации; вынесите значения в local/secrets.env, в слое — ${ИМЯ}", naked);
+  section("Секреты в skills слоёв", SKILL_SECRETS_ADVICE, nakedSkills);
   const values = [...valueFiles].map(([file, names]) => ({ agent: "—", target: file, detail: `значения ${[...names].sort().join(", ")}` }));
   section("Значения секретов в конфигах агентов", "miksy sync заменит серверы на обёртки (записанные keep-ом остаются, пока секрет не задан)", values);
   section("Значение секрета в ключе вне учёта", "sync оставляет такой ключ как есть (конфликт) — возьмите его под учёт", literals);
@@ -370,7 +373,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const strayOff = [...offSet].filter((n) => !known.has(n)).map((n) => ({ agent: "—", target: "local/machine.yaml", detail: `mcp_off: ${n} — такого сервера нет ни в одном слое; снять отметку — miksy mcp on ${n}` }));
   section("Выключен сервер, которого нет в слоях", "опечатка в имени или сервер убран из слоёв", strayOff);
 
-  const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + missing.size
+  const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + nakedSkills.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
     + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");

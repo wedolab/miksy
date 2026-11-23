@@ -4,7 +4,8 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adoptSkill, nakedInText, skillFileKind } from "../src/adopt";
+import { adoptSkill } from "../src/adopt";
+import { nakedInText, skillFileKind } from "../src/secrets";
 import { cliFixture, expectCode, put } from "./helpers";
 
 // Значения похожих на настоящие токенов собираются по частям: в исходнике теста целого токена нет

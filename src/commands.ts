@@ -17,7 +17,7 @@ import { foreignMcp, foreignSkills, ownMcpOf } from "./foreign";
 import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsafeWorkspace } from "./setup";
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
-import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
+import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
@@ -975,8 +975,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const machine = loadMachine();
       if (cmd === "sync") {
         const naked = layerSecrets();
-        if (naked.length)
-          console.log(`ВНИМАНИЕ: секреты открытым текстом в слоях (уйдут в git конфигурации) — вынесите значения в local/secrets.env, в слое оставьте \${ИМЯ}:\n${naked.map((l) => "  " + l).join("\n")}\n`);
+        if (naked.mcp.length)
+          console.log(`ВНИМАНИЕ: секреты открытым текстом в слоях (уйдут в git конфигурации) — вынесите значения в local/secrets.env, в слое оставьте \${ИМЯ}:\n${naked.mcp.map((l) => "  " + l).join("\n")}\n`);
+        if (naked.skills.length)
+          console.log(`ВНИМАНИЕ: секреты в skills слоёв (уйдут в git конфигурации; значения скрыты) — ${SKILL_SECRETS_ADVICE}:\n${naked.skills.map((l) => "  " + l).join("\n")}\n`);
         const unread = ignoredLayerParts();
         if (unread.length) console.log(`предупреждение: ${ignoredText(unread)}\n`);
         const keys = unknownKeys();
