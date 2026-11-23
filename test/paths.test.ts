@@ -9,7 +9,7 @@ import { emptyState, loadManifest, sha } from "../src/manifest";
 import { targetId } from "../src/registry";
 import { claude } from "../adapters/claude";
 import { unsafeWorkspace } from "../src/setup";
-import { cliFixture, put } from "./helpers";
+import { cliFixture, put, restoreEnv } from "./helpers";
 
 function linked() {
   const f = cliFixture();
@@ -30,7 +30,7 @@ test("П1/П7: config, home и workspace канонические, backups по�
     expect(loadMachine().home).toBe(canonical(f.home));
     expect(loadMachine().workspace).toBe(canonical(f.ws));
     expect(containsProjects(canonical(f.config))).toBe(false);
-  } finally { process.env = saved; }
+  } finally { restoreEnv(saved); }
 });
 
 test("R4: git получает относительный путь между каноническими концами", () => {

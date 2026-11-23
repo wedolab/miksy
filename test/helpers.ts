@@ -124,3 +124,11 @@ export function gitInit(dir: string) {
   const r = Bun.spawnSync(["git", "init", "--quiet", dir], { stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`git init ${dir}: код ${r.exitCode}, ${r.stderr.toString().trim()}`);
 }
+
+// Вернуть окружение процесса к снимку { ...process.env } на месте. Не process.env = saved: замена делает его
+// обычным объектом, и на Windows пропадает нечувствительность к регистру — process.env.Path больше не PATH
+// (тест мастера после этого дописывал в PATH отдельный ключ Path и терял git; круг 11e)
+export function restoreEnv(saved: Record<string, string | undefined>) {
+  for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+  Object.assign(process.env, saved);
+}

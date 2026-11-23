@@ -5,7 +5,7 @@ import { gitEnv } from "../src/git";
 import { homeDir } from "../src/paths";
 import { ADAPTERS, renderFor } from "../src/registry";
 import { compare } from "../src/sync";
-import { cliFixture, put, expectCode } from "./helpers";
+import { cliFixture, put, expectCode, restoreEnv } from "./helpers";
 
 const none = { layers: [], instructions: [], skills: [], notes: [], mcp: [] };
 const secretMcp = { layer: "x", item: { name: "s", command: "echo", env: { TOKEN: "${TOKEN}" } } };
@@ -54,7 +54,7 @@ test("С20: gitEnv убирает переменные репо и индекс�
     expect(env.GIT_INDEX_FILE).toBeUndefined();
     expect(env.GIT_CONFIG_COUNT).toBe("1");
     expect(env.GIT_CONFIG_KEY_0).toBe("safe.directory");
-  } finally { process.env = saved; }
+  } finally { restoreEnv(saved); }
 });
 
 test("С24: sync --out передаёт keep — own-файл с пропущенным сервером есть в песочнице", () => {
@@ -95,5 +95,5 @@ test("С26: битая ссылка в HOME — понятная ошибка п
   try {
     process.env.HOME = process.env.USERPROFILE = `${link}/sub`;
     expect(() => homeDir()).toThrow(/домашний каталог/);
-  } finally { process.env = saved; }
+  } finally { restoreEnv(saved); }
 });

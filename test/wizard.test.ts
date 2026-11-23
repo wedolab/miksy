@@ -75,14 +75,16 @@ function fixture() {
       const code = setup({ ask, force: !!opts.force, run: runCommand, engine, sys, log: (s = "") => out.push(s) });
       const left = ask ? (ask as ReturnType<typeof scripted>).left() : 0;
       if (left) throw new Error(`мастер не задал ${left} вопросов сценария; вывод:\n${out.slice(-60).join("\n")}`);
+      // Всё, что мастер нашёл и записал, — в песочнице теста
+      expect(inside(configRoot(), dir)).toBe(true);
       return code;
     } catch (e) {
-      if (!/прервано|не задал/.test((e as Error).message)) (e as Error).message += `\nвывод:\n${out.slice(-40).join("\n")}`;
+      // Исходная ошибка мастера — не подменять проверкой песочницы
+      if (!/прервано|не задал/.test((e as Error).message))
+        (e as Error).message += `\nконфигурация: ${configRoot()}\nвывод:\n${out.slice(-40).join("\n")}`;
       throw e;
     } finally {
       console.log = orig;
-      // Всё, что мастер нашёл и записал, — в песочнице теста
-      expect(inside(configRoot(), dir)).toBe(true);
     }
   };
   const config = `${ws}/home/Miksy/miksy-config`;
