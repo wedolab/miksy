@@ -25,8 +25,9 @@ export type Inherits = { rules?: boolean; skills?: boolean; mcp?: boolean };
 // sensitive (ставит ядро) — в файле MCP или подставленный секрет: 0600 (исполняемому — 0700).
 // secretKeys (ставит ядро для merge) — имена внутри data, которым нужны секреты (обёртка/helper).
 // team — файл импортированного командного skill (копия командного содержимого, не личный файл).
+// skillSecret — копия файла-секрета skill слоя («<skill>/<файл>»; skillFiles): секрет хранится не только в local/ (круг 11i-2).
 export type RenderedFile = { sensitive?: boolean } & (
-  | { base: "home" | "project" | "local"; path: string; mode: "own"; content: string; block?: boolean; executable?: boolean; team?: boolean; mcp?: { format: "json" | "toml"; key: string } }
+  | { base: "home" | "project" | "local"; path: string; mode: "own"; content: string; block?: boolean; executable?: boolean; team?: boolean; skillSecret?: string; mcp?: { format: "json" | "toml"; key: string } }
   | { base: "home" | "project"; path: string; mode: "merge"; format: "json" | "toml"; key: string[]; data: unknown; optional?: boolean; secretKeys?: string[] });
 
 // keep — MCP, пропущенные ядром (не хватает переменных, секрет нельзя доставить): уже записанные

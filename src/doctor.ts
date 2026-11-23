@@ -19,8 +19,9 @@ import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
+import { SKILL_SECRET_COPY_ADVICE } from "./skillfiles";
 import { ADAPTERS, agentTitle, deliveredSkillNames, deliveryOrder } from "./registry";
-import { files } from "./plural";
+import { count, files } from "./plural";
 import { agentNote, decisionTitle, dialogAgentId, dialogTitle, approvalsSource, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
 import { shimNotes } from "./shim";
 
@@ -77,6 +78,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const added: Addition[] = []; // добавки агентов в обход слоёв
   const permissions: Finding[] = [];
   const exposed: Finding[] = []; // секреты в файлах каталогов без git
+  const skillLinks: Finding[] = [];
+  // Копии файлов-секретов skills по целям (круг 11i-2): «<skill>/<файл>» → места (агент, цель, путь)
+  const secretCopies = new Map<string, Set<string>>();
   const undeliverable: Finding[] = []; // секрет есть, но доставить его нельзя (многострочный, символы)
   const texts = new Map<string, string | null>();
   const valueFiles = new Map<string, Set<string>>(); // конфиг агента → секреты, чьи значения в нём лежат
@@ -129,6 +133,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
         idle.set(item.name, byWhy.set(why, (byWhy.get(why) ?? new Set()).add(adapter.id)));
       }
       for (const k of rendered.skipped) if (k.why) undeliverable.push({ ...where, detail: `mcp ${k.name}: ${k.why}` });
+      // Файлы skills слоёв, которые фильтр доставки не пропустил (круг 11i): ссылки наружу и битые. Файлы-секреты — в
+      // разделе «Секреты в skills слоёв»; одна строка на skill и файл, а не на каждого агента и цель
+      for (const f of result.files) if (f.mode === "own" && f.skillSecret) secretCopies.set(f.skillSecret, (secretCopies.get(f.skillSecret) ?? new Set()).add(`${adapter.id}|${t.title}|${f.path}`));
+      for (const w of result.warnings) if (/^skill .*ссылка .*не доставлена$/.test(w) && !skillLinks.some((x) => x.detail === w)) skillLinks.push({ agent: "—", target: "", detail: w });
       for (const a of result.advice ?? []) advice.push({ ...where, detail: a });
       if (result.portable) portableUsed = true;
       for (const w of result.persistent ?? []) persistent.push({ ...where, detail: w });
@@ -356,6 +364,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Значения секретов в конфигах агентов", "miksy sync заменит серверы на обёртки (записанные keep-ом остаются, пока секрет не задан)", values);
   section("Значение секрета в ключе вне учёта", "sync оставляет такой ключ как есть (конфликт) — возьмите его под учёт", literals);
   section("Файлы секретов", "local/secrets/<ИМЯ>: нужны записанным конфигам", secretProblems);
+  section("Файлы skills не доставлены", "ссылка ведёт за пределы слоёв конфигурации или никуда; положите в skill сам файл или уберите ссылку", skillLinks);
   section("Секрет нельзя доставить", "сервер пропущен; исправьте значение в local/secrets.env или определение в слое", undeliverable);
   section("Пустые значения секретов", "сервер получит пустое значение; задайте его в local/secrets.env", emptySecrets);
   // Команда miksy: старый вид — всегда; нет её — когда ею запускаются MCP-серверы проектов (src/shim.ts)
@@ -374,7 +383,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Выключен сервер, которого нет в слоях", "опечатка в имени или сервер убран из слоёв", strayOff);
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + nakedSkills.length + missing.size
-    + values.length + secretProblems.length + undeliverable.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
+    + values.length + secretProblems.length + undeliverable.length + skillLinks.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
     + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
   // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)
@@ -386,6 +395,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (shim.info.length) info.push(`Команда miksy (${shim.info.length}):`, ...shim.info.map((l) => "  " + l));
   const newer = newerLedger(manifest.engine);
   if (newer) info.push(`Версия: ${newer}`);
+  if (secretCopies.size)
+    info.push(`Файлы секретов skills разложены по целям (секрет хранится не только в local/secrets.env; ${SKILL_SECRET_COPY_ADVICE}):`,
+      ...[...secretCopies].sort(([a], [b]) => a.localeCompare(b)).map(([k, s]) => `  ${k} → ${count(s.size, "место", "места", "мест")}`));
   if (idle.size) {
     info.push(`Серверы, которые на этой машине не запустятся (${idle.size}):`);
     for (const [name, byWhy] of idle) for (const [why, ag] of byWhy) info.push(`  ${name}  ${why}  (${[...ag].join(", ")})`);

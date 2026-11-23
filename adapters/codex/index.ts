@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
-import { skillFiles } from "../../src/skillfiles";
+import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { gitStatusOf } from "../../src/sync";
 import { mcpTables, parseToml, tomlValue } from "../../src/toml";
@@ -94,7 +94,7 @@ export const codex: Adapter = {
     for (const { item } of skillsDir ? cfg.skills : []) {
       for (const f of skillFiles(item, warnings)) {
         files.push({ base: isGlobal ? "home" : "project", path: `${skillsDir}/${item.name}/${f.rel}`,
-          mode: "own", content: f.content, ...(f.executable && { executable: true }), ...(item.team && { team: true }) });
+          mode: "own", content: f.content, ...skillFileFlags(item, f) });
       }
     }
 

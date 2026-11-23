@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
-import { skillFiles } from "../../src/skillfiles";
+import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { currentGlobal, currentProject, strictJson } from "./current";
 import { keepOwn } from "../../src/paths";
@@ -132,8 +132,7 @@ export const antigravity: Adapter = {
             : `.agents/plugins/miksy/skills/${item.name}/${f.rel}`,
           mode: "own",
           content: f.content,
-          ...(f.executable && { executable: true }),
-          ...(item.team && { team: true }),
+          ...skillFileFlags(item, f),
         });
       }
     }

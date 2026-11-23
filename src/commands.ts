@@ -17,6 +17,7 @@ import { foreignMcp, foreignSkills, ownMcpOf } from "./foreign";
 import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsafeWorkspace } from "./setup";
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
+import { skillSecretCopies } from "./skillfiles";
 import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
@@ -320,6 +321,9 @@ function runTarget(
   // «Да», сохранённое прежним расчётом отпечатка, — на новый (doctor и --dry-run не сохраняют)
   if (cmd === "sync" && result.trustRenew && !("dry-run" in flags)) renewDecision(result.trustRenew);
   if (cmd === "sync") result.warnings.push(...literalHints(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id));
+  // Файл-секрет skill (git конфигурации его игнорирует) впервые копируется в эту цель — одна строка, при следующих sync
+  // уже нет (действие «новый» только при первой записи; круг 11i-2)
+  if (cmd === "sync") result.warnings.push(...skillSecretCopies(result, actions));
   observe?.({ agent: adapter.id, title: t.title, scope: t.target.scope, ...(t.target.scope === "project" && { dir: t.target.dir }), actions, warnings: result.warnings });
   let conflicts = actions.filter((a) => a.kind === "conflict").length;
   // Файлы секретов, нужные этой цели (значения — только в local/secrets/, имена — в выводе)
@@ -1295,14 +1299,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         // Слой уходит в git конфигурации: секреты и служебное не переносим, найденное в тексте — показываем с маской
         if (plan.secret.length)
           console.log(`  Не скопировано (похоже на секрет): ${plan.secret.join(", ")}\n` +
-            `    слой уходит в git конфигурации. Значения храните в local/secrets.env; файлы skill miksy копирует как есть (\${ИМЯ} подставляет только в MCP), ` +
-            `поэтому секрет skill пусть получает от MCP-сервера или из переменной окружения. Если файл всё же нужен и в нём нет секретов — скопируйте его вручную из ${slash(src.dir)} в ${plan.dir}`);
+            `    слой уходит в git конфигурации; как передать skill секрет — docs/layers.md#секреты-в-skills. ` +
+            `Если файл всё же нужен и в нём нет секретов — скопируйте его вручную из ${slash(src.dir)} в ${plan.dir}`);
         if (plan.junk.length)
           console.log(`  Не скопировано (служебное): ${plan.junk.join(", ")} — файлы ОС и каталоги программ; если нужно, скопируйте вручную из ${slash(src.dir)} в ${plan.dir}`);
         if (plan.naked.length)
           console.log(`  ВНИМАНИЕ: похоже на секреты открытым текстом — попадут в слой и в git конфигурации (значения скрыты):\n` +
             plan.naked.map((l) => `    ${l}`).join("\n") +
-            `\n    вынесите значения в local/secrets.env, а skill пусть получает их от MCP-сервера или из переменной окружения; затем поправьте файл в ${plan.dir}`);
+            `\n    уберите их из файлов skill (как передать skill секрет — docs/layers.md#секреты-в-skills), затем поправьте файл в ${plan.dir}`);
         if ("dry-run" in flags) {
           console.log("\n--dry-run: ничего не записано.");
           break;

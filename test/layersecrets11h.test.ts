@@ -69,7 +69,7 @@ describe("секреты в skills слоёв", () => {
     expect(s.out).toContain("ВНИМАНИЕ: секреты в skills слоёв");
     expect(s.out).toContain("layers/global/skills/deploy/SKILL.md:4: API_TOKEN=<secret>");
     expect(s.out).toContain("layers/global/skills/deploy/.env — файл с секретами");
-    expect(s.out).toContain("от MCP-сервера или из переменной окружения");
+    expect(s.out).toContain("docs/layers.md#секреты-в-skills");
     expect(s.out).not.toContain("в слое оставьте");
     expect(s.out).not.toContain(PASS);
     const d = f.run(["doctor"]);

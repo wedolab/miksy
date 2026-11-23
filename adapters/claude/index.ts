@@ -4,7 +4,7 @@ import { claudeTrust } from "./trust";
 import { claudeRestoreHome } from "./restore";
 import type { Adapter, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
-import { skillFiles } from "../../src/skillfiles";
+import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { claudeProjects, currentGlobal, currentProject, projectKeys } from "./current";
 import { teamCollection, trackedPaths } from "../../src/git";
@@ -110,8 +110,7 @@ export const claude: Adapter = {
           path: `.claude/skills/${item.name}/${f.rel}`,
           mode: "own",
           content: f.content,
-          ...(f.executable && { executable: true }),
-          ...(item.team && { team: true }),
+          ...skillFileFlags(item, f),
         });
       }
     }

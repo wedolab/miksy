@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Adapter, RenderContext, RenderedFile } from "../../src/adapter";
 import { deliver, type Launcher, nativeServers } from "../../src/launch";
-import { skillFiles } from "../../src/skillfiles";
+import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { serverSecrets } from "../../src/vars";
 import { configsOf, currentGlobal, currentProject, strictJson } from "./current";
@@ -112,8 +112,7 @@ export const opencode: Adapter = {
           path: `${isGlobal ? ".config/opencode/skills/" : ".opencode/skills/"}${item.name}/${f.rel}`,
           mode: "own",
           content: f.content,
-          ...(f.executable && { executable: true }),
-          ...(item.team && { team: true }),
+          ...skillFileFlags(item, f),
         });
       }
       if (isGlobal && existsSync(join(machine.home, ".claude", "skills", item.name, "SKILL.md")))

@@ -1,4 +1,5 @@
 import { varRefs, varSource } from "./resolve";
+import { skillFiles } from "./skillfiles";
 import type { Machine, Resolved } from "./types";
 
 const pad = (s: string, n: number) => s + " ".repeat(Math.max(1, n - s.length));
@@ -37,7 +38,17 @@ export function formatResolved(
 
   out.push("Skills");
   if (!r.skills.length) out.push("  —");
-  for (const s of r.skills) out.push("  " + pad(s.item.name, 24) + s.layer);
+  for (const s of r.skills) {
+    out.push("  " + pad(s.item.name, 24) + s.layer);
+    // Что из папки skill агентам не уйдёт (фильтр доставки, круг 11i): ссылки наружу, файлы-секреты, бинарные
+    const skipped: string[] = [];
+    try {
+      skillFiles(s.item, skipped);
+    } catch (e) {
+      skipped.push(`skill ${s.item.name}: ${(e as Error).message}`);
+    }
+    problems.push(...skipped);
+  }
 
   if (r.notes.length) out.push("", "Заметки", ...r.notes.map((n) => "  " + n));
   if (problems.length) out.push("", "Проблемы", ...problems.map((p) => "  " + p));

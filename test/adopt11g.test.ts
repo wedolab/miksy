@@ -80,7 +80,7 @@ describe("11g: adopt skill", () => {
     expectCode(dry, 0);
     for (const r of [dry, f.run([...args, "--yes"])]) {
       expect(r.out).toContain("Не скопировано (похоже на секрет): .env, keys/ID_RSA, sub/deeper/.ENV.local");
-      expect(r.out).toContain("local/secrets.env");
+      expect(r.out).toContain("docs/layers.md#секреты-в-skills");
       expect(r.out).toContain("Не скопировано (служебное): .DS_Store, .git/, node_modules/");
       expect(r.out).toContain("scripts/run.sh:2: export API_KEY=<secret>");
       expect(r.out).not.toContain(KEY);

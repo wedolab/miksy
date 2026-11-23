@@ -571,9 +571,10 @@ export function layerSecrets(root = configRoot()): { mcp: string[]; skills: stri
   return { mcp, skills: found.filter((f) => !ignored.has(f.rel)).map((f) => f.line) };
 }
 
-// Совет для секретов в skills слоёв: подстановки ${ИМЯ} в файлах skill нет (DESIGN §8.4) — совет MCP тут не годится
+// Совет для секретов в skills слоёв: подстановки ${ИМЯ} в файлах skill нет (DESIGN §3 п. 6) — совет MCP тут не годится;
+// способы передать skill секрет («лестница») — в docs/layers.md, ссылка на раздел
 export const SKILL_SECRETS_ADVICE =
-  "значения храните в local/secrets.env, а skill пусть получает их от MCP-сервера или из переменной окружения; файл с секретами уберите из слоя или добавьте в .gitignore конфигурации";
+  "уберите секрет из файлов skill — как передать его skill, docs/layers.md#секреты-в-skills; файл с секретами уберите из слоя или добавьте в .gitignore конфигурации";
 
 // Какие из путей (относительно root, через «/») git игнорирует: .gitignore, info/exclude, глобальный excludesFile.
 // Отслеживаемый файл игнорируемым не считается — он уже в репо. Один запуск git на весь список (-z: любые имена).
