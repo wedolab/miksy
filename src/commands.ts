@@ -1290,8 +1290,17 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const plan = adoptSkill(src.dir, name, level, undefined, true);
         console.log(`План: skill ${name} → ${plan.dir}\n  файлы: ${plan.files.join(", ")}`);
         if (plan.skipped.length) console.log(`  симлинки не копируются (могли вести за пределы skill): ${plan.skipped.join(", ")}`);
-        const risky = plan.files.filter((f) => /(^|\/)(\.env[^/]*|id_[a-z0-9]+|[^/]*\.(pem|key|p12|pfx))$/i.test(f));
-        if (risky.length) console.log(`  ВНИМАНИЕ: похоже на секреты — попадут в слой (и в git конфигурации): ${risky.join(", ")}`);
+        // Слой уходит в git конфигурации: секреты и служебное не переносим, найденное в тексте — показываем с маской
+        if (plan.secret.length)
+          console.log(`  Не скопировано (похоже на секрет): ${plan.secret.join(", ")}\n` +
+            `    слой уходит в git конфигурации. Значения храните в local/secrets.env; файлы skill miksy копирует как есть (\${ИМЯ} подставляет только в MCP), ` +
+            `поэтому секрет skill пусть получает от MCP-сервера или из переменной окружения. Если файл всё же нужен и в нём нет секретов — скопируйте его вручную из ${slash(src.dir)} в ${plan.dir}`);
+        if (plan.junk.length)
+          console.log(`  Не скопировано (служебное): ${plan.junk.join(", ")} — файлы ОС и каталоги программ; если нужно, скопируйте вручную из ${slash(src.dir)} в ${plan.dir}`);
+        if (plan.naked.length)
+          console.log(`  ВНИМАНИЕ: похоже на секреты открытым текстом — попадут в слой и в git конфигурации (значения скрыты):\n` +
+            plan.naked.map((l) => `    ${l}`).join("\n") +
+            `\n    вынесите значения в local/secrets.env, а skill пусть получает их от MCP-сервера или из переменной окружения; затем поправьте файл в ${plan.dir}`);
         if ("dry-run" in flags) {
           console.log("\n--dry-run: ничего не записано.");
           break;

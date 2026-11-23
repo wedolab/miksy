@@ -252,6 +252,8 @@ describe("мастер setup", () => {
     project(f.ws, "Acme/app");
     userMcp(f.home, { one: { type: "stdio", command: "node", args: ["1.js"] }, two: { type: "stdio", command: "node", args: ["2.js"] } });
     put(`${f.ws}/Acme/app/.claude/skills/my-skill/SKILL.md`, "---\nname: my-skill\ndescription: d\n---\n");
+    // Секрет рядом со skill в слой не переносится (круг 11g)
+    put(`${f.ws}/Acme/app/.claude/skills/my-skill/.env`, "A=1\n");
     f.bin.set("npx", "npx");
     f.bin.set("node", "node");
     const base: Step[] = [
@@ -270,6 +272,8 @@ describe("мастер setup", () => {
     expect(existsSync(`${f.config}/layers/global/mcp/one.yaml`)).toBe(true);
     expect(existsSync(`${f.config}/layers/global/mcp/two.yaml`)).toBe(false);
     expect(existsSync(`${f.config}/layers/tree/Acme/skills/my-skill/SKILL.md`)).toBe(true);
+    expect(existsSync(`${f.config}/layers/tree/Acme/skills/my-skill/.env`)).toBe(false);
+    expect(f.text()).toContain("Не скопировано (похоже на секрет): .env");
     expect(f.text()).toMatch(/MCP-сервер one — claude, глобально/);
     expect(f.text()).toMatch(/skill my-skill — claude.*в проекте Acme\/app/);
     // Повтор: two оставлен — не спрашивается; новая добавка three — «пропустить все»

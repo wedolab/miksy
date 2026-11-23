@@ -2,7 +2,7 @@
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { guard } from "./bounds";
-import { envLine, nakedSecrets, redact, redactArgs, SECRET_KEY } from "./secrets";
+import { envLine, nakedSecrets, redact, redactArgs, SECRET_KEY, suspicious } from "./secrets";
 import { LAYER_PARTS, loadSecrets, configRoot } from "./load";
 import type { Machine, McpServer } from "./types";
 
@@ -222,8 +222,49 @@ export function addSecrets(secrets: Record<string, string>, root = configRoot())
   if (process.platform !== "win32") chmodSync(path, 0o600);
 }
 
+// Файлы, которые в слой (и в git конфигурации) не переносятся: похожие на секреты — по имени, без учёта регистра.
+// Окружение и ключи (.env*, .envrc direnv, *.pem, *.key, PKCS#12, Java keystore, SSH-ключи без .pub), учётные данные программ
+// (.npmrc, .pypirc, .netrc, .pgpass, .git-credentials, .htpasswd), JSON с учётными данными (credentials*.json,
+// client_secret*.json, service-account*.json), хранилища паролей (*.kdbx), secrets.env самого miksy.
+// Образцы .env (.example, .sample, .template, .dist) — переносятся: в них нет значений
+const SECRET_FILE = new RegExp(
+  "^(\\.env(\\..+)?|.+\\.(pem|key|p12|pfx|jks|keystore|kdbx)|id_(rsa|dsa|ecdsa|ed25519)(_sk)?(\\..+)?|" +
+  "[._]netrc|\\.envrc|\\.npmrc|\\.pypirc|\\.pgpass|\\.git-credentials|\\.htpasswd|secrets\\.env|" +
+  "(credentials|client_secret|service[-_]account)[^/]*\\.json)$", "i");
+const SECRET_SAMPLE = /^\.env\.(example|sample|template|dist)$|\.pub$/i;
+// Служебное: файлы ОС и каталоги программ — skill они не нужны
+const JUNK_FILE = /^(\.DS_Store|Thumbs\.db|desktop\.ini)$/i;
+const JUNK_DIR = /^(\.git|node_modules|__pycache__)$/i;
+
+export function skillFileKind(name: string, dir: boolean): "secret" | "junk" | null {
+  if (dir) return JUNK_DIR.test(name) ? "junk" : null;
+  if (JUNK_FILE.test(name)) return "junk";
+  return SECRET_FILE.test(name) && !SECRET_SAMPLE.test(name) ? "secret" : null;
+}
+
+// Секреты открытым текстом в файле skill: строки с распознанными частями (URL с паролем, ?token=, Bearer, токены
+// с префиксом) и KEY=значение, где имя похоже на секрет, а значение — на случайный токен. Значения замаскированы
+const ASSIGN = /^(\s*(?:export\s+)?["']?([A-Za-z_][\w.-]*)["']?\s*[:=]\s*["']?)([^"'\s#,]+)/;
+export function nakedInText(text: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  text.split(/\r?\n/).forEach((l, i) => {
+    let masked = redact(l, () => "<secret>");
+    const a = masked.match(ASSIGN);
+    if (a && SECRET_KEY.test(a[2]) && suspicious(a[3])) masked = a[1] + "<secret>" + masked.slice(a[0].length);
+    if (masked !== l) out.push({ line: i + 1, text: masked.trim().slice(0, 160) });
+  });
+  return out;
+}
+
+const textOf = (path: string): string | null => {
+  const b = readFileSync(path);
+  if (b.length > 1 << 20 || b.subarray(0, 8192).includes(0)) return null;
+  return b.toString("utf8");
+};
+
 // Копирование skill в слой. Симлинки не разыменовываем: ссылка могла вести за пределы skill
-// (ключи, .env). dryRun — только список того, что будет скопировано
+// (ключи, .env). Похожее на секреты и служебное не копируется (skillFileKind); в скопированном тексте ищутся
+// секреты (naked: файл:строка с маской) — справка, копирование не останавливается. dryRun — только план
 export function adoptSkill(srcDir: string, name: string, level: string, root = configRoot(), dryRun = false) {
   checkName(name);
   const dst = join(layerDir(level, root), "skills", name);
@@ -231,20 +272,37 @@ export function adoptSkill(srcDir: string, name: string, level: string, root = c
   if (existsSync(dst)) throw new Error(`${slash(relative(root, dst))} уже существует`);
   const files: string[] = [];
   const skipped: string[] = [];
+  const secret: string[] = [];
+  const junk: string[] = [];
   const walk = (from: string) => {
     for (const e of readdirSync(from)) {
       const f = join(from, e);
+      const rel = slash(relative(srcDir, f));
       const st = lstatSync(f);
-      if (st.isSymbolicLink()) skipped.push(slash(relative(srcDir, f)));
-      else if (st.isDirectory()) walk(f);
-      else if (st.isFile()) files.push(slash(relative(srcDir, f)));
+      if (st.isSymbolicLink()) skipped.push(rel);
+      else if (st.isDirectory()) {
+        if (skillFileKind(e, true)) junk.push(`${rel}/`);
+        else walk(f);
+      } else if (st.isFile()) {
+        const kind = skillFileKind(e, false);
+        if (kind === "secret") secret.push(rel);
+        else if (kind === "junk") junk.push(rel);
+        else files.push(rel);
+      }
     }
   };
   walk(srcDir);
+  // Порядок readdir зависит от ФС (Linux — нет) — списки в выводе сортируются
+  for (const l of [files, skipped, secret, junk]) l.sort();
+  const naked: string[] = [];
+  for (const f of files) {
+    const text = textOf(join(srcDir, f));
+    if (text) for (const n of nakedInText(text)) naked.push(`${f}:${n.line}: ${n.text}`);
+  }
   if (!dryRun)
     for (const f of files) {
       mkdirSync(dirname(join(dst, f)), { recursive: true });
       copyFileSync(join(srcDir, f), join(dst, f));
     }
-  return { dir: slash(relative(root, dst)), files, skipped };
+  return { dir: slash(relative(root, dst)), files, skipped, secret, junk, naked };
 }
