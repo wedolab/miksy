@@ -80,6 +80,9 @@ export interface Manifest {
   // Отпечаток папки (TargetState.folder) к отметке trustedBefore — тот же ключ: папку после clean подменили — отметка не
   // действует (круг 10l). Ключа нет — как раньше
   trustedFolder?: Record<string, string>;
+  // Хеш встроенного skill miksy (builtin.ts: skillHash), который видел последний sync --global этой машины: строка
+  // «ваша замена отстаёт от встроенного» — только когда встроенный сменился с тех пор (круг 11j). Поля нет — до 0.6.1
+  builtinSkill?: string;
 }
 
 export const manifestPath = () => join(configRoot(), "local", "state", "manifest.json");
@@ -168,6 +171,7 @@ export function loadManifest(path = manifestPath()): Manifest {
     // Список — форма невыпущенного снимка 0.2.1 (без отпечатков): отметки нет, учёт не повреждён (рецензия 7b A, п. 3)
     if (names(m.trustedBefore)) delete m.trustedBefore;
     if (m.trustedBefore !== undefined && (!record(m.trustedBefore) || !Object.entries(m.trustedBefore).every(([id, v]) => id.includes("|") && typeof v === "string"))) throw new Error();
+    if (m.builtinSkill !== undefined && typeof m.builtinSkill !== "string") delete m.builtinSkill; // справочное поле — без отказа
     if (m.trustedFolder !== undefined && (!record(m.trustedFolder) || !Object.values(m.trustedFolder).every((v) => typeof v === "string"))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
       if (!id.includes("|") || !validState(state)) throw new Error();
@@ -218,7 +222,8 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
     ...(Array.isArray(m.machineOther) && m.machineOther.some((x) => typeof x === "string" && /^[0-9a-f]{6,32}$/.test(x))
       && { machineOther: [...new Set(m.machineOther.filter((x) => typeof x === "string" && /^[0-9a-f]{6,32}$/.test(x)))].sort() }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
     ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }),
-    ...(Object.keys(folders).length > 0 && { trustedFolder: folders }) };
+    ...(Object.keys(folders).length > 0 && { trustedFolder: folders }),
+    ...(typeof m.builtinSkill === "string" && { builtinSkill: m.builtinSkill }) };
 }
 
 // Хеш записи, для которой при миграции нашлись разные значения и ни одно не совпало с диском:

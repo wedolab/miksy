@@ -16,6 +16,7 @@ function world(dotInHome: boolean) {
   const home = `${root}/home`, config = `${root}/config`, ws = `${root}/ws`, dot = dotInHome ? `${home}/dotfiles` : `${root}/dotfiles`;
   put(`${config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");
   put(`${config}/layers/global/instructions/00.md`, "# global\n");
+  put(`${config}/layers/global/layer.yaml`, "exclude: [skill.miksy]\n"); // встроенный skill (11j): ~/.agents/skills — ссылка наружу, запись туда — конфликт
   put(`${config}/layers/tree/instructions/00.md`, "# workspace\n");
   put(`${config}/local/machine.yaml`, `workspace: ${ws}\nagents: [claude, codex]\n`);
   mkdirSync(`${ws}/Org/p1`, { recursive: true });
@@ -42,6 +43,7 @@ test.skipIf(!win)("0.2.2 (снимок): ~/.claude/CLAUDE.md — ссылка н
   const o = { root, home: `${root}/home`, config: `${root}/config`, ws: `${root}/ws`, dot: `${root}/home/dotfiles` };
   put(`${o.config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");
   put(`${o.config}/layers/global/instructions/00.md`, "# global\n");
+  put(`${o.config}/layers/global/layer.yaml`, "exclude: [skill.miksy]\n"); // встроенный skill (11j) не нужен этому тесту
   put(`${o.config}/local/machine.yaml`, `workspace: ${o.ws}\nagents: [claude]\n`);
   mkdirSync(o.ws, { recursive: true });
   put(`${o.dot}/CLAUDE.md`, "# my rules\n");

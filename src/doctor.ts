@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -20,6 +20,8 @@ import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
 import { SKILL_SECRET_COPY_ADVICE } from "./skillfiles";
+import { BUILTIN_SKILL, type BuiltinCopy, builtinCopies, builtinCopyText, builtinLayer } from "./builtin";
+import { selectGlobal } from "./resolve";
 import { ADAPTERS, agentTitle, deliveredSkillNames, deliveryOrder } from "./registry";
 import { count, files } from "./plural";
 import { agentNote, decisionTitle, dialogAgentId, dialogTitle, approvalsSource, inheritedExec, type PendingTrust, pendingText, trustMark, trustPlan, trustState } from "./trust";
@@ -395,6 +397,12 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (shim.info.length) info.push(`Команда miksy (${shim.info.length}):`, ...shim.info.map((l) => "  " + l));
   const newer = newerLedger(manifest.engine);
   if (newer) info.push(`Версия: ${newer}`);
+  // Копии skill miksy в глобальных слоях: прежний образец не действует, своя замена может отставать (круг 11j)
+  let copies: BuiltinCopy[] = [];
+  try {
+    if (builtinLayer()) copies = builtinCopies(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n)));
+  } catch { /* ошибку слоёв показывает проверка целей */ }
+  if (copies.length) info.push(`Skill ${BUILTIN_SKILL} в конфигурации (${copies.length}):`, ...copies.map((c) => "  " + builtinCopyText(c, configRoot())));
   if (secretCopies.size)
     info.push(`Файлы секретов skills разложены по целям (секрет хранится не только в local/secrets.env; ${SKILL_SECRET_COPY_ADVICE}):`,
       ...[...secretCopies].sort(([a], [b]) => a.localeCompare(b)).map(([k, s]) => `  ${k} → ${count(s.size, "место", "места", "мест")}`));

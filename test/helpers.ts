@@ -13,8 +13,10 @@ export function put(path: string, content: string) {
   writeFileSync(path, content);
 }
 
-// Конфигурация: глобальный слой и слой workspace с инструкциями; projects — проекты workspace (git-репо)
-export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}) {
+// Конфигурация: глобальный слой и слой workspace с инструкциями; projects — проекты workspace (git-репо).
+// Встроенный skill miksy (круг 11j) по умолчанию выключен (exclude в layers/global/layer.yaml), чтобы не менять
+// ожидания тестов глобальной цели; builtin: true — как у пользователя, без exclude
+export function cliFixture(opts: { agents?: string[]; projects?: string[]; builtin?: boolean } = {}) {
   // Полный путь: TEMP бывает коротким именем 8.3 (RUNNER~1 на раннерах GitHub), а miksy печатает полный
   const dir = realpathSync.native(mkdtempSync(join(tmpdir(), "cli-"))).replaceAll("\\", "/");
   const config = `${dir}/config`;
@@ -23,6 +25,7 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[] } = {}
   mkdirSync(home, { recursive: true });
   put(`${config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");
   put(`${config}/layers/global/instructions/00.md`, "# global\n");
+  if (!opts.builtin) put(`${config}/layers/global/layer.yaml`, "exclude: [skill.miksy]\n");
   put(`${config}/layers/tree/instructions/00.md`, "# workspace\n");
   put(`${config}/local/machine.yaml`, `workspace: ${ws}\nagents: [${(opts.agents ?? ["claude"]).join(", ")}]\n`);
   for (const p of opts.projects ?? ["Org/p1"]) {

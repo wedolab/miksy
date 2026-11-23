@@ -192,6 +192,7 @@ function world() {
   const home = `${root}/home`, config = `${root}/config`, ws = `${root}/ws`;
   put(`${config}/map.yaml`, "global:\n  - { use: global }\nlayers: []\n");
   put(`${config}/layers/global/instructions/00.md`, "# global\n");
+  put(`${config}/layers/global/layer.yaml`, "exclude: [skill.miksy]\n"); // встроенный skill (11j): ~/.agents/skills — ссылка наружу, запись туда — конфликт
   put(`${config}/layers/tree/instructions/00.md`, "# workspace\n");
   put(`${config}/local/machine.yaml`, `workspace: ${ws}\nagents: [claude, codex]\n`);
   mkdirSync(`${ws}/Org/p1`, { recursive: true });

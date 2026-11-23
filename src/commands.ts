@@ -18,14 +18,15 @@ import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsaf
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
 import { skillSecretCopies } from "./skillfiles";
-import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
+import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadLayer, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
 import { engineVersion, newerLedger } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
 import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
-import { merge } from "./resolve";
+import { merge, selectGlobal } from "./resolve";
+import { builtinCopies, builtinCopyText, builtinHash } from "./builtin";
 import { clashText, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, suggestTree, treeClashes, treeOf } from "./roots";
 import { type RootItem, rootItems, rewriteRoots } from "./rootfile";
 import { rewriteList } from "./machinefile";
@@ -1081,6 +1082,20 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         : one ? [projectTarget(one.abs, one.rel, machine, one.nested, runGroups)]
         : [vanishedTarget(positional[0], manifest, machine) || (() => { const p = findProject(positional[0], roots); return projectTarget(p.abs, p.rel, machine, p.nested, runGroups); })()];
 
+      // Своя замена встроенного skill miksy: одна строка, когда встроенный сменился с прошлого sync --global этой машины
+      // (хеш — в учёте), а не на каждом sync (круг 11j). Замены нет — учёт не трогаем (sync без изменений оставляет его
+      // байт в байт); учёт более новой версии miksy не переписываем (его отметку переписывает только setup)
+      if (cmd === "sync" && "global" in flags) {
+        const now = builtinHash();
+        const own = now && manifest.builtinSkill !== now ? builtinCopies(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n))).filter((c) => !c.stale) : [];
+        if (own.length) {
+          for (const c of own) console.log(`предупреждение: ${builtinCopyText(c, configRoot())}\n`);
+          if (!("dry-run" in flags) && !newerLedger(manifest.engine)) {
+            manifest.builtinSkill = now;
+            saveManifest(manifest);
+          }
+        }
+      }
       const adapters = agentsFor(machine, flags.agent);
       runAgents = new Set(adapters.map((a) => a.id));
       // «Забыть» каталог — и записанное туда агентами, которых убрали из agents без clean: данных на диске больше нет,

@@ -1,5 +1,6 @@
 // Общее для команд CLI: адаптеры, построение целей, генерация для цели
 import { ADAPTERS } from "./agents";
+import { BUILTIN_SKILL, withBuiltin } from "./builtin";
 export { ADAPTERS };
 import type { Adapter, RenderedFile, RenderResult, Target } from "./adapter";
 import { createLauncher, stableBun } from "./launch";
@@ -56,8 +57,12 @@ export function titleOf(rel: string, root: Root | undefined, machine: Machine): 
   return root && rel && roots.length > 1 && dirsOf(rel, roots).length > 1 ? `${title} (${root.path})` : title;
 }
 
+// Слои домашнего каталога: встроенный слой движка (skill miksy) первым, затем глобальные слои пользователя (круг 11j)
 export function globalTarget(machine: Machine): TargetSpec {
-  const cfg = merge(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n)), machine.os);
+  const { layers, copies } = withBuiltin(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n)));
+  const cfg = merge(layers, machine.os);
+  for (const c of copies.filter((x) => x.stale))
+    cfg.notes.push(`skill ${BUILTIN_SKILL}: ${c.layer}/skills/${BUILTIN_SKILL} — неизменённая копия прежнего образца, не действует (действует встроенный)`);
   return { cfg, target: { scope: "global" }, title: `~ (${machine.home})` };
 }
 

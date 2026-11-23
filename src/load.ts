@@ -377,7 +377,7 @@ export function allLayerMcp(root = configRoot()): McpServer[] {
   return out;
 }
 
-function loadLayerDir(dir: string, name: string): Layer {
+export function loadLayerDir(dir: string, name: string): Layer {
   const metaPath = join(dir, "layer.yaml");
   const meta = existsSync(metaPath)
     ? yaml<{ description?: string; exclude?: string[]; import_skills?: unknown; trust?: unknown; target?: unknown }>(metaPath) ?? {}
