@@ -95,7 +95,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const trust: Finding[] = [];
   const pendingTrust: PendingTrust[] = []; // нужно решение пользователя (исполняемые настройки агента)
   const declined: PendingTrust[] = []; // пользователь отказал в доверии (miksy trust)
-  const literals: Finding[] = []; // значение секрета в ключе вне учёта (конфликт «создан не miksy»)
+  const literals: Finding[] = []; // значение секрета в настройке, записанной не miksy (конфликт)
   const emptySecrets: Finding[] = []; // секрет, который использует сервер, пустой
   const delivered = new Map<string, string[]>();
   // Серверы, которые на этой машине не запустятся (круг 11c, справочно): имя → причина → агенты
@@ -368,7 +368,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Секреты в skills слоёв", SKILL_SECRETS_ADVICE, nakedSkills);
   const values = [...valueFiles].map(([file, names]) => ({ agent: "—", target: file, detail: `значения ${[...names].sort().join(", ")}` }));
   section("Значения секретов в конфигах агентов", "miksy sync заменит серверы на обёртки (записанные keep-ом остаются, пока секрет не задан)", values);
-  section("Значение секрета в ключе вне учёта", "sync оставляет такой ключ как есть (конфликт) — возьмите его под учёт", literals);
+  section("Значение секрета в настройке, записанной не miksy", "sync её не трогает (конфликт), и значение лежит в конфиге агента открытым текстом. Что сделать — в конце каждой строки", literals);
   section("Файлы секретов", "local/secrets/<ИМЯ>: нужны записанным конфигам", secretProblems);
   section("Файлы skills не доставлены", "ссылка ведёт за пределы слоёв конфигурации, никуда или на файл секретов вне skill; положите в skill сам файл (папку) или уберите ссылку", skillLinks);
   section("Секрет нельзя доставить", "сервер пропущен; исправьте значение в local/secrets.env или определение в слое", undeliverable);

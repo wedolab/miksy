@@ -72,7 +72,7 @@ describe("бэкапы запусков", () => {
     expect([...backups.keys()].some((p) => p.endsWith(".claude.json"))).toBe(true);
     for (const [p, b] of backups) if (!p.includes("originals")) expect(b.toString("utf8")).not.toContain(PLAIN);
     const d = f.run(["doctor"]);
-    expect(d.out).toContain("Значение секрета в ключе вне учёта");
+    expect(d.out).toContain("Значение секрета в настройке, записанной не miksy");
     expect(d.out).not.toContain(PLAIN);
   }, 60000);
 });

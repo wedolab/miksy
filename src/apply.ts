@@ -704,7 +704,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       }
       for (const n of Object.keys(data)) if (Object.hasOwn(current, n) && !recorded?.names.includes(n)) {
         conflicts.add(n);
-        actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: "TOML: имя MCP уже есть вне владения miksy; сначала miksy adopt --global <имя> --to global --agent codex" });
+        actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy — miksy его не трогает (и с --force). Чтобы miksy записал свой из слоя, удалите из файла таблицу [mcp_servers.${n}] вместе с подтаблицами [mcp_servers.${n}.…], затем miksy sync --global` });
       }
       data = Object.fromEntries(Object.entries(data).filter(([n]) => !conflicts.has(n)));
       // Пропущенный сервер (нет переменных), записанный раньше, остаётся в блоке как был
