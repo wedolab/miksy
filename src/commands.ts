@@ -22,7 +22,7 @@ import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProje
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
-import { engineVersion, newerLedger } from "./version";
+import { engineVersion, newerLedger, versionNote } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
 import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, agentDirs, enclosingTarget, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
 import { merge, selectGlobal } from "./resolve";
@@ -38,7 +38,7 @@ import { type AgentId, formatTeamSkills, scanTeamSkills } from "./teamskills";
 import type { Adapter } from "./adapter";
 import type { Machine, McpServer, Resolved } from "./types";
 import { deliveredSkillNames, deliveryOrder } from "./registry";
-import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, linkedDir, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
+import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, linkedDir, localAccessText, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
 
 // Ссылка (в том числе битая)
 const isLinkPath = (p: string) => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
@@ -1190,11 +1190,11 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Права local/: проверка одним снимком; исправление — только при открытых путях
       if ("dry-run" in flags) {
         const access = checkLocalAccess();
-        if (access.bad.length) console.log(`\nДоступ local/: закрыть владельцу (открытых путей или ошибок проверки: ${access.bad.length}).`);
+        if (access.bad.length) console.log(`\nДоступ к local/ (секреты и учёт этой машины): ${localAccessText(access)} — sync закроет его только для вас.`);
         for (const l of access.links) warn(l);
       } else {
         const access = ensurePrivateLocal();
-        if (access.fixed) console.log("\nДоступ local/: закрыт владельцу (были открытые пути).");
+        if (access.fixed) console.log("\nДоступ к local/ (секреты и учёт этой машины): закрыт — теперь только для вас.");
         for (const l of access.warnings) warn(l);
       }
       const printedFormer = new Set<string>();
@@ -1784,9 +1784,13 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       code = runRestore(positional[0], flags, ask);
       break;
 
-    case "version":
-      console.log(`miksy ${engineVersion()}`);
+    case "version": {
+      // Номер не выпуска — с пояснением (круг 11s; подробно — docs/troubleshooting.md, «Установка, окружение, обновление»)
+      const v = engineVersion();
+      const note = versionNote(v);
+      console.log(`miksy ${v}${note ? ` (${note})` : ""}`);
       break;
+    }
 
     case "update":
       code = "finish" in flags

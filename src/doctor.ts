@@ -15,7 +15,7 @@ import { foreignMcp, foreignSkills } from "./foreign";
 import { connectHint, detectAgents } from "./agentid";
 import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
-import { checkLocalAccess, checkSecretFiles, secretsDir } from "./secretfiles";
+import { checkLocalAccess, checkSecretFiles, localAccessText, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
@@ -204,7 +204,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
 
   const localAccess = checkLocalAccess();
   if (localAccess.refuse) permissions.push({ agent: "—", target: "local/backups", detail: `пока так, все команды, которые пишут (sync, clean, setup, update, root, adopt, trust, target), откажут: ${localAccess.refuse}` });
-  if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `открытых путей или ошибок проверки: ${localAccess.bad.length}; ${localAccess.bad[0]} — sync/setup исправит права${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
+  if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `${localAccessText(localAccess)} — sync/setup закроет local/ (секреты и учёт этой машины) только для вас${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
   // Ссылка local/secrets — одной строкой, в «Файлах секретов» (там и что делает sync); здесь — без повтора (выпуск 0.2.3, A7)
   // Путь — как записан и через настоящий путь local/ (local/ сама — ссылка; рецензия 9a, №8)
   const secretsLinks = [slash(secretsDir())];

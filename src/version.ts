@@ -7,6 +7,7 @@ import { ENGINE } from "./load";
 import { gitSpawn } from "./git";
 import { samePath } from "./paths";
 import { compareVersions, SEMVER } from "./changelog";
+import { count } from "./plural";
 
 export { compareVersions, SEMVER };
 
@@ -56,6 +57,17 @@ export function describeEngine(engine = ENGINE): string {
     }
   }
   return text;
+}
+
+// Пояснение к номеру для miksy --version (круг 11s): «0.7.0-2-gc5c1a79-dirty» — не выпуск, на 2 коммита новее 0.7.0,
+// коммит c5c1a79; -dirty — в папке движка незакоммиченные правки. Выпуск (только номер) и другие формы — null
+export function versionNote(v: string): string | null {
+  const m = /^(\d+\.\d+\.\d+)(?:-(\d+)-g([0-9a-f]+))?(-dirty)?$/.exec(v);
+  if (!m || (!m[2] && !m[4])) return null;
+  return [
+    ...(m[2] ? [`не выпуск: на ${count(Number(m[2]), "коммит", "коммита", "коммитов")} новее выпуска ${m[1]}, коммит ${m[3]}`] : []),
+    ...(m[4] ? ["в папке движка есть незакоммиченные правки"] : []),
+  ].join("; ");
 }
 
 // Минимальная версия Bun — как engines в package.json (тест сверяет). В Bun до 1.4.3 spawnSync изредка теряет вывод

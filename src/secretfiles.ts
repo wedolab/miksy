@@ -382,19 +382,22 @@ function snapshot(root: string, w: Walk): Map<string, string> {
 // один на всё дерево: doctor не запускает icacls отдельно для тысяч бэкапов). bad — открытые пути (sync/setup
 // закроют); links — ссылки с открытой или несуществующей целью (кроме копии «до miksy»); open — открытые пути полностью,
 // в нижнем регистре (что сбрасывать), null — проверка не удалась (сбрасывать всё)
-function scan(dir: string): { bad: string[]; links: string[]; open: Set<string> | null; refuse: string | null } {
+// bad — все находки (открытые пути и сбои проверки; по ним privateLocal решает, исправлять ли); failed — из них сбои
+// проверки (права не прочитаны): тексты doctor и sync --dry-run называют оба вида отдельно (круг 11s)
+function scan(dir: string): { bad: string[]; failed: string[]; links: string[]; open: Set<string> | null; refuse: string | null } {
   // Ссылки local/backups с открытой целью — это отказ (backupsRefusal), не «открытые пути»
-  if (!existsSync(dir)) return { bad: [], links: [], open: new Set(), refuse: null };
+  if (!existsSync(dir)) return { bad: [], failed: [], links: [], open: new Set(), refuse: null };
   try {
     const root = resolve(localRoot(dir));
     const w = walkLocal(root);
     const linked = linkProblems(root, w.links);
     const refuse = backupsRefusal(root, w.links);
     const bad: string[] = [];
+    const failed: string[] = [];
     const open = new Set<string>();
     if (!win) {
       for (const p of w.paths) { const why = aclProblem(p); if (why) { bad.push(`${slash(p)}: ${why}`); open.add(p.toLowerCase()); } }
-      return { bad, links: linked, open, refuse };
+      return { bad, failed, links: linked, open, refuse };
     }
     const me = mySid();
     // Без ссылок — как 0.2.1: один снимок /t, строки подряд, без карты путей (скорость; выпуск 0.2.2, круг 8c, C13).
@@ -411,7 +414,7 @@ function scan(dir: string): { bad: string[]; links: string[]; open: Set<string> 
           open.add(join(dirname(root), lines[i]).toLowerCase());
         }
       } finally { rmSync(tmp, { force: true }); }
-      return { bad, links: linked, open, refuse };
+      return { bad, failed, links: linked, open, refuse };
     }
     const acl = snapshot(root, w);
     // Только пути обхода: строки снимка вне него (если icacls куда-то зашёл) — не пути local/
@@ -419,18 +422,29 @@ function scan(dir: string): { bad: string[]; links: string[]; open: Set<string> 
       const sddl = acl.get(p.toLowerCase());
       const shown = relative(dirname(root), p);
       const foreign = sddl === undefined ? [] : foreignAces(sddl, me);
-      if (sddl === undefined) bad.push(`${shown}: icacls не прочитал права`);
+      if (sddl === undefined) { bad.push(`${shown}: icacls не прочитал права`); failed.push(bad[bad.length - 1]); }
       else if (foreign.length) bad.push(`${shown}: доступ есть не только у владельца (${foreign.join(", ")})`);
       else continue;
       open.add(p.toLowerCase());
     }
-    return { bad, links: linked, open, refuse };
-  } catch (e) { return { bad: [(e as Error).message], links: [], open: null, refuse: backupsRefusal(dir) }; }
+    return { bad, failed, links: linked, open, refuse };
+  } catch (e) { return { bad: [(e as Error).message], failed: [(e as Error).message], links: [], open: null, refuse: backupsRefusal(dir) }; }
 }
 // refuse — запись в local/backups будет отказана (C10): --dry-run и doctor говорят то же, что настоящий запуск
-export function checkLocalAccess(dir = join(configRoot(), "local")): { bad: string[]; links: string[]; refuse: string | null } {
-  const { bad, links, refuse } = scan(dir);
-  return { bad, links, refuse };
+export function checkLocalAccess(dir = join(configRoot(), "local")): { bad: string[]; failed: string[]; links: string[]; refuse: string | null } {
+  const { bad, failed, links, refuse } = scan(dir);
+  return { bad, failed, links, refuse };
+}
+
+// Итог проверки local/ для человека (doctor, sync --dry-run; круг 11s): сколько путей открыто другим пользователям
+// (пример) и сколько не удалось проверить (почему) — отдельно, а не общим счётчиком; null — всё закрыто
+export function localAccessText(a: { bad: string[]; failed: string[] }): string | null {
+  const open = a.bad.filter((b) => !a.failed.includes(b));
+  const parts = [
+    ...(open.length ? [`открыто другим пользователям: ${open.length} (например, ${open[0]})`] : []),
+    ...(a.failed.length ? [`права не удалось проверить: ${a.failed.length} (${a.failed[0]})`] : []),
+  ];
+  return parts.length ? parts.join("; ") : null;
 }
 
 // Закрыть local/ владельцу: сначала проверка, исправление — только если есть открытые пути (Windows: не обходить ACL
