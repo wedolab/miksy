@@ -390,7 +390,7 @@ export const realSystem: System = {
   },
 };
 
-export type Run = (cmd: string, args: string[], io: { ask?: Ask | null; observe?: (r: TargetReport) => void }) => number;
+export type Run = (cmd: string, args: string[], io: { ask?: Ask | null; observe?: (r: TargetReport) => void; hints?: boolean }) => number;
 
 export type SetupOptions = {
   ask: Ask | null; // null — без диалога: только конфигурация, local/, machine.yaml, команда miksy
@@ -751,6 +751,8 @@ export function setup(o: SetupOptions): number {
     ...(previous.trust ? [`trust: ${JSON.stringify(previous.trust)}`] : []),
     "",
   ].join("\n");
+  // Записан ли machine.yaml в этом запуске (первый setup или --force): заметка о подготовке машины — только тогда (круг 11p)
+  let machineWritten = false;
   if (!workspace) {
     log("\n• local/machine.yaml не записан: workspace не выбран (запустите setup в терминале или пропишите workspace вручную)");
   } else if (hadMachine && !o.force) {
@@ -784,7 +786,9 @@ export function setup(o: SetupOptions): number {
       }
       if (no.length) log(`  не подключены: ${no.join(", ")} — miksy их не настраивает; передумаете — miksy setup ещё раз (спросит) или допишите в agents в local/machine.yaml`);
     } else if (ask) log(`✓ local/machine.yaml уже есть — не трогаю (переспросить workspace и агентов: setup --force)`);
-    else log(`\n• local/machine.yaml уже есть — не трогаю (перезаписать: setup --force). Найдено сейчас:\n${yaml.replace(/^/gm, "    ")}`);
+    // Содержимое файла не печатается (круг 11p): workspace и агенты — из него же (строки выше), расхождения с найденным
+    // (агенты вне agents, новые пути к программам) — отдельными строками
+    else log(`✓ local/machine.yaml уже есть — не трогаю (перезаписать: setup --force)`);
     for (const [k, v] of newVars) addVar(machinePath, config, k, v, log);
   } else if (agree(`Записать local/machine.yaml (workspace, агенты${Object.keys(vars).length ? ", пути к программам" : ""})?`, true)) {
     // Каталога нет — создать; недоступен (нет диска, ссылка в никуда) — не создавать (об этом сказано выше):
@@ -796,6 +800,7 @@ export function setup(o: SetupOptions): number {
     backup(machinePath, config);
     writeAtomic(machinePath, yaml);
     log("✓ local/machine.yaml записан");
+    machineWritten = true;
   }
   const machine = (() => { try { return existsSync(machinePath) ? loadMachine(config) : null; } catch (e) { log(`• ${(e as Error).message}`); return null; } })();
   const machineAgents = machine ? agentsFor(machine) : [];
@@ -854,16 +859,18 @@ export function setup(o: SetupOptions): number {
   // отметка версии учёта новее этой — переписывается на эту
   if (installed && readFileSync(shim, "utf8") === shimBody && (!other || sameShim(other))) markLedger(config, engine, log);
 
-  // Заметка конфигурации о подготовке машины (local.example/README.md) — то, что miksy не настраивает сам
+  // Заметка конфигурации о подготовке машины (local.example/README.md) — то, что miksy не настраивает сам. Только когда
+  // machine.yaml записан в этом запуске (машина готовится): на настроенной машине повтор ничего не сообщает (круг 11p)
   const machineNote = () => {
     const note = join(config, "local.example", "README.md");
-    if (existsSync(note)) log(`\nВ вашей конфигурации есть заметка о подготовке машины — то, что miksy не настраивает сам (например, профили облачных CLI): ${slash(note)}. Прочитайте её.`);
+    if (machineWritten && existsSync(note)) log(`\nВ вашей конфигурации есть заметка о подготовке машины — то, что miksy не настраивает сам (например, профили облачных CLI): ${slash(note)}. Прочитайте её.`);
   };
 
   if (!ask || !machine || !o.run) {
     if (!ask) secretsReport();
     machineNote();
-    if (o.hints === false) return 0;
+    // «Дальше» — пока miksy ничего не записывал на этой машине (учёт пуст); после первого sync эти шаги уже пройдены (круг 11p)
+    if (o.hints === false || synced(config)) return 0;
     log(`\nДальше:
   ${cmd} setup                      мастер: копия настроек, добавки агентов, секреты, план и запись
   ${cmd} doctor                     что нужно синхронизировать
@@ -887,7 +894,7 @@ export function setup(o: SetupOptions): number {
   const d = doctor(agentsFor(loadMachine(config)), loadMachine(config), false, undefined, (c) => sys.which(c));
   for (const l of d.text.split("\n")) if (l && !l.startsWith(" ")) log(`  ${l}`);
   if (d.problems) log(`  подробно: ${cmd} doctor`);
-  log(`\n${wrote ? "Готово." : "Настройки агентам не записаны — позже: " + cmd + " sync --global и " + cmd + " sync --all."}`);
+  log(`\n${wrote ? "Готово." : "Настройки агентам не записаны — позже: " + cmd + " sync --global и " + cmd + " sync --all (план — с --dry-run)."}`);
   if (wrote) log(`Перезапустите открытые сессии агентов — настройки читаются при старте. Проверка: откройте проект и
 спросите агента: «Процитируй первую строку раздела „## MCP“ в твоих инструкциях и вызови context7
 для „bun“». Ответ «MCP-серверы подключает miksy по слоям…» и найденная библиотека — всё работает.`);
@@ -1094,14 +1101,14 @@ export function setup(o: SetupOptions): number {
       const level = levels[Number(c) - 1];
       const args = [...(it.dir ? [it.dir, it.name] : ["--global", it.name]), "--to", level];
       try {
-        run("adopt", args, { ask });
+        run("adopt", args, { ask, hints: false });
         adopted = true;
       } catch (e) {
         const msg = (e as Error).message;
         if (/разные определения/.test(msg)) {
           log(`  ${msg}`);
           const agent = ask!.choose("Чьё определение взять?", it.agents.map((x) => ({ key: x, label: x })));
-          if (agent) try { run("adopt", [...args, "--agent", agent], { ask }); adopted = true; } catch (e2) { log(`  ${(e2 as Error).message}`); }
+          if (agent) try { run("adopt", [...args, "--agent", agent], { ask, hints: false }); adopted = true; } catch (e2) { log(`  ${(e2 as Error).message}`); }
         } else log(`  ${msg}`);
       }
     }
@@ -1209,10 +1216,8 @@ export function setup(o: SetupOptions): number {
     if (ask!.line("v — показать полный план, Enter — дальше:")?.toLowerCase() === "v") log(text.trimEnd());
 
     step(9, "Запись", "sync --global (домашний каталог агентов) и sync --all (все проекты workspace).");
-    if (!ask!.yes("Записать настройки агентам сейчас?")) {
-      log("  Не записано. Позже: miksy sync --global и miksy sync --all (план — с --dry-run).");
-      return false;
-    }
+    // Отказ — без строки здесь: «позже: sync …» — одной строкой в итоге мастера (круг 11p)
+    if (!ask!.yes("Записать настройки агентам сейчас?")) return false;
     const written: TargetReport[] = [];
     for (const args of [["--global"], ["--all"]]) {
       log(`\n$ miksy sync ${args.join(" ")}`);

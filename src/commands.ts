@@ -178,6 +178,8 @@ function confirm(reason: string, flags: Record<string, string>) {
 // Что sync/clean решили по каждой цели (план до записи) — сводка плана для мастера setup
 export type TargetReport = { agent: string; title: string; scope: "global" | "project"; dir?: string; actions: Action[]; warnings: string[]; error?: string };
 let observe: ((r: TargetReport) => void) | null = null;
+// false — команда внутри мастера setup: без своего «Дальше: …» (следующие шаги ведёт мастер; круг 11p)
+let hints = true;
 
 // Секреты, нужные целям этого запуска (id цели → имена): из них и из учёта остальных целей —
 // какие файлы local/secrets/ нужны; файлы, уже записанные в этом запуске
@@ -839,7 +841,7 @@ const tilde = (s: string) => (/^~(?=$|[\\/])/.test(s) ? homeDir() + s.slice(1).r
 // Одна команда miksy: код выхода (0 — успех, 1 — проблемы doctor, 3 — конфликты). Ошибки — исключения
 // (UsageError — код 2, Cancelled — отказ в подтверждении). io.ask — вопросы (по умолчанию — терминал,
 // если он есть); io.observe — план каждой цели sync/clean. Кеш git — на одну команду (если включён)
-export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; observe?: (r: TargetReport) => void } = {}): number {
+export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; observe?: (r: TargetReport) => void; hints?: boolean } = {}): number {
   const parsed = parseArgs(cmd, rest);
   // «~», «~/…» и «~\…» в путях — домашний каталог: PowerShell 5.1 передаёт «~» программе как есть (выпуск 0.2.1, A4).
   // Имена (adopt <путь> <имя>) и значения других флагов так не начинаются
@@ -847,6 +849,7 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   const flags = "out" in parsed.flags ? { ...parsed.flags, out: tilde(parsed.flags.out) } : parsed.flags;
   ask = io.ask !== undefined ? io.ask : process.stdin.isTTY ? terminalAsk : null;
   observe = io.observe ?? null;
+  hints = io.hints ?? true;
   resetRun();
   if (gitCaching()) cacheGit();
   // Кеш путей — только командам, которые ничего не пишут: doctor и sync/clean с --dry-run (круг 10k, src/paths.ts).
@@ -864,7 +867,7 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
     }
     return code;
   }
-  finally { ask = null; observe = null; restorePaths(paths); restoreSkipped(outer); }
+  finally { ask = null; observe = null; hints = true; restorePaths(paths); restoreSkipped(outer); }
 }
 
 function command(cmd: string, flags: Record<string, string>, positional: string[], tail?: string[]): number {
@@ -1373,7 +1376,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const prefix = loadMap().skillPrefix ?? "miksy-";
         if (!name.startsWith(prefix)) console.log(`  совет: свои skills лучше называть с префиксом (${prefix}…), чтобы не совпадать с командными${loadMap().skillPrefix ? "" : "; свой префикс — skill_prefix в map.yaml"}`);
       }
-      console.log(`\nДальше: miksy sync --all${level === "global" ? " и miksy sync --global" : ""}` +
+      // В мастере setup запись и конфликты ведёт он сам (шаги 8–9: план, запись, замена «создан не miksy»)
+      if (hints) console.log(`\nДальше: miksy sync --all${level === "global" ? " и miksy sync --global" : ""}` +
         `\nЕсли для ${t.title} будет конфликт с исходной записью агента — miksy sync ${isGlobal ? "--global" : quoteArg(positional[0])} --agent <агент> --force (бэкап будет).`);
       break;
     }

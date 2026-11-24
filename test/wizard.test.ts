@@ -196,7 +196,8 @@ describe("мастер setup", () => {
     // Отказ от записи: ни учёта, ни файлов агентов
     expect(existsSync(`${f.config}/local/state/manifest.json`)).toBe(false);
     expect(existsSync(`${f.home}/.claude/CLAUDE.md`)).toBe(false);
-    expect(t).toContain("Не записано. Позже: miksy sync --global и miksy sync --all");
+    expect(t).toMatch(/Настройки агентам не записаны — позже: .*sync --global и .*sync --all \(план — с --dry-run\)\./);
+    expect(t).not.toContain("Не записано. Позже");
   }, 120000);
 
   test("продолжение после прерывания: сделанное не переспрашивается", () => {
@@ -545,4 +546,80 @@ describe("проверка раскладки (layoutWarning)", () => {
     const w = layoutWarning(s.ws, engineAt(s.dir, "elsewhere/miksy"), s.config)!;
     expect(w).toContain(`слой Tools/miksy, а движок лежит в ${s.dir}/elsewhere/miksy — на первой машине он был в ${s.ws}/Tools/miksy`);
   });
+});
+
+// Круг 11p: лишний вывод повторного setup и мастера
+describe("мастер setup: без лишнего вывода (круг 11p)", () => {
+  test("повторный setup --yes: machine.yaml не печатается — одна строка, как перезаписать", () => {
+    const f = fixture();
+    expect(f.wizard([], { yes: true })).toBe(0);
+    const before = readFileSync(`${f.config}/local/machine.yaml`, "utf8");
+    f.out.length = 0;
+    expect(f.wizard([], { yes: true })).toBe(0);
+    const t = f.text();
+    expect(t).toContain("✓ local/machine.yaml уже есть — не трогаю (перезаписать: setup --force)");
+    expect(t).not.toContain("Найдено сейчас");
+    expect(t).not.toContain("# Настройки этой машины");
+    expect(t).not.toMatch(/^\s*agents: \[/m);
+    expect(t).not.toMatch(/^\s*workspace: /m);
+    expect(readFileSync(`${f.config}/local/machine.yaml`, "utf8")).toBe(before);
+  }, 60000);
+
+  test("--yes: «Дальше» — пока sync ни разу не запускался; заметка о подготовке машины — когда machine.yaml записан сейчас", () => {
+    const f = fixture();
+    put(`${f.config}/local.example/README.md`, "# Подготовка машины\n");
+    const note = "есть заметка о подготовке машины";
+    // Первый запуск: machine.yaml записан — заметка есть; учёта нет — «Дальше» есть
+    expect(f.wizard([], { yes: true })).toBe(0);
+    expect(f.text()).toContain(note);
+    expect(f.text()).toContain("\nДальше:");
+    // Повтор до sync: файл не тронут — заметки нет; sync не было — «Дальше» есть
+    f.out.length = 0;
+    expect(f.wizard([], { yes: true })).toBe(0);
+    expect(f.text()).not.toContain(note);
+    expect(f.text()).toContain("\nДальше:");
+    // После sync — без «Дальше»
+    const orig = console.log;
+    console.log = () => {};
+    try { expect(runCommand("sync", ["--global"], { ask: null })).toBe(0); }
+    finally { console.log = orig; }
+    f.out.length = 0;
+    expect(f.wizard([], { yes: true })).toBe(0);
+    expect(f.text()).not.toContain("Дальше:");
+    expect(f.text()).not.toContain(note);
+    // --force перезаписывает machine.yaml — заметка снова
+    f.out.length = 0;
+    expect(f.wizard([], { yes: true, force: true })).toBe(0);
+    expect(f.text()).toContain("✓ local/machine.yaml записан");
+    expect(f.text()).toContain(note);
+  }, 60000);
+
+  test("adopt в мастере — без своего «Дальше»; отдельный miksy adopt — с ним", () => {
+    const f = fixture();
+    userMcp(f.home, { one: { type: "stdio", command: "node", args: ["1.js"] } });
+    f.bin.set("npx", "npx");
+    f.bin.set("node", "node");
+    f.wizard([
+      { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: "" }, { q: /Записать local\/machine\.yaml/, a: "y" },
+      { q: /Скопировать это в/, a: "n" }, { q: /Создать команду/, a: "n" },
+      { q: /Перенести в конфигурацию/, a: "1" }, { q: /Записать в слой/, a: "y" },
+      { q: /полный план/, a: "" }, { q: /Записать настройки/, a: "n" },
+    ]);
+    const t = f.text();
+    expect(t).toContain("✓ MCP one →");
+    expect(t).not.toContain("Дальше:");
+    expect(t).not.toContain("будет конфликт с исходной записью агента");
+    // Отказ от записи — одна строка «позже: sync» (в итоге), а не две
+    expect(t.match(/Настройки агентам не записаны — позже:/g)?.length).toBe(1);
+    expect(t).not.toContain("Не записано. Позже");
+    // Отдельная команда — как была
+    userMcp(f.home, { one: { type: "stdio", command: "node", args: ["1.js"] }, two: { type: "stdio", command: "node", args: ["2.js"] } });
+    const out: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => { out.push(a.map(String).join(" ")); };
+    try { expect(runCommand("adopt", ["--global", "two", "--to", "global", "--yes"], { ask: null })).toBe(0); }
+    finally { console.log = orig; }
+    expect(out.join("\n")).toContain("Дальше: miksy sync --all и miksy sync --global");
+  }, 120000);
 });
