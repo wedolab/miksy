@@ -9,7 +9,7 @@ import { canonical, fold, inside, pathKey, quoteArg, sameKey, samePath, slash, d
 import { dirname, join, relative, resolve } from "node:path";
 import { agentId } from "./agentid";
 import { clashText, dirsOf, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, treeAbove, treeClashes, treeJoin, treeOf } from "./roots";
-import { containsProjects, ENGINE, findProject, listProjects, type Project, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers } from "./load";
+import { containsProjects, ENGINE, findProject, listProjects, type Project, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers, type WalkCut } from "./load";
 import { merge, selectGlobal, selectProject } from "./resolve";
 import { type AgentId, scanTeamSkills, withTeamSkills } from "./teamskills";
 import { loadManifest, type Manifest, saveManifest, sha, type TargetState } from "./manifest";
@@ -336,10 +336,11 @@ export const targetId = (adapter: Adapter, target: Target) =>
 // Служебные каталоги самого miksy (песочницы, тестовые репо, бэкапы) — не проекты
 // warn — пропущенные каталоги и проекты (нет доступа; проект содержит домашний каталог — его
 // файлы агенты читали бы во всём доме): предупреждение, а не отказ всей команды
-export function allProjects(machine: Machine, adapters: Adapter[] = Object.values(ADAPTERS), warn?: (msg: string) => void) {
+// cut — обход корня упёрся в бюджет папок (doctor, «Справочно»; круг 11q)
+export function allProjects(machine: Machine, adapters: Adapter[] = Object.values(ADAPTERS), warn?: (msg: string) => void, cut?: (c: WalkCut) => void) {
   const known = adapters.flatMap((a) => a.knownDirs?.(machine) ?? []);
   const home = canonical(machine.home);
-  return listProjects(machineRoots(machine), known, warn).filter((p) => {
+  return listProjects(machineRoots(machine), known, warn, cut).filter((p) => {
     if (serviceDir(p.abs)) return false;
     if (!inside(home, p.abs)) return true;
     warn?.(`${p.rel} пропущен: проект содержит домашний каталог (для дома — --global)`);

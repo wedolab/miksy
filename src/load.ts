@@ -659,34 +659,65 @@ export function serviceDir(p: string): boolean {
   return serviceRoots.roots.some((r) => inside(q, r));
 }
 
+// Поиск проектов (круг 11q): уровни 1–SHALLOW_LEVELS от корня обхода — полностью; глубже — не больше DEEP_BUDGET
+// папок на один обход. Обход в ширину: при нехватке бюджета теряется самое глубокое. Почему так — DESIGN, «Обход workspace»
+export const SHALLOW_LEVELS = 7;
+export const DEEP_BUDGET = 10_000;
+// Обход упёрся в бюджет: корень, сколько папок глубже SHALLOW_LEVELS пройдено, где их больше всего (путь от корня — число)
+export type WalkCut = { root: string; budget: number; heavy: [string, number][] };
+
 // skipped — каталоги, пропущенные из-за прав (нет доступа): для предупреждения, а не отказа команды;
-// skip — каталоги, куда обход не заходит (вложенные корни workspace: их обходят отдельно)
-function reposUnder(root: string, stop = false, skipped?: (dir: string) => void, skip: string[] = []): string[] {
+// skip — каталоги, куда обход не заходит (вложенные корни workspace: их обходят отдельно); cut — обход упёрся в бюджет
+function reposUnder(root: string, stop = false, skipped?: (dir: string) => void, skip: string[] = [], cut?: (c: WalkCut) => void, budget = DEEP_BUDGET): string[] {
   const repos: string[] = [];
   const skipKeys = new Set(skip.map((s) => fold(slash(s))));
-  const walk = (dir: string, depth: number) => {
-    if (depth > 6 || (stop && repos.length)) return;
+  // Обход — от канонического корня: ссылки он не открывает (Dirent ссылки — не каталог), поэтому пути внутри тоже
+  // канонические и служебные каталоги сравниваются строкой, без realpath на каждую папку. Найденное — в форме root
+  const given = trimSlash(slash(root));
+  let base = given;
+  try { base = trimSlash(canonical(root)); } catch { /* нет доступа — как есть */ }
+  const shown = (p: string) => given + p.slice(base.length);
+  serviceDir(base); // обновить корни служебных каталогов (конфигурация могла смениться)
+  const service = (p: string) => serviceRoots!.roots.some((r) => inside(p, r));
+  const queue = [base];
+  const levels = [0];
+  let deep = 0;
+  const heavy = new Map<string, number>();
+  outer: for (let i = 0; i < queue.length; i++) {
+    if (stop && repos.length) break;
+    const dir = queue[i];
+    const level = levels[i] + 1;
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch (e) {
       // нечитаемый каталог (EACCES) — пропускаем, не роняя обход
-      if (["EACCES", "EPERM"].includes((e as NodeJS.ErrnoException).code ?? "")) skipped?.(dir);
-      return;
+      if (["EACCES", "EPERM"].includes((e as NodeJS.ErrnoException).code ?? "")) skipped?.(shown(dir));
+      continue;
     }
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith(".") || SKIP_DIRS.has(e.name)) continue;
       const p = child(dir, e.name);
-      if (serviceDir(p) || skipKeys.has(fold(p))) continue;
-      if (existsSync(join(p, ".git"))) repos.push(p);
-      walk(p, depth + 1);
+      if (service(p) || skipKeys.has(fold(shown(p)))) continue;
+      if (level > SHALLOW_LEVELS) {
+        if (deep >= budget) {
+          cut?.({ root: given, budget, heavy: [...heavy].sort((a, b) => b[1] - a[1]).slice(0, 3) });
+          break outer;
+        }
+        deep++;
+        const key = p.slice(base.endsWith("/") ? base.length : base.length + 1).split("/").slice(0, 2).join("/");
+        heavy.set(key, (heavy.get(key) ?? 0) + 1);
+      }
+      if (existsSync(join(p, ".git"))) repos.push(shown(p));
+      queue.push(p);
+      levels.push(level);
     }
-  };
-  walk(slash(root), 0);
+  }
   return repos;
 }
 
-// Есть ли внутри каталога другие проекты (git-репо) — тогда его CLAUDE.local.md подхватили бы и они
+// Есть ли внутри каталога другие проекты (git-репо) — тогда его CLAUDE.local.md подхватили бы и они. Бюджет — как у
+// поиска проектов, упор — молча (как раньше предел глубины)
 export const containsProjects = (dir: string) => reposUnder(dir, true).length > 0;
 
 export type Project = { abs: string; rel: string; nested: boolean; root: Root };
@@ -695,12 +726,13 @@ export type Project = { abs: string; rel: string; nested: boolean; root: Root };
 // Вложенный корень обходится сам по себе — обход внешнего его пропускает. Каталог без git, внутри
 // которого есть другие проекты (например, каталог организации), — не проект: его файлы подхватывались
 // бы всеми вложенными проектами. Недоступный корень (диск не подключён) пропускается. rel — место в
-// дереве слоёв. warn — пропущенные каталоги (нет доступа)
-export function listProjects(workspace: string | Root[], extra: string[] = [], warn?: (msg: string) => void): Project[] {
+// дереве слоёв. warn — пропущенные каталоги (нет доступа); cut — обход корня упёрся в бюджет папок (doctor, «Справочно»);
+// budget — для тестов
+export function listProjects(workspace: string | Root[], extra: string[] = [], warn?: (msg: string) => void, cut?: (c: WalkCut) => void, budget = DEEP_BUDGET): Project[] {
   const live = asRoots(workspace).filter(rootExists);
   const repos = new Set<string>();
   for (const r of live)
-    for (const p of reposUnder(r.path, false, (d) => warn?.(`каталог ${d} пропущен при поиске проектов — нет доступа`), innerRoots(r, live).map((o) => o.path)))
+    for (const p of reposUnder(r.path, false, (d) => warn?.(`каталог ${d} пропущен при поиске проектов — нет доступа`), innerRoots(r, live).map((o) => o.path), cut, budget))
       repos.add(p);
 
   const under = (a: string, b: string) => inside(a, b) && !sameKey(a, b);

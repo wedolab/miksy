@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, declaredSkillSecrets, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys, WIDE_SKILL_SECRETS, wideSkillSecrets } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, declaredSkillSecrets, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys, WIDE_SKILL_SECRETS, wideSkillSecrets, SHALLOW_LEVELS, type WalkCut } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -44,7 +44,8 @@ const globalSkillDirs = () => Object.values(ADAPTERS).flatMap((a) => (a.homeSkil
 export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, bunVersion: string = Bun.version, which: (cmd: string) => string | null = (c) => Bun.which(c)): { text: string; problems: number; added: Addition[]; blocked: Blocked[] } {
   const secrets = loadSecrets();
   const skippedDirs: string[] = [];
-  const projects = allProjects(machine, undefined, (w) => skippedDirs.push(w));
+  const cuts: WalkCut[] = [];
+  const projects = allProjects(machine, undefined, (w) => skippedDirs.push(w), (c) => cuts.push(c));
   const badGroups: string[] = [], absentGroups: string[] = [], rootGroups: string[] = [];
   // Каталога группы нет на этой машине (проекты не склонированы) — справочно, как слои без проектов
   const groups = listGroups(machine, (w) => {
@@ -454,6 +455,13 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const renamed = Object.values(ADAPTERS).flatMap((a) => (a.aliases ?? []).map((old) => `${old} теперь ${a.id}${a.aliasNote ? ` ${a.aliasNote}` : ""}`)).join("; ");
   if (legacy.length) info.push(`Прежнее имя агента (${legacy.length}) — работает, но лучше переименовать: ${renamed}:`, ...legacy.map((l) => "  " + l));
   if (skippedDirs.length) info.push(`Пропущено при поиске проектов (${skippedDirs.length}):`, ...skippedDirs.map((w) => "  " + w));
+  // Обход корня упёрся в бюджет папок глубже SHALLOW_LEVELS (круг 11q): справка, а не проблема — в sync --all её нет
+  if (cuts.length) {
+    const n = (x: number) => String(x).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    info.push(`Поиск проектов остановлен (${cuts.length}) — глубже ${SHALLOW_LEVELS} уровней от корня miksy просматривает не больше ${n(cuts[0].budget)} папок, проекты дальше могли не найтись:`,
+      ...cuts.map((c) => `  ${c.root}${c.heavy.length ? ` — больше всего папок в ${c.heavy.map(([p, k]) => `${p} (${n(k)})`).join(", ")}` : ""}`),
+      "  Проект там — запустите miksy sync в его папке; большие папки без проектов (данные, архивы) лучше держать вне workspace.");
+  }
   const unread = ignoredLayerParts();
   if (unread.length) info.push(`Не читается: ${ignoredText(unread)}`);
   if (unused.length) info.push(`Слои, которые на этой машине ни к чему не применяются (проектов нет): ${unused.join(", ")}`);
