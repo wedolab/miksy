@@ -483,6 +483,24 @@ export function checkSkillSecrets(v: unknown, where: string): string[] {
   return [...new Set(v as string[])];
 }
 
+// Привязки map.yaml (layers: [{ use, match }]) с match шире одной организации (шаблон в первой части пути: *, **, ?, […],
+// {…}), чей слой объявляет skill_secrets: эти имена получат skills всех подходящих организаций — как из global (круг 11l).
+// Строка «map.yaml: layers[i] (match: …) → слой: имена»; битая карта или слой — пропуск (ошибку покажет загрузка)
+export function wideSkillSecrets(root = configRoot()): string[] {
+  const out: string[] = [];
+  let map: MiksyMap;
+  try { map = loadMap(root); } catch { return out; }
+  map.layers.forEach((e, i) => {
+    if (typeof e?.match !== "string" || !/[*?[{]/.test(e.match.split("/")[0])) return;
+    try {
+      const names = loadLayer(e.use, root).skillSecrets ?? [];
+      if (names.length) out.push(`map.yaml: layers[${i}] (match: ${e.match}) → слой ${e.use}: ${names.join(", ")}`);
+    } catch { /* покажет загрузка */ }
+  });
+  return out;
+}
+export const WIDE_SKILL_SECRETS = "skill_secrets в слое привязки map.yaml с match шире одной организации — эти секреты miksy secret выдаст skills всех подходящих организаций, как из global; объявите их в слое организации (layers/tree/<организация>/layer.yaml)";
+
 // Все объявления skill_secrets в слоях конфигурации: файл layer.yaml (от конфигурации) и имя — для doctor (объявлен, а
 // значения в local/secrets.env нет). Ошибки разбора здесь не важны — их покажет загрузка слоя
 export function declaredSkillSecrets(root = configRoot()): { file: string; name: string }[] {

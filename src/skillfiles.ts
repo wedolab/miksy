@@ -8,11 +8,13 @@
 //   доставляются — скрипту skill они могут быть нужны;
 // - ссылка на файл внутри слоёв конфигурации (<конфигурация>/layers) — копией содержимого; ссылка наружу (в том числе
 //   в local/ — secrets.env с любым именем ссылки уехал бы в каждый проект — и на map.yaml) или битая — не доставляется, warning;
-//   ссылка на каталог не обходится (как и раньше);
-// - файл, похожий на секрет по имени (skillFileKind): git конфигурации его игнорирует — доставляется секретным
+//   ссылка на каталог не обходится (как и раньше); сама папка skill (skills/, слой) — ссылка наружу или битая: skill не
+//   доставляется целиком, warning (круг 11l);
+// - файл, похожий на секрет по имени (skillFileKind; у ссылки — по имени цели, круг 11l): ссылка на файл секретов вне этого
+//   skill — не доставляется, warning; git конфигурации его игнорирует — доставляется секретным
 //   (0600 на macOS/Linux); иначе (отслеживается, не игнорируется, конфигурация не git) — не доставляется, warning
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { gitMemo } from "./git";
 import { configRoot, gitIgnored } from "./load";
 import { canonical, inside, slash } from "./paths";
@@ -62,6 +64,21 @@ function readSkillDir(item: Skill, warnings: string[]): Source[] {
   // Граница ссылок — каталог слоёв, не вся конфигурация: в ней local/ с секретами
   let realLayers = join(root, "layers");
   try { realLayers = canonical(realLayers); } catch { /* как есть */ }
+  // Сама папка skill слоя (или skills/, или весь слой) может быть ссылкой или junction (круг 11l): её цель должна быть
+  // внутри слоёв конфигурации, иначе skill не доставляется целиком — как ссылка на файл наружу. Skill не из слоёв
+  // конфигурации (встроенный skill движка) этой проверки не проходит — он не в git конфигурации
+  const realSkill = (() => { try { return canonical(item.dir); } catch { return null; } })(); // null — битая
+  const fromLayers = inside(slash(item.dir), slash(join(root, "layers")));
+  if (fromLayers && (!realSkill || !inside(realSkill, realLayers))) {
+    warnings.push(`skill ${item.name}: папка skill — ссылка ${realSkill ? "за пределы слоёв конфигурации" : "битая"}, skill не доставлен`);
+    return [];
+  }
+  // Файл-секрет git конфигурации игнорирует — по каноническому пути (ссылки и папки-ссылки git не разыменовывает)
+  const ignored = (real: string) => {
+    if (!inside(real, realLayers)) return false; // не в слоях — не в git конфигурации
+    const rel = `layers/${slash(relative(realLayers, real))}`;
+    return ignoredSecrets(root).has(rel) || gitMemo(`skill-secret-ignored|${root}|${rel}`, () => gitIgnored(root, [rel])).has(rel);
+  };
   const out: Source[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir).sort()) {
@@ -72,8 +89,10 @@ function readSkillDir(item: Skill, warnings: string[]): Source[] {
         if (!SKIP_DIR.test(name)) walk(path);
         continue;
       }
-      if (l.isSymbolicLink()) {
-        let real: string | null = null;
+      // Цель ссылки (канонически); у обычного файла — только для файла-секрета (ниже): обход node_modules без лишних вызовов
+      const link = l.isSymbolicLink();
+      let real: string | null = null;
+      if (link) {
         try { real = canonical(path); } catch { /* битая */ }
         if (!real || !inside(real, realLayers)) {
           warnings.push(`skill ${item.name}: ${rel} — ссылка ${real ? "за пределы слоёв конфигурации" : "битая"}, не доставлена`);
@@ -83,11 +102,18 @@ function readSkillDir(item: Skill, warnings: string[]): Source[] {
       let st;
       try { st = statSync(path); } catch { continue; }
       if (!st.isFile()) continue; // ссылка на каталог не обходится
-      const kind = skillFileKind(name, false);
+      // Вид файла — по тому, что доставляется: у ссылки — по её цели (круг 11l), а не по имени ссылки
+      const kind = skillFileKind(real ? basename(real) : name, false);
       if (kind === "junk") continue;
       let sensitive = false;
       if (kind === "secret") {
-        if (!ignoredSecrets(root).has(slash(relative(root, path)))) {
+        // Ссылка на файл секретов другого skill (или вне skill) — не доставляется: секрет одного skill (часто — другой
+        // организации) не должен уходить с чужим skill
+        if (real && (!realSkill || !inside(real, realSkill))) {
+          warnings.push(`skill ${item.name}: ${rel} — ссылка на файл секретов вне этого skill, не доставлена`);
+          continue;
+        }
+        if (!ignored(real ?? canonical(path))) {
           warnings.push(`skill ${item.name}: ${rel} похож на секрет и не исключён из git конфигурации — не доставлен; уберите его из слоя или добавьте в .gitignore конфигурации (как передать skill секрет — docs/layers.md#секреты-в-skills)`);
           continue;
         }

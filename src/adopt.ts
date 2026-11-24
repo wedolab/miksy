@@ -224,7 +224,7 @@ export function addSecrets(secrets: Record<string, string>, root = configRoot())
 
 // Копирование skill в слой. Симлинки не разыменовываем: ссылка могла вести за пределы skill
 // (ключи, .env). Похожее на секреты и служебное не копируется (skillFileKind); в скопированном тексте ищутся
-// секреты (naked: файл:строка с маской) — справка, копирование не останавливается. dryRun — только план
+// секреты (naked: файл:строка и что найдено, без текста строки) — справка, копирование не останавливается. dryRun — только план
 export function adoptSkill(srcDir: string, name: string, level: string, root = configRoot(), dryRun = false) {
   checkName(name);
   const dst = join(layerDir(level, root), "skills", name);

@@ -18,13 +18,13 @@ import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsaf
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
 import { skillSecretCopies } from "./skillfiles";
-import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadLayer, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys } from "./load";
+import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadLayer, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys, WIDE_SKILL_SECRETS, wideSkillSecrets } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
 import { engineVersion, newerLedger } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
-import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
+import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, agentDirs, enclosingTarget, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
 import { merge, selectGlobal } from "./resolve";
 import { builtinCopies, builtinCopyText, builtinHash } from "./builtin";
 import { placeSkillSecrets, secretValue } from "./secretcmd";
@@ -765,7 +765,6 @@ function decideTrust(list: { p: PendingTrust; adapter: Adapter; t: TargetSpec }[
 }
 
 // Каталоги, где агенты уже работали (их реестры проектов): тоже проекты, и без git
-const agentDirs = (machine: Machine) => new Set(Object.values(ADAPTERS).flatMap((a) => a.knownDirs?.(machine) ?? []).flatMap((d) => { try { return [fold(pathKey(d))]; } catch { return []; } }));
 
 // Каталог для root add, который сам проект: git-репо (без проектов внутри), проект или цель target: true другого
 // корня, каталог с записанным miksy. Текст — общий с мастером setup (projectRootText); иначе null
@@ -820,12 +819,8 @@ function syncProject(path: string | undefined, machine: Machine, out: boolean): 
       if (inside(machine.home, cwd)) return { p: findProject(cwd, roots), plain: false };
       throw rootError(cwd);
     }
-    for (let d = cwd; inside(d, at.root.path) && !sameKey(d, at.root.path); d = slash(dirname(d))) {
-      if (existsSync(join(d, ".git"))) return { p: findProject(d, roots), plain: false };
-      const g = isGroup(d);
-      if (g) return { p: { abs: g.abs, rel: g.rel, nested: g.nested, root: at.root }, plain: false };
-      if (known.has(fold(d)) && !containsProjects(d)) return { p: findProject(d, roots), plain: false };
-    }
+    const up = enclosingTarget(cwd, at.root, machine);
+    if (up) return { p: up, plain: false };
     throw new UsageError(`${cwd} — не проект: каталог без git и не цель${containsProjects(cwd) ? " (внутри — проекты)" : ""}; ${how} настройки только проекту или цели. Сделать его проектом — git init, целью без git — miksy target; все проекты — miksy sync --all`);
   }
   const p = findProject(path, roots);
@@ -944,7 +939,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const known = loadSecrets();
       console.log(formatResolved(title, cfg, machine, known));
       // Секреты, которые skills этого места получают через miksy secret (круг 11k): имена и слой, без значений
-      const forSkills = abs ? placeSkillSecrets(abs, machine).names : cfg.skillSecrets ?? [];
+      // Служебный каталог (явным путём) — секреты там не выдаются: строка-пояснение, а не ошибка (круг 11l)
+      const service = !!abs && serviceDir(abs);
+      const forSkills = service ? [] : abs ? placeSkillSecrets(abs, machine).names : cfg.skillSecrets ?? [];
+      if (service) console.log("\nСекреты для skills: служебный каталог miksy (копии, бэкапы, сборки) — miksy secret здесь их не выдаёт");
       if (forSkills.length) {
         console.log("\nСекреты для skills (miksy secret; значения — в local/secrets.env)");
         for (const s of forSkills) console.log(`  ${s.item.padEnd(24)}${s.layer}${s.item in known ? "" : "   НЕТ в local/secrets.env"}`);
@@ -1008,6 +1006,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         if (unread.length) console.log(`предупреждение: ${ignoredText(unread)}\n`);
         const keys = unknownKeys();
         if (keys.length) console.log(`предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): ${keys.join(", ")}\n`);
+        const wide = wideSkillSecrets();
+        if (wide.length) console.log(`предупреждение: ${WIDE_SKILL_SECRETS}:\n${wide.map((l) => "  " + l).join("\n")}\n`);
         // Команда miksy старого вида (движок обновили git pull, без update или setup): ею агенты запускают MCP-серверы
         for (const p of shimNotes(machine.home, machine.os, false).problems) console.log(`предупреждение: ${p}\n`);
       }
@@ -1105,15 +1105,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Своя замена встроенного skill miksy: одна строка, когда встроенный сменился с прошлого sync --global этой машины
       // (хеш — в учёте), а не на каждом sync (круг 11j). Замены нет — учёт не трогаем (sync без изменений оставляет его
       // байт в байт); учёт более новой версии miksy не переписываем (его отметку переписывает только setup)
+      let builtinSeen: string | null = null;
       if (cmd === "sync" && "global" in flags) {
         const now = builtinHash();
         const own = now && manifest.builtinSkill !== now ? builtinCopies(selectGlobal(loadMap(), machine.os).map((n) => loadLayer(n))).filter((c) => !c.stale) : [];
         if (own.length) {
           for (const c of own) console.log(`предупреждение: ${builtinCopyText(c, configRoot())}\n`);
-          if (!("dry-run" in flags) && !newerLedger(manifest.engine)) {
-            manifest.builtinSkill = now;
-            saveManifest(manifest);
-          }
+          // В учёт — после успешной синхронизации (круг 11l): упадёт sync — строка повторится в следующий раз
+          if (!("dry-run" in flags) && !newerLedger(manifest.engine)) builtinSeen = now;
         }
       }
       const adapters = agentsFor(machine, flags.agent);
@@ -1238,6 +1237,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (!("dry-run" in flags) && rootsChanged && Object.keys(manifest.targets).length) saveManifest(manifest);
       // Номер машины, под которым учёт записывает блоки exclude (круг 10z-2)
       if (!("dry-run" in flags) && noteMachine(manifest, undefined, flags["machine-was"])) saveManifest(manifest);
+      if (builtinSeen) {
+        manifest.builtinSkill = builtinSeen;
+        saveManifest(manifest);
+      }
 
       // Доверие проектам с исполняемыми настройками агента: в терминале — вопрос по каждому (--yes его
       // не снимает); без терминала и в --dry-run — список и указание агенту спросить пользователя

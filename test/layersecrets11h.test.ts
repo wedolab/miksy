@@ -37,8 +37,8 @@ describe("секреты в skills слоёв", () => {
       "layers/global/skills/deploy/SKILL.md",
       "layers/tree/Org/skills/s/SKILL.md",
     ]);
-    expect(r.skills).toContain("layers/global/skills/deploy/SKILL.md:4: вызов: curl -H \"Authorization: Bearer <secret>\"");
-    expect(r.skills).toContain("layers/global/skills/deploy/scripts/run.sh:2: export API_KEY=<secret>");
+    expect(r.skills).toContain("layers/global/skills/deploy/SKILL.md:4: токен Bearer");
+    expect(r.skills).toContain("layers/global/skills/deploy/scripts/run.sh:2: ключ API_KEY");
     const all = r.skills.join("\n");
     for (const v of [TOKEN, PASS]) expect(all).not.toContain(v);
     if (linked) expect(all).not.toContain("link.env");
@@ -67,7 +67,7 @@ describe("секреты в skills слоёв", () => {
     put(`${skill(f.config)}/.env`, "X=1\n");
     const s = f.run(["sync", "--global", "--dry-run"]);
     expect(s.out).toContain("ВНИМАНИЕ: секреты в skills слоёв");
-    expect(s.out).toContain("layers/global/skills/deploy/SKILL.md:4: API_TOKEN=<secret>");
+    expect(s.out).toContain("layers/global/skills/deploy/SKILL.md:4: ключ API_TOKEN");
     expect(s.out).toContain("layers/global/skills/deploy/.env — файл с секретами");
     expect(s.out).toContain("docs/layers.md#секреты-в-skills");
     expect(s.out).not.toContain("в слое оставьте");
@@ -75,7 +75,7 @@ describe("секреты в skills слоёв", () => {
     const d = f.run(["doctor"]);
     expectCode(d, 1);
     expect(d.out).toContain("Секреты в skills слоёв (2)");
-    expect(d.out).toContain("layers/global/skills/deploy/SKILL.md:4: API_TOKEN=<secret>");
+    expect(d.out).toContain("layers/global/skills/deploy/SKILL.md:4: ключ API_TOKEN");
     expect(d.out).not.toContain("Секреты открытым текстом в слоях");
     expect(d.out).not.toContain(PASS);
   });

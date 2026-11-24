@@ -142,15 +142,33 @@ export function skillFileKind(name: string, dir: boolean): "secret" | "junk" | n
 }
 
 // Секреты открытым текстом в файле skill: строки с распознанными частями (URL с паролем, ?token=, Bearer, токены
-// с префиксом) и KEY=значение, где имя похоже на секрет, а значение — на случайный токен. Значения замаскированы
-const ASSIGN = /^(\s*(?:export\s+)?["']?([A-Za-z_][\w.-]*)["']?\s*[:=]\s*["']?)([^"'\s#,]+)/;
+// с префиксом) и ключ: значение / KEY=значение (в том числе в середине строки — JSON, YAML в одну строку), где имя
+// похоже на секрет, а значение — на случайный токен. Текст строки не выводится (круг 11l: в нём могли остаться
+// нераспознанные значения) — только что найдено: вид и имя ключа или параметра
+const ASSIGN = /(?:^|[\s{,;(])(?:export\s+)?["']?([A-Za-z_][\w.-]*)["']?\s*[:=]\s*["']?([^"'\s#,;}]+)/g;
+const PREFIX = /^(sk-|glpat-|gh[pousr]_|github_pat_|dop_v1_|xox[abpr]-|y0_|AKIA|AQVN|t1\.|eyJ)/;
+const KIND = ["пароль в адресе", "параметр %s в адресе", "пароль в строке подключения (%s)", "токен %s"];
 export function nakedInText(text: string): { line: number; text: string }[] {
   const out: { line: number; text: string }[] = [];
   text.split(/\r?\n/).forEach((l, i) => {
-    let masked = redact(l, () => "<secret>");
-    const a = masked.match(ASSIGN);
-    if (a && SECRET_KEY.test(a[2]) && suspicious(a[3])) masked = a[1] + "<secret>" + masked.slice(a[0].length);
-    if (masked !== l) out.push({ line: i + 1, text: masked.trim().slice(0, 160) });
+    const what: string[] = [];
+    const add = (w: string) => { if (!what.includes(w)) what.push(w); };
+    const seen: string[] = []; // значения, уже найденные частями, — ключ с тем же значением не повторяем
+    PARTS.forEach(({ rx }, k) => {
+      for (const m of l.matchAll(rx)) {
+        const value = m[m.length - 1];
+        if (!value || hasRef(value) || value.startsWith("<secret")) continue;
+        seen.push(value);
+        add(KIND[k].replace("%s", m[2]));
+      }
+    });
+    for (const m of l.matchAll(PREFIXED)) {
+      if (seen.some((v) => v.includes(m[0]))) continue; // уже найден частью (Bearer ghp_…)
+      seen.push(m[0]);
+      add(`токен ${m[0].match(PREFIX)?.[0] ?? ""}…`);
+    }
+    for (const m of l.matchAll(ASSIGN)) if (SECRET_KEY.test(m[1]) && suspicious(m[2]) && !seen.some((v) => m[2].includes(v))) add(`ключ ${m[1]}`);
+    if (what.length) out.push({ line: i + 1, text: what.join(", ") });
   });
   return out;
 }

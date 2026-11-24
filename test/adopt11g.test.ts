@@ -36,7 +36,7 @@ describe("11g: какие файлы skill не переносятся", () => {
     expect(found.map((f) => f.line)).toEqual([2, 3, 4]);
     const all = JSON.stringify(found);
     for (const v of [TOKEN, KEY, "pa55word"]) expect(all).not.toContain(v);
-    expect(found[1].text).toBe("API_KEY=<secret>");
+    expect(found[1].text).toBe("ключ API_KEY");
   });
 });
 
@@ -63,7 +63,7 @@ describe("11g: adopt skill", () => {
     expect([...plan.files].sort()).toEqual([".env.example", "SKILL.md", "keys/id_rsa.pub", "scripts/run.sh"]);
     expect([...plan.secret].sort()).toEqual([".env", "keys/ID_RSA", "sub/deeper/.ENV.local"]);
     expect([...plan.junk].sort()).toEqual([".DS_Store", ".git/", "node_modules/"]);
-    expect(plan.naked).toEqual(["scripts/run.sh:2: export API_KEY=<secret>"]);
+    expect(plan.naked).toEqual(["scripts/run.sh:2: ключ API_KEY"]);
     const done = adoptSkill(`${root}/src`, "tool", "workspace", root);
     expect(done).toEqual(plan);
     const dst = `${root}/layers/tree/skills/tool`;
@@ -82,7 +82,7 @@ describe("11g: adopt skill", () => {
       expect(r.out).toContain("Не скопировано (похоже на секрет): .env, keys/ID_RSA, sub/deeper/.ENV.local");
       expect(r.out).toContain("docs/layers.md#секреты-в-skills");
       expect(r.out).toContain("Не скопировано (служебное): .DS_Store, .git/, node_modules/");
-      expect(r.out).toContain("scripts/run.sh:2: export API_KEY=<secret>");
+      expect(r.out).toContain("scripts/run.sh:2: ключ API_KEY");
       expect(r.out).not.toContain(KEY);
     }
     expect(dry.out).toContain("--dry-run: ничего не записано.");

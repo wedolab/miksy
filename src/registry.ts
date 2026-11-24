@@ -9,7 +9,7 @@ import { canonical, fold, inside, pathKey, quoteArg, sameKey, samePath, slash, d
 import { dirname, join, relative, resolve } from "node:path";
 import { agentId } from "./agentid";
 import { clashText, dirsOf, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, treeAbove, treeClashes, treeJoin, treeOf } from "./roots";
-import { containsProjects, ENGINE, listProjects, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers } from "./load";
+import { containsProjects, ENGINE, findProject, listProjects, type Project, serviceDir, loadLayer, loadMap, configRoot, rootMemoryKey, treeGroups, treeLayers } from "./load";
 import { merge, selectGlobal, selectProject } from "./resolve";
 import { type AgentId, scanTeamSkills, withTeamSkills } from "./teamskills";
 import { loadManifest, type Manifest, saveManifest, sha, type TargetState } from "./manifest";
@@ -76,6 +76,24 @@ export const layersOf =(rel: string, machine: Machine) => [...treeLayers(rel), .
 export interface Group { abs: string; rel: string; nested: boolean; git: boolean; root?: Root }
 // Как назвать помеченный каталог в выводе
 export const markedKind = (t: { nested?: boolean }) => (t.nested ? "группа" : "цель без git");
+
+// Каталоги, где уже работал агент (реестры проектов агентов): такой каталог без git — тоже проект
+export const agentDirs = (machine: Machine) => new Set(Object.values(ADAPTERS).flatMap((a) => a.knownDirs?.(machine) ?? []).flatMap((d) => { try { return [fold(pathKey(d))]; } catch { return []; } }));
+
+// Ближайшая цель вверх от каталога внутри корня — как у sync без пути: git-репо, цель target: true (группа), каталог,
+// где работал агент (без проектов внутри). Сам корень не цель; не нашлось — null. Общая для sync и miksy secret (круг 11l)
+export function enclosingTarget(dir: string, root: Root, machine: Machine): Project | null {
+  const roots = machineRoots(machine);
+  const groups = listGroups(machine);
+  const known = agentDirs(machine);
+  for (let d = slash(dir); inside(d, root.path) && !sameKey(d, root.path); d = slash(dirname(d))) {
+    if (existsSync(join(d, ".git"))) return findProject(d, roots);
+    const g = groups.find((x) => sameKey(x.abs, d));
+    if (g) return { abs: g.abs, rel: g.rel, nested: g.nested, root };
+    if (known.has(fold(d)) && !containsProjects(d)) return findProject(d, roots);
+  }
+  return null;
+}
 
 // Группы этой машины: каталоги всех корней на месте помеченного слоя (ветка корня совпала с папкой
 // другого корня — два каталога). Неверная пометка (нет каталога, служебный каталог, содержит дом, внутри проекта,
