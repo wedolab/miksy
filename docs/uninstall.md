@@ -115,7 +115,7 @@ cp ~/Projects/miksy-config/local/backups/before-miksy-<метка>/.codex/config
 
 Если не нужно, — в таком порядке:
 - **команда `miksy`** — только после шага 1: ею Codex, opencode и Antigravity запускают MCP-серверы проектов, и без
-  неё эти серверы не запустятся, пока `clean` их не уберёт. Файлы: `~/.bun/bin/miksy` (на Windows — `miksy.cmd` в той
+  неё эти серверы не запустятся, пока `clean` их не уберёт. Файлы: `~/.bun/bin/miksy` (на Windows — ещё `miksy.cmd` в той
   же папке, `$HOME\.bun\bin`) и `~/.miksy`, если есть (в нём записано, где лежит конфигурация);
 - **Bun**, если он нужен был только miksy: папку `~/.bun` (`Remove-Item -Recurse $HOME\.bun` в PowerShell) и
   `~/.bun/bin` в PATH. macOS и Linux — строки `# miksy`, `# bun`, `export BUN_INSTALL=…`, `export PATH=…` в

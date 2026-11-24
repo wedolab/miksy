@@ -5,6 +5,15 @@
 пока версия 0.x, «Ломает» или «Новое» поднимают вторую цифру, только «Исправлено» — третью. Как
 обновиться — `miksy update` ([docs/update.md](docs/update.md)). Правила записи — [RELEASING.md](RELEASING.md).
 
+## Не выпущено
+
+### Исправлено
+
+- Windows: в Git Bash (через него, например, выполняет команды Claude Code) команда `miksy` не находилась —
+  находился только `miksy.cmd`, и пример `miksy secret ИМЯ | <команда>` не работал. Теперь `miksy update` или
+  `miksy setup` кладёт рядом с `miksy.cmd` команду `miksy` для Git Bash. В PowerShell и cmd всё по-прежнему.
+  `miksy doctor` напомнит, если на машине есть Git Bash, а этой команды нет.
+
 ## 0.7.0 — 2026-11-24
 
 ### Новое

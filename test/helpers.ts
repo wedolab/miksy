@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { expect } from "bun:test";
 import { placeSlug, scriptName } from "../src/launch";
-import { shimPath, shimText } from "../src/shim";
+import { shimFiles, shimPath } from "../src/shim";
 
 export const CLI = resolve(import.meta.dir, "..", "src", "cli.ts");
 
@@ -52,7 +52,8 @@ export function cliFixture(opts: { agents?: string[]; projects?: string[]; built
 export function withShim(f: { home: string }): string {
   const os = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
   const path = shimPath(f.home, os, {});
-  put(path, shimText(os, process.execPath.replaceAll("\\", "/"), CLI.replaceAll("\\", "/")));
+  // Как setup: на Windows — miksy.cmd и спутник miksy для Git Bash (круг 11m)
+  for (const s of shimFiles(os, process.execPath.replaceAll("\\", "/"), CLI.replaceAll("\\", "/"))) put(`${dirname(path)}/${s.name}`, s.text);
   if (os !== "windows") chmodSync(path, 0o755);
   return path;
 }

@@ -1,8 +1,8 @@
-// Команда miksy (shim, ~/.bun/bin/miksy[.cmd]) — её пишет miksy setup; через неё агенты запускают MCP-серверы проектов
+// Команда miksy (shim, ~/.bun/bin/miksy; на Windows — miksy.cmd и спутник miksy для Git Bash) — её пишет miksy setup; через неё агенты запускают MCP-серверы проектов
 // (miksy mcp, src/mcprun.ts). Здесь же — где она лежит и в каком она виде (sync и doctor предупреждают о старом виде)
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { configRoot } from "./load";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { slash } from "./paths";
 import type { Os } from "./types";
 
@@ -49,6 +49,36 @@ export function shimText(os: Os, bun: string, cli: string, legacy = false): stri
     ...(utf8 ? [":done", "set miksy_rc=%errorlevel%", "if %miksy_cp% GTR 0 chcp %miksy_cp% >nul", "exit /b %miksy_rc%"] : ["exit /b %errorlevel%"]),
     "",
   ].join("\r\n");
+}
+
+// Windows: спутник miksy.cmd — sh-скрипт «miksy» без расширения в той же папке (как у npm: name, name.cmd). Git Bash,
+// MSYS2 и Cygwin не используют PATHEXT и miksy.cmd по имени «miksy» не находят; cmd и PowerShell берут .cmd (PATHEXT),
+// файл без расширения им не мешает (круг 11m). Текст — тот же POSIX-вид (пути C:/…: bun.exe их понимает), LF
+export const shimCompanion = (cmd: string) => cmd.replace(/\.cmd$/i, "");
+export function shimFiles(os: Os, bun: string, cli: string): { name: string; text: string }[] {
+  return os === "windows"
+    ? [{ name: "miksy.cmd", text: shimText("windows", bun, cli) }, { name: "miksy", text: shimText("macos", bun, cli) }]
+    : [{ name: "miksy", text: shimText(os, bun, cli) }];
+}
+
+// bash на Windows, которому нужен спутник: Git for Windows (bash в PATH, рядом с git в PATH, обычные места установки),
+// MSYS2, Cygwin. System32\bash.exe — запуск WSL (там свой Linux и свой miksy), MinGit и git GitHub Desktop — без bash.
+// Путь или null
+export function windowsBash(env: Record<string, string | undefined> = process.env, exists: (p: string) => boolean = existsSync): string | null {
+  const path = env[Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH"] ?? "";
+  const dirs = path.split(";").filter(Boolean);
+  const wsl = (d: string) => /[\\/](system32|sysnative)[\\/]?$/i.test(d) || /[\\/]microsoft[\\/]windowsapps[\\/]?$/i.test(d);
+  // Пути Windows — и в тестах на macOS/Linux
+  const wj = win32.join;
+  const pf = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432, env.LOCALAPPDATA && wj(env.LOCALAPPDATA, "Programs")].filter((x): x is string => !!x);
+  const candidates = [
+    ...dirs.filter((d) => !wsl(d)).map((d) => wj(d, "bash.exe")),
+    // git.exe в PATH (Git\cmd) — bash рядом: Git\bin\bash.exe
+    ...dirs.filter((d) => exists(wj(d, "git.exe"))).map((d) => wj(d, "..", "bin", "bash.exe")),
+    ...pf.map((p) => wj(p, "Git", "bin", "bash.exe")),
+    "C:\\msys64\\usr\\bin\\bash.exe", "C:\\cygwin64\\bin\\bash.exe", "C:\\cygwin\\bin\\bash.exe",
+  ];
+  return candidates.find((c) => exists(c)) ?? null;
 }
 
 // Команда miksy, которую создал setup (прежний формат — bun из PATH — тоже): только её setup обновляет
@@ -121,12 +151,21 @@ export function rcAddsDir(text: string, dir: string, home: string): boolean {
 // запущенных не из терминала (Windows — PATH пользователя и системы в реестре; macOS, Linux — rc-файлы оболочки,
 // их читают оболочка входа и приложения, берущие её окружение), — справочно, с тем, что сделать
 // agents — названия агентов, MCP проектов которых запускает команда miksy (адаптеры с projectMcp: "portable")
-export function shimNotes(home: string, os: Os, used: boolean, o: { registryPath?: () => string | null; agents?: string[] } = {}): { problems: string[]; info: string[] } {
+export function shimNotes(home: string, os: Os, used: boolean, o: { registryPath?: () => string | null; agents?: string[]; bash?: () => string | null } = {}): { problems: string[]; info: string[] } {
   const who = o.agents?.length ? o.agents.join(", ") : "агенты";
   const path = shimPath(home, os);
   const state = shimState(path);
   const problems: string[] = [], info: string[] = [];
   if (state === "legacy") problems.push(`команда miksy (${path}) старого вида: она читает .env и bunfig.toml папки, в которой её запускают (агенты — в папке проекта), — выполните miksy setup --yes`);
+  // Windows: спутник для Git Bash (круг 11m) — только при своей miksy.cmd. Нет его или он старый — проблема, если на
+  // машине есть bash (иначе он никому не нужен — молчим); чужой файл — справка
+  if (os === "windows" && (state === "current" || state === "legacy")) {
+    const sh = shimCompanion(path);
+    const s = shimState(sh);
+    if (s === "foreign") info.push(`${sh} — не команда miksy: в Git Bash (MSYS2, Cygwin) по имени miksy найдётся он, а не ${path}; уберите его и выполните miksy setup --yes`);
+    else if (s !== "current" && (o.bash ?? windowsBash)())
+      problems.push(`в Git Bash команды miksy ${s === "missing" ? "нет" : "старого вида"} (${sh}): агенты, которые выполняют команды через Git Bash, miksy не найдут (находится только miksy.cmd) — выполните miksy update или miksy setup --yes`);
+  }
   if (!used) return { problems, info };
   if (state === "missing") problems.push(`команды miksy нет (${path}), а ею ${who} запускают MCP-серверы проектов (miksy mcp) — выполните miksy setup (создаст её)`);
   else if (state === "foreign") info.push(`${path} — не команда miksy: MCP-серверы проектов (${who}) запускаются командой miksy (miksy mcp) — уберите этот файл и выполните miksy setup --yes`);

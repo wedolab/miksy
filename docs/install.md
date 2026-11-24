@@ -26,7 +26,8 @@
 3. **Копия настроек агентов** — один раз, до первой записи: в `local/backups/before-miksy-<метка>/`. Вернуть её —
    `miksy restore` после `miksy clean` («[Как удалить](uninstall.md#3-вернуть-копию-до-miksy)»).
 4. **Программы для MCP-серверов** (`npx`, `uvx`, `docker`…) — покажет команду и выполнит после «y».
-5. **Команда `miksy`** — `~/.bun/bin/miksy` (на Windows — `miksy.cmd` там же); если надо, добавит каталог в PATH:
+5. **Команда `miksy`** — `~/.bun/bin/miksy` (на Windows — `miksy.cmd` там же для cmd и PowerShell и `miksy` для Git
+   Bash); если надо, добавит каталог в PATH:
    строкой в `~/.zshrc` (zsh), `~/.bash_profile` (bash на macOS) или `~/.bashrc` (bash на Linux), на Windows — в
    PATH пользователя. Действует в новых окнах терминала.
 6. **Ручные настройки агентов** — MCP-серверы и skills проектов, которые вы добавляли сами: по каждому спросит, куда

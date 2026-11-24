@@ -47,7 +47,7 @@ export const PROGRAMS: { name: string; commands: string[]; install: Record<Os, s
 ];
 
 export { engineBunArgs, ourShim, rcAddsDir, shimConfig, shimText } from "./shim";
-import { ourShim, rcAddsDir, rememberShim, shimText } from "./shim";
+import { ourShim, rcAddsDir, rememberShim, shimCompanion, shimFiles, shimText } from "./shim";
 
 // Все ${VAR} из MCP слоёв: имя → слои, где встречается. applies — слой (путь от layers/: global,
 // env-macos, tree, tree/Org/Team) к чему-то применяется на этой машине; остальные не спрашиваются
@@ -831,6 +831,17 @@ export function setup(o: SetupOptions): number {
   } else if (shimNow !== null && ask) log(`✓ команда miksy есть: ${slash(shim)}`);
   const installed = existsSync(shim) && statSync(shim).isFile() && ourShim(readFileSync(shim, "utf8"));
   if (installed) rememberShim(shim); // устойчивый путь команды для sync и doctor (src/shim.ts shimPath)
+  // Windows: спутник miksy.cmd для Git Bash (MSYS2, Cygwin) — sh-скрипт «miksy» рядом (круг 11m). Без отдельного вопроса:
+  // это та же команда; создаётся и при update (setup без вопросов) на уже установленных машинах. Чужой — не трогаем
+  if (installed && os === "windows") {
+    const sh = shimCompanion(shim);
+    const body = shimFiles(os, bun, cli).find((f) => f.name === "miksy")!.text;
+    const now = existsSync(sh) ? (statSync(sh).isFile() ? readFileSync(sh, "utf8") : "") : null;
+    if (now === null || (now !== body && ourShim(now))) {
+      writeFileSync(sh, body, { mode: 0o755 });
+      log(`✓ команда miksy для Git Bash ${now === null ? "создана" : "обновлена"}: ${slash(sh)}`);
+    } else if (now !== body) log(`• ${slash(sh)} уже есть и не от miksy — не трогаю: в Git Bash по имени miksy найдётся он`);
+  }
   if (installed && ask) pathStep(bunBin);
   const other = sys.which("miksy");
   const sameShim = (p: string) => { try { return samePath(p, shim); } catch { return false; } };

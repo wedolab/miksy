@@ -195,6 +195,7 @@ layers/tree/<ветка>»), они же — в копии `local/machine.yaml`.
 | Сообщение | Что значит и что делать |
 |---|---|
 | `… установок несколько — используется …` (doctor, setup, install) | Удалите лишнюю. Для Bun затем `miksy setup`, `miksy sync --global` и `sync --all` |
+| Windows, Git Bash: `miksy: command not found` / doctor: `в Git Bash команды miksy нет` | Git Bash не находит `miksy.cmd` по имени `miksy`. `miksy update` (или `miksy setup --yes` из PowerShell) положит рядом команду `miksy` для Git Bash |
 | `CODEX_HOME=…` / `CLAUDE_CONFIG_DIR=…` / `XDG_CONFIG_HOME=…`: `… настройки miksy агент не увидит` (doctor) | Уберите переменную из профиля оболочки |
 | `Прежнее имя агента … gemini теперь antigravity` (doctor) | Переименуйте, когда удобно |
 | `opencode … — версия 1.x, а miksy пишет настройки в формате opencode 2.x` (doctor, setup) | Обновите opencode ([install.md](install.md#установка-агентов)) |
