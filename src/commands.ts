@@ -5,7 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { cachePaths, canonical, restorePaths, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
 import { shimNotes } from "./shim";
 import type { RenderResult } from "./adapter";
-import { apply, applyPlanned, approvalExclude, describe, plan, verifyMerges, type Action } from "./apply";
+import { apply, applyPlanned, approvalExclude, conflictFile, describe, plan, verifyMerges, type Action } from "./apply";
 import { cacheGit, gitCaching } from "./git";
 import { agentNote, decisionTitle, dialogTitle, askTrust, dialogOwn, dialogPrint, ownApprovals, executableSettings, ownFiles, type PendingTrust, pendingText, renewDecision, saveDecision, type TrustAgent, trustedByMiksy, trustMark, trustState, folderId, isReplaced } from "./trust";
 import { blocksOf as blocksWithMachine, ensureMachineId, machineId, machineUnknown, noteMachine, noteSkipped, resetSkipped, restoreSkipped, skippedReason } from "./machineid";
@@ -729,9 +729,26 @@ function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest:
   // Файл одобрений скрыт от git вместе с одобрением — до его создания (Г10)
   const ex = t.target.scope === "project" ? approvalExclude(planned, t.target.dir) : null;
   if (ex) actions.push(ex);
+  // «Да», а доверия после этого запуска не будет (круг 11r): сказать прямо и что делать. Причина — та же, что в
+  // предупреждении sync («<агент>: нет доверия — …»); файлы цели в конфликте (не от miksy или изменены) — доверие
+  // ставится по своим файлам, поэтому сначала их перезаписать: sync --force (бэкап будет). Код — как у sync с конфликтом
+  // null — доверие будет (или «да» не было): сказать нечего; иначе — число конфликтов (код 3)
+  const notSet = (): number | null => {
+    if (answer !== "yes" || ban || actions.some((a) => a.kind === "trust" && !a.remove)) return null;
+    const why = r.result.warnings.filter((w) => w.startsWith(`${adapter.id}: нет доверия — `));
+    if (!why.length) return null;
+    const conflicted = [...new Set(planned.filter((a) => a.kind === "conflict").map((a) => conflictFile(a.abs) ?? a.abs))];
+    const title = `${decisionTitle(agent)} ${t.title}`;
+    for (const w of why) console.log(`  предупреждение: ${w}`);
+    console.log(conflicted.length
+      ? `  ${title}: доверие не поставлено — в конфликте ${conflicted.length === 1 ? "файл" : "файлы"} ${conflicted.join(", ")}. Перезаписать ${conflicted.length === 1 ? "его файлом" : "их файлами"} miksy (бэкап будет) и поставить доверие: miksy sync ${quoteArg(t.target.dir)} --agent ${adapter.id} --force`
+      : `  ${title}: доверие не поставлено (причина — выше); решение подействует, когда причины не станет`);
+    return conflicted.length;
+  };
   if (!actions.length) {
-    console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не меняется${ban ? ` — ${ban}` : ""}`);
-    return 0;
+    const n = notSet();
+    if (n === null) console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не меняется${ban ? ` — ${ban}` : ""}`);
+    return n ?? 0;
   }
   console.log(actions.map(describe).join("\n"));
   if (ban) console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не ставится — ${ban}`);
@@ -751,7 +768,7 @@ function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest:
     console.log(`  ОШИБКА: ${(e as Error).message}`);
     return 1;
   }
-  return actions.filter((a) => a.kind === "conflict").length;
+  return Math.max(actions.filter((a) => a.kind === "conflict").length, notSet() ?? 0);
 }
 
 // Решение о доверии: в терминале — вопрос; answer — уже данный ответ (--confirm/--deny)
@@ -765,7 +782,8 @@ function decideTrust(list: { p: PendingTrust; adapter: Adapter; t: TargetSpec }[
       continue;
     }
     saveDecision(p, a);
-    console.log(`  ${a === "yes" ? "доверять" : "не доверять"} — записано в local/trust.json`);
+    // Сохраняется решение, а не доверие: поставлено ли оно — строки ниже (круг 11r)
+    console.log(`  решение «${a === "yes" ? "доверять" : "не доверять"}» сохранено в local/trust.json`);
     conflicts += applyTrust(adapter, machine, t, manifest, a);
   }
   return conflicts;
@@ -1396,7 +1414,13 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       saveMoves(manifest, moves);
       const secrets = loadSecrets();
       const list: { p: PendingTrust; adapter: Adapter; t: TargetSpec }[] = [];
-      for (const adapter of agentsFor(machine, flags.agent).filter((a) => a.trust))
+      // Агент без доверия проекту (адаптер без trust): решать нечего — так и сказать, а не «настроек не от miksy нет» (круг 11r)
+      const deciding = agentsFor(machine, flags.agent).filter((a) => a.trust);
+      if (!deciding.length) {
+        console.log(`У ${agentsFor(machine, flags.agent).map((a) => a.title).join(", ")} нет доверия проекту — решать нечего.`);
+        break;
+      }
+      for (const adapter of deciding)
         for (const t of targets) {
           if (t.target.scope !== "project") continue;
           const id = targetId(adapter, t.target);

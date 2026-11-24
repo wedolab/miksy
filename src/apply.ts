@@ -903,7 +903,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
 }
 
 // Файл, к которому относится конфликт: путь целиком или путь до « ключ» (слияние, таблица TOML)
-function conflictFile(abs: string): string | null {
+export function conflictFile(abs: string): string | null {
   const file = (p: string) => existsSync(p) && statSync(p).isFile();
   if (file(abs)) return abs;
   for (let i = abs.lastIndexOf(" "); i > 0; i = abs.lastIndexOf(" ", i - 1)) if (file(abs.slice(0, i))) return abs.slice(0, i);

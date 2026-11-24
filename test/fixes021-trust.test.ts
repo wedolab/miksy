@@ -164,7 +164,7 @@ describe("A3 — trust --confirm при trust: false называет запре
     f.run(["sync", app]);
     const c = f.run(["trust", app, "--confirm"]);
     expectCode(c, 0);
-    expect(c.out).toContain("записано в local/trust.json");
+    expect(c.out).toContain("сохранено в local/trust.json");
     expect(c.out).toMatch(/trust: \{ claude: false \} в слое Org/);
     expect(c.out).toContain("доверие поставит следующий miksy sync после снятия запрета");
     expect(trusted(f.home, app)).toBe(false);

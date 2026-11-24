@@ -17,7 +17,7 @@ test("A3′: trust: false добавили после доверия miksy, sync
   expect(f.run(["trust", app, "--confirm"]).err).toBe("");
   put(`${f.config}/layers/tree/Org/app/layer.yaml`, "trust: { claude: false }\n");
   const c = f.run(["trust", app, "--confirm"]);
-  expect(c.out).toContain("доверять — записано в local/trust.json");
+  expect(c.out).toContain("решение «доверять» сохранено в local/trust.json");
   expect(c.out).toMatch(/доверие Claude .*\(снять своё\)/);
   expect(c.out).toContain("доверие не ставится — запрет trust: { claude: false } в слое Org/app (его layer.yaml)");
   expect(c.out).toContain("доверие поставит следующий miksy sync после снятия запрета");
