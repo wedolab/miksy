@@ -8,6 +8,7 @@ interface Spec {
   bool?: string[]; // --name
   positional: [number, number]; // сколько позиционных аргументов допустимо
   check?: (flags: Record<string, string>, positional: string[]) => void;
+  tail?: true; // после «--» — команда с аргументами как есть (miksy secret ИМЯ -- <команда>; круг 11n)
 }
 
 // Цель sync/clean: ровно одно из — путь, --global, --all
@@ -48,7 +49,7 @@ export const COMMANDS: Record<string, Spec> = {
   },
   doctor: { valued: ["agent"], bool: ["verbose"], positional: [0, 0] },
   // secret <ИМЯ> — значение в трубу; --show — человеку в терминал
-  secret: { bool: ["show"], positional: [1, 1] },
+  secret: { valued: ["line", "env"], bool: ["show"], positional: [1, 1], tail: true },
   target: { bool: ["remove", "dry-run"], positional: [0, 1] },
   // root — список корней; root add [<путь>] [--tree <ветка>]; root remove <путь>
   root: {
@@ -92,7 +93,7 @@ export const COMMANDS: Record<string, Spec> = {
   version: { positional: [0, 0] },
 };
 
-export function parseArgs(cmd: string, args: string[]): { flags: Record<string, string>; positional: string[] } {
+export function parseArgs(cmd: string, args: string[]): { flags: Record<string, string>; positional: string[]; tail?: string[] } {
   const spec = COMMANDS[cmd];
   if (!spec) throw new UsageError(`неизвестная команда «${cmd}»`);
   const valued = new Set(spec.valued ?? []);
@@ -101,8 +102,13 @@ export function parseArgs(cmd: string, args: string[]): { flags: Record<string, 
   const positional: string[] = [];
   const known = () => [...valued].map((f) => `--${f} <значение>`).concat([...bool].map((f) => `--${f}`)).join(", ") || "нет";
 
+  let tail: string[] | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
+    if (a === "--" && spec.tail) {
+      tail = args.slice(i + 1);
+      break;
+    }
     if (!a.startsWith("-") || a === "-") {
       positional.push(a);
       continue;
@@ -127,5 +133,5 @@ export function parseArgs(cmd: string, args: string[]): { flags: Record<string, 
   if (positional.length > max) throw new UsageError(`лишние аргументы для ${cmd}: ${positional.slice(max).join(" ")}`);
   if (positional.length < min) throw new UsageError(`${cmd}: не хватает аргументов`);
   spec.check?.(flags, positional);
-  return { flags, positional };
+  return { flags, positional, ...(tail && { tail }) };
 }

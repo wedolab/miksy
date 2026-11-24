@@ -7,6 +7,15 @@
 
 ## Не выпущено
 
+### Новое
+
+- `miksy secret ИМЯ -- <команда>` — miksy сам запускает команду и отдаёт ей секрет на вход, мимо чата. Пишется
+  одинаково в PowerShell, cmd и bash, например `miksy secret DEV_PASS --line "dev:{}" -- ssh dev@HOST sudo chpasswd`:
+  `--line` подставляет значение вместо `{}` и добавляет перевод строки, `--env PGPASSWORD` кладёт значение в
+  переменную окружения команды. Раньше на Windows в PowerShell секрет можно было передать только обходом
+  (`cmd /c` или Git Bash): труба PowerShell портит значение. Труба `miksy secret ИМЯ | <команда>` осталась для
+  macOS, Linux и bash. Подробнее — docs/layers.md, «Секреты в skills».
+
 ### Исправлено
 
 - Windows: в Git Bash (через него, например, выполняет команды Claude Code) команда `miksy` не находилась —

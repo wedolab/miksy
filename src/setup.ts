@@ -848,7 +848,7 @@ export function setup(o: SetupOptions): number {
   if (other && !sameShim(other))
     log(`• команда miksy в PATH — ${slash(other)}, а не ${slash(shim)}`);
   // Подсказки — командой, которая действительно найдётся: Homebrew-bun не кладёт ~/.bun/bin в PATH
-  if (installed && !other && !ask) log(`• каталог ${slash(bunBin)} не в PATH — команда miksy не найдётся. Добавьте его в PATH (например, в ~/.zshrc: export PATH="${slash(bunBin)}:$PATH") или запускайте bun ${quoteArg(cli)}`);
+  if (installed && !other && !ask) log(`• каталог ${slash(bunBin)} не в PATH — команда miksy не найдётся. Добавьте его в PATH (${os === "windows" ? `Пуск → «Изменение переменных среды текущего пользователя» → Path → «Создать» → ${bunBin.replaceAll("/", "\\")}; или miksy setup в терминале — предложит сам` : `например, в ~/.zshrc: export PATH="${slash(bunBin)}:$PATH"`}) или запускайте bun ${quoteArg(cli)}`);
   const cmd = installed && sys.which("miksy") && sameShim(sys.which("miksy")!) ? "miksy" : `bun ${quoteArg(cli)}`;
   // Команда miksy ведёт на эту копию движка (своя команда с её путём, другой miksy в PATH нет) — переход на неё явный:
   // отметка версии учёта новее этой — переписывается на эту

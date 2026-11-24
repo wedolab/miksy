@@ -27,7 +27,7 @@ import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners,
 import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, agentDirs, enclosingTarget, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
 import { merge, selectGlobal } from "./resolve";
 import { builtinCopies, builtinCopyText, builtinHash } from "./builtin";
-import { placeSkillSecrets, secretValue } from "./secretcmd";
+import { CommandNotFound, placeSkillSecrets, runWithSecret, secretValue } from "./secretcmd";
 import { clashText, locate, machineRoots, nestedText, outerRoot, type Root, rootExists, rootKey, rootText, suggestTree, treeClashes, treeOf } from "./roots";
 import { type RootItem, rootItems, rewriteRoots } from "./rootfile";
 import { rewriteList } from "./machinefile";
@@ -101,10 +101,15 @@ export const USAGE = `miksy — раскладывает ваши правила
                                miksy root remove <путь> — убрать (--forget — как у clean);
                                miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
-  miksy secret <ИМЯ>           для skills: значение секрета из local/secrets.env — в трубу
-                               (miksy secret ИМЯ | <команда>), без перевода строки. Только
-                               секреты, объявленные для места текущей папки: skill_secrets в
-                               layer.yaml слоя. В терминал — только с --show
+  miksy secret <ИМЯ> -- <команда> [аргументы…]
+                               для skills: miksy запускает команду и отдаёт ей значение секрета
+                               из local/secrets.env в stdin, без перевода строки (работает в
+                               PowerShell, cmd и bash). --line "dev:{}" — строка по шаблону ({} —
+                               значение) с переводом строки; --env ИМЯ — в переменную окружения
+                               команды. Код возврата — команды. Только секреты, объявленные для
+                               места текущей папки: skill_secrets в layer.yaml слоя.
+  miksy secret <ИМЯ>           значение — в stdout для трубы bash (miksy secret ИМЯ | <команда>);
+                               в терминал — только с --show
 
 MCP-серверы на этой машине
   miksy mcp off <имя>          сервер из слоёв на этой машине не нужен (например, его секрета
@@ -850,7 +855,7 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   const outer = skippedReason();
   resetSkipped();
   try {
-    let code = command(cmd, flags, positional);
+    let code = command(cmd, flags, positional, parsed.tail);
     // Номер этой машины не получен (круг 10z-2, src/machineid.ts): проекты с git отложены — одна строка, код не 0
     const why = skippedReason();
     if (why) {
@@ -862,7 +867,7 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   finally { ask = null; observe = null; restorePaths(paths); restoreSkipped(outer); }
 }
 
-function command(cmd: string, flags: Record<string, string>, positional: string[]): number {
+function command(cmd: string, flags: Record<string, string>, positional: string[], tail?: string[]): number {
   let code = 0;
   // Запись в local/backups отказана (ссылка с открытой или несуществующей целью) — пишущие команды останавливаются в
   // начале, до вопросов и записи; их --dry-run — та же строка и код 1 (выпуск 0.2.2, круг 8c, C10; рецензия A, п. 7)
@@ -878,6 +883,18 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Значение — в stdout без перевода строки и больше ничего (труба); ошибка — исключение без значения (stderr, код 1)
       const name = positional[0];
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError(`имя секрета — буквы, цифры и «_», как в local/secrets.env: miksy secret <ИМЯ>`);
+      // miksy secret ИМЯ [--line "…{}…"] [--env ПЕРЕМЕННАЯ] -- <команда> (круг 11n): miksy сам запускает команду и отдаёт
+      // ей значение — в stdin или в переменную окружения; код возврата — её
+      if (tail !== undefined) {
+        try {
+          return runWithSecret(name, process.cwd(), loadMachine(), tail, { line: flags.line, env: flags.env });
+        } catch (e) {
+          if (!(e instanceof CommandNotFound)) throw e;
+          console.error(`Ошибка: ${e.message}`);
+          return 127; // как у оболочек: команда не найдена
+        }
+      }
+      if ("line" in flags || "env" in flags) throw new UsageError(`--line и --env — только с командой: miksy secret ${name} --line "…{}…" -- <команда>`);
       process.stdout.write(secretValue(name, process.cwd(), loadMachine(), !!process.stdout.isTTY, "show" in flags));
       break;
     }

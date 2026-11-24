@@ -27,9 +27,10 @@ export const PAST: readonly string[] = [
   "5031adff4011914968bc69830f9af4dc897979d0dc7dc62b1fd0f3b40c50e4d9", // до 0.1.0
   "1e9f4850e8c3a5588da42ee5d0340ff21fffbcb5f457f75414a6aae0a41c881c", // 0.6.1 до miksy secret (c978f9b)
   "9652396a54e71fa19507325df1a721e94389daa400070620861d0ec32608c0f2", // 0.6.1 до честной оговорки об изоляции (69ffd8e)
+  "fdfd93b46cbb1292ff58bca2accc7f8f6fba0b2b9ab6ae7e5b37f43c8f495c89", // 0.7.0
 ];
 // Хеш нынешнего builtin/skills/miksy — сторож: test/builtin11j.test.ts сверяет его с каталогом
-export const CURRENT = "fdfd93b46cbb1292ff58bca2accc7f8f6fba0b2b9ab6ae7e5b37f43c8f495c89";
+export const CURRENT = "423da4d730eaaa6aa95cefcc6fc0b34e8639c2abfa062ab3f15f821a28f699f5";
 
 // Хеш skill для сравнения копий: все файлы (без служебных .DS_Store и т. п.), путь и содержимое; CRLF → LF, без BOM —
 // копия, прошедшая через git с autocrlf или Блокнот, та же
