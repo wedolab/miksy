@@ -68,7 +68,7 @@ test("TOML-блок Codex: пропущенный сервер, записанн
     files: [{ base: "home" as const, path: ".codex/config.toml", mode: "merge" as const, format: "toml" as const, key: ["mcp_servers"], data }],
   });
   writeFileSync(`${home}/x`, "");
-  const { state } = apply(plan(file({ gl: { command: "npx" }, ctx: { url: "u" } }), { scope: "global" }, machine, emptyState(), false), emptyState());
-  const actions = plan(file({ ctx: { url: "u" } }, ["gl"]), { scope: "global" }, machine, state, false);
+  const { state } = apply(plan(file({ gl: { command: "npx" }, ctx: { url: "u" } }), { scope: "global" }, machine, emptyState(), false, "codex"), emptyState());
+  const actions = plan(file({ ctx: { url: "u" } }, ["gl"]), { scope: "global" }, machine, state, false, "codex");
   expect(actions).toEqual([]);
 });

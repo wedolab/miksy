@@ -11,7 +11,7 @@ import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./se
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
 import { locate, machineRoots, type Root, rootKey, suggestTree, treeAbove, treeJoin } from "./roots";
 import { agentId, detectAgents, notConnectedText } from "./agentid";
-import { ADAPTERS } from "./agents";
+import { ADAPTERS, rulesExample } from "./agents";
 export { detectAgents };
 import { backup } from "./backup";
 import { loadManifest, writeAtomic } from "./manifest";
@@ -170,7 +170,7 @@ export function projectRootText(dir: string, home: string, roots: Root[], o: { g
     : repo ? ` Чтобы он стал проектом, ${outsideRepoAdvice(dir, home, roots)}` : "";
   // Группа: её пометка в этом месте дерева перестанет действовать — записанное sync --all уберёт сам, как у снятой
   const before = group ? `, пометка target: true (layers/tree/${place!.tree}/layer.yaml) перестанет действовать, и следующий miksy sync --all уберёт записанное в него miksy`
-    : o.recorded ? ", а записанное в него раньше (CLAUDE.local.md и др.) останется и перестанет обновляться" : "";
+    : o.recorded ? `, а записанное в него раньше (${rulesExample()} и др.) останется и перестанет обновляться` : "";
   return `${dir} — ${kind}: корнем workspace он станет папкой с проектами, а не проектом — настройки проекта miksy в него писать не будет${before}.${advice}${advice ? "." : ""}`;
 }
 

@@ -407,7 +407,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
     // свои ключи проекта в домашнем конфиге агента
     const projectConfig = spec.projectFile ? pathKey(join(target.dir, spec.projectFile)) : "";
     const successful = (path: string) => !actions.some((x) => x.kind === "conflict" && pathKey(x.abs) === pathKey(path));
-    const ownMerge = (f: RenderResult["files"][number]) => f.mode === "merge" && f.key[0] === "projects" && Object.keys(f.data as object).length > 0;
+    const ownMerge = (f: RenderResult["files"][number]) => f.mode === "merge" && f.key[0] === spec.table && Object.keys(f.data as object).length > 0;
     const rendered = spec.projectFile
       ? result.files.some((f) => f.base === "project" && f.path === spec.projectFile)
       : result.files.some((f) => f.base === "project" || ownMerge(f));
@@ -549,7 +549,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
         return { actions: out, missing, advice };
       }
     }
-    const keys = spec.keys(target.dir, machine, Object.keys(doc.projects ?? {}));
+    const keys = spec.keys(target.dir, machine, Object.keys(doc[spec.table] ?? {}));
     // Своё доверие прежнему пути цели (каталог переехал, учёт перенесён) — снимается: под нынешним
     // путём оно ставится по тем же правилам
     if (why === null) for (const [id, rec] of Object.entries(prev.trust ?? {})) {
@@ -559,7 +559,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       out.push({ kind: "trust", abs: file, ...rec, remove: true, beforeHash: sha(text), roots });
     }
     for (const k of keys) {
-      const key = ["projects", k, spec.field];
+      const key = [spec.table, k, spec.field];
       const value = spec.value;
       const cur = trustValue(doc, key);
       const recorded = Object.hasOwn(prev.trust ?? {}, trustId(file, key));

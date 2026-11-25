@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cliFixture, expectCode, put } from "./helpers";
 import { replaceTomlBlock, splitToml } from "../src/toml";
+const T = "mcp_servers"; // таблица MCP Codex (adapters/codex: mcpTable)
 
 const PLAIN = "plainsecretvalue99";
 const SERVER = "name: tok\ncommand: tok-server\nenv:\n  TOKEN: ${MYTOK}\n";
@@ -57,7 +58,7 @@ describe("чужая таблица Codex с именем из слоя (кру�
     expect(text).not.toContain(PLAIN);
     // Текст вне блока — побайтно прежний без чужой таблицы
     // (пустая строка после чужой таблицы — часть её раздела до следующего заголовка, уходит вместе с ней)
-    expect(splitToml(text).outside).toBe(HEAD + TAIL.slice(1));
+    expect(splitToml(T, text).outside).toBe(HEAD + TAIL.slice(1));
     const tok = (Bun.TOML.parse(text) as any).mcp_servers.tok;
     expect(tok.command).toContain("tok-stdio-");
     expect(tok.env).toBeUndefined();
@@ -82,7 +83,7 @@ describe("чужая таблица Codex с именем из слоя (кру�
     expectCode(f.run(["sync", "--global"]), 0);
     const written = readFileSync(f.file, "utf8");
     // Учёт забыт (новая машина): таблица та же, но блок — уже не miksy по учёту; маркеры тоже убраны
-    const plain = splitToml(written);
+    const plain = splitToml(T, written);
     writeFileSync(f.file, plain.before + plain.block.replace(/^\n/, "").replace(/^# [<>]{3} miksy.*\r?\n/gm, "") + plain.after);
     const ledger = `${f.config}/local/state/manifest.json`;
     const m = JSON.parse(readFileSync(ledger, "utf8"));
@@ -97,7 +98,7 @@ describe("чужая таблица Codex с именем из слоя (кру�
 
   test("блок miksy без учёта: отличается — конфликт с командой; --force берёт, чужие таблицы блока остаются; повтор стабилен", () => {
     const f = fixture(HEAD);
-    const block = replaceTomlBlock(splitToml(HEAD), { tok: { command: "old-wrapper", env: { TOKEN: PLAIN } }, mine: { command: "my-server" } });
+    const block = replaceTomlBlock(T, splitToml(T, HEAD), { tok: { command: "old-wrapper", env: { TOKEN: PLAIN } }, mine: { command: "my-server" } });
     writeFileSync(f.file, block);
     const s = f.run(["sync", "--global"]);
     expectCode(s, 3);
@@ -115,7 +116,7 @@ describe("чужая таблица Codex с именем из слоя (кру�
     const doc = Bun.TOML.parse(text) as any;
     expect(doc.mcp_servers.mine).toEqual({ command: "my-server" });
     expect(doc.mcp_servers.tok.command).toContain("tok-stdio-");
-    expect(Object.keys(splitToml(text).servers)).toEqual(["tok"]);
+    expect(Object.keys(splitToml(T, text).servers)).toEqual(["tok"]);
     for (const p of files(`${f.config}/local/backups`)) expect(readFileSync(p, "utf8")).not.toContain(PLAIN);
     // Повтор: без конфликтов и правок; таблица mine — добавка агента (adopt), а не конфликт
     const again = f.run(["sync", "--global"]);

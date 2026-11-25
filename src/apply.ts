@@ -41,7 +41,7 @@ export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: b
   // папке (machine: под строкой её блока exclude, круг 10z)
   | { kind: "release"; abs: string; owner?: string; machine?: true }
   | { kind: "merge"; abs: string; key: string[]; set: Record<string, unknown>; remove: string[]; adopt: string[]; own: string[]; roots?: string[]; beforeHash?: string }
-  | { kind: "toml"; abs: string; content: string; beforeHash: string; names: string[]; definitions?: Record<string, string>; written?: string[]; roots?: string[] }
+  | { kind: "toml"; abs: string; table: string; content: string; beforeHash: string; names: string[]; definitions?: Record<string, string>; written?: string[]; roots?: string[] }
   // lines — итоговые строки блока; pre — на время apply (ещё и удаляемые файлы): пишется до файлов
   // unrecorded — строки не записываются в учёт (clean цели без учёта: оставшиеся строки — от забытого учёта)
   // Круг 10z (у каждой машины свой блок): lines — строки блока этой машины; current — свои строки до плана; claim —
@@ -451,7 +451,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         Object.assign(servers, fresh);
         if (retained) {
           if (f.mcp.format === "json") { doc[f.mcp.key] = servers; content = JSON.stringify(doc, null, 2) + "\n"; }
-          else content = content.split(/(?=^\[)/m)[0] + mcpTables(servers);
+          else content = content.split(/(?=^\[)/m)[0] + mcpTables(f.mcp.key, servers);
         }
       } catch {
         actions.push({ kind: "conflict", abs: path, why: "MCP keep: предыдущий конфиг не разбирается — не меняю" });
@@ -673,10 +673,13 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
 
   // TOML: единственный управляемый MCP-блок, с отдельным учётом для clean.
   const toml = new Map<string, { abs: string; data: Record<string, unknown>; roots: string[] }>();
+  // Таблица MCP-серверов агента в его TOML-конфиге (Adapter.mcpTable)
+  const mcpTable = ADAPTERS[owner]?.mcpTable;
+  const table = mcpTable ?? "";
   for (const f of result.files) {
     if (f.mode !== "merge" || f.format !== "toml") continue;
     const path = abs(f.base, f.path);
-    if (f.key.length !== 1 || f.key[0] !== "mcp_servers") throw new Error("TOML merge поддерживает только key: [mcp_servers]");
+    if (!mcpTable || f.key.length !== 1 || f.key[0] !== mcpTable) throw new Error(`TOML merge поддерживает только key: [${mcpTable ?? "таблица MCP адаптера (mcpTable)"}]`);
     if (toml.has(pathKey(path))) throw new Error("TOML merge: повторное описание одного файла");
     if (!safeRelative(f.path)) {
       actions.push({ kind: "conflict", abs: path, why: "путь адаптера выходит за пределы цели — не меняю TOML" });
@@ -698,24 +701,24 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       const force_ = `miksy sync --global --agent ${owner} --force`;
       // Блок miksy без учёта (новая машина, учёт забыт; круг 11u): маркеры снимаются, его таблицы — обычные таблицы
       // файла. Все одинаковы со слоем — берутся под учёт молча; иначе — по --force; таблицы не из слоя остаются в файле
-      const unowned = recorded ? null : ownedTomlParts(text);
+      const unowned = recorded ? null : ownedTomlParts(table, text);
       if (unowned?.block) {
-        const stripped = stripMarkers(text);
+        const stripped = stripMarkers(table, text);
         if (stripped === null) throw new Error("TOML: блок miksy без учёта, и снять его маркеры безопасно нельзя — проверьте файл по бэкапу");
         const alike = Object.entries(unowned.servers).every(([n, v]) => n in data && !differingFields(v, data[n]).length);
         if (!alike && !force) throw new Error(`TOML: в файле блок miksy, а учёта его на этой машине нет (новая машина или учёт забыт), и он отличается от слоя. Взять его: ${force_} (бэкап файла будет; таблицы блока, которых нет в слое, останутся в файле как есть)`);
         text = stripped;
       }
-      const parts = ownedTomlParts(text, !!recorded?.definitions);
+      const parts = ownedTomlParts(table, text, !!recorded?.definitions);
       if (recorded && !recorded.definitions && sha(parts.block) !== recorded.hash && !force)
         throw new Error(recorded.hash === UNKNOWN_HASH ? `TOML: ${UNKNOWN_WHY}` : "TOML: управляемый блок изменён или удалён вручную (--force перезапишет только блок)");
-      const current = parseToml(text).mcp_servers ?? {};
+      const current = parseToml(text)[table] ?? {};
       const definitions = recorded?.definitions ?? Object.fromEntries((recorded?.names ?? []).filter((n) => n in parts.servers).map((n) => [n, definitionHash(parts.servers[n])]));
       const conflicts = new Set<string>();
       for (const n of recorded?.names ?? []) {
         if ((!Object.hasOwn(current, n) || definitionHash(current[n]) !== definitions[n]) && !force) {
           conflicts.add(n);
-          actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: "TOML: таблица изменена или удалена вручную (--force перехватит учтённое имя)" });
+          actions.push({ kind: "conflict", abs: `${path} ${table}.${n}`, why: "TOML: таблица изменена или удалена вручную (--force перехватит учтённое имя)" });
         }
       }
       // Таблица с именем из слоя, которую записал не miksy (круг 11u): одинаковая — под учёт молча, отличающаяся —
@@ -724,12 +727,12 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         const fields = differingFields(current[n], data[n]);
         if (fields.length && !force) {
           conflicts.add(n);
-          actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy, и он отличается от слоя (поля: ${fields.join(", ")}). Заменить определением из слоя: ${force_} (бэкап файла будет)` });
+          actions.push({ kind: "conflict", abs: `${path} ${table}.${n}`, why: `TOML: сервер ${n} здесь записал не miksy, и он отличается от слоя (поля: ${fields.join(", ")}). Заменить определением из слоя: ${force_} (бэкап файла будет)` });
           continue;
         }
-        try { removeTables(parts.outside, ["mcp_servers", n]); } catch {
+        try { removeTables(parts.outside, [table, n]); } catch {
           conflicts.add(n);
-          actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy в форме, которую miksy не заменит безопасно (inline-таблица или mcp_servers = {…}). Перепишите его как таблицу [mcp_servers.${n}] или удалите, затем miksy sync --global` });
+          actions.push({ kind: "conflict", abs: `${path} ${table}.${n}`, why: `TOML: сервер ${n} здесь записал не miksy в форме, которую miksy не заменит безопасно (inline-таблица или ${table} = {…}). Перепишите его как таблицу [${table}.${n}] или удалите, затем miksy sync --global` });
         }
       }
       data = Object.fromEntries(Object.entries(data).filter(([n]) => !conflicts.has(n)));
@@ -743,11 +746,11 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       }
       const replace = [...new Set([...(recorded?.names ?? []), ...Object.keys(data)])].filter((n) => !conflicts.has(n));
       // При конфликте одной таблицы другие продолжают синхронизироваться; конфликтная сохраняет старый хеш.
-      const content = replace.length ? replaceOwnedMcp(text, replace, data, !!recorded?.definitions) : text;
+      const content = replace.length ? replaceOwnedMcp(table, text, replace, data, !!recorded?.definitions) : text;
       const names = [...new Set([...Object.keys(data), ...(recorded?.names ?? []).filter((n) => conflicts.has(n))])];
       const nextDefinitions = Object.fromEntries(names.map((n) => [n, conflicts.has(n) ? definitions[n] : definitionHash(data[n])]));
       if (content !== original || (names.length > 0 && (!recorded?.definitions || !same(recorded.definitions, nextDefinitions))) || (recorded && !names.length))
-        actions.push({ kind: "toml", abs: path, content, beforeHash: sha(original), names, definitions: nextDefinitions, written: Object.keys(data), roots });
+        actions.push({ kind: "toml", abs: path, table, content, beforeHash: sha(original), names, definitions: nextDefinitions, written: Object.keys(data), roots });
       else if (!conflicts.size) {
         const mode = modeFix(path);
         if (mode !== null) actions.push({ kind: "chmod", abs: path, mode, roots });
@@ -1282,8 +1285,8 @@ function applyInto(actions: Action[], state: TargetState, made?: Made): { state:
       parseToml(readFileSync(a.abs, "utf8"));
       noteFile(made, a.abs, existed, {}, {});
       state.toml ??= {};
-      if (a.names.length) state.toml[pathKey(a.abs)] = { hash: sha(splitToml(a.content).block), names: a.names,
-        definitions: a.definitions ?? Object.fromEntries(a.names.map((n) => [n, definitionHash(parseToml(a.content).mcp_servers[n])])) };
+      if (a.names.length) state.toml[pathKey(a.abs)] = { hash: sha(splitToml(a.table, a.content).block), names: a.names,
+        definitions: a.definitions ?? Object.fromEntries(a.names.map((n) => [n, definitionHash(parseToml(a.content)[a.table][n])])) };
       else delete state.toml[pathKey(a.abs)];
       rememberPath(state, a.abs);
       if (!Object.keys(state.toml).length) delete state.toml;
@@ -1429,7 +1432,9 @@ function writeExclude(a: Extract<Action, { kind: "exclude" }>, lines: string[], 
 }
 
 // Проверка, что наши ключи на месте (открытые сессии агента могут перезаписать файл своей копией)
-export function verifyMerges(state: TargetState, written?: Action[]): string[] {
+// owner — id агента цели: его таблица MCP в TOML (Adapter.mcpTable)
+export function verifyMerges(state: TargetState, written?: Action[], owner?: string): string[] {
+  const table = (owner && ADAPTERS[owner]?.mcpTable) || "";
   const lost: string[] = [];
   for (const [file, keys] of Object.entries(state.merges)) {
     const checked = written ? Object.fromEntries(Object.entries(keys).map(([k, names]) => [k, names.filter((n) => written.some((a) =>
@@ -1452,9 +1457,9 @@ export function verifyMerges(state: TargetState, written?: Action[]): string[] {
     if (!names.length) continue;
     try {
       const text = readFileSync(file, "utf8");
-      const servers = parseToml(text).mcp_servers ?? {};
-      if (!recorded.definitions && sha(splitToml(text).block) !== recorded.hash) lost.push(`${file} управляемый блок изменён`);
-      for (const name of names) if (!Object.hasOwn(servers, name) || (recorded.definitions && definitionHash(servers[name]) !== recorded.definitions[name])) lost.push(`${file} mcp_servers.${name}`);
+      const servers = parseToml(text)[table] ?? {};
+      if (!recorded.definitions && sha(splitToml(table, text).block) !== recorded.hash) lost.push(`${file} управляемый блок изменён`);
+      for (const name of names) if (!Object.hasOwn(servers, name) || (recorded.definitions && definitionHash(servers[name]) !== recorded.definitions[name])) lost.push(`${file} ${table}.${name}`);
     } catch { lost.push(`${file} управляемый блок отсутствует или повреждён`); }
   }
   for (const [id, rec] of Object.entries(state.trust ?? {})) {

@@ -23,3 +23,7 @@ export const ADAPTERS: Record<string, Adapter> = new Proxy({} as Record<string, 
     return d && { ...d, configurable: true };
   },
 });
+
+// Пример файла правил проекта для текстов человеку («CLAUDE.local.md и т. п.»): первый файл правил первого адаптера,
+// у которого они есть (Adapter.rulesFiles)
+export const rulesExample = (): string => Object.values(ADAPTERS).find((a) => a.rulesFiles?.length)?.rulesFiles![0] ?? "файл правил";

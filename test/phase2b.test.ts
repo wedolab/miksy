@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, symlinkSync, lstatSync } from "node:fs";
-import { apply, plan, verifyMerges } from "../src/apply";
+import { apply, plan as planFor, verifyMerges as verifyFor } from "../src/apply";
+// TOML-слияние — Codex: план и проверка — от его имени (таблица MCP — adapters/codex: mcpTable)
+const plan = (...a: Parameters<typeof planFor>) => planFor(a[0], a[1], a[2], a[3], a[4], a[5] ?? "codex", ...(a.slice(6) as []));
+const verifyMerges = (s: Parameters<typeof verifyFor>[0], w?: Parameters<typeof verifyFor>[1]) => verifyFor(s, w, "codex");
 import { emptyState, loadManifest, sha } from "../src/manifest";
 import { pathKey } from "../src/paths";
 import { aclProblem } from "../src/secretfiles";

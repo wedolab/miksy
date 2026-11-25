@@ -141,6 +141,12 @@ export interface Adapter {
   skillsFallback?: { from: string; to: string };
   // Пишется после остальных агентов: пропускает skills, уже доставленные ими в общие каталоги
   deliverLast?: boolean;
+  // Таблица MCP-серверов в общем TOML-конфиге агента (merge format: toml, key: [mcpTable]; Codex: mcp_servers). Нужна и
+  // без рендера: clean и проверка записанного (verifyMerges) знают таблицу по агенту
+  mcpTable?: string;
+  // Каталоги skills проекта (относительно цели), которые агент читает сам, кто бы их ни писал: skill, доставленный туда
+  // другим агентом, этот агент не копирует к себе (opencode — каталоги skills Claude и Codex)
+  sharedSkills?: string[];
   // Свой файл проекта узнаётся по содержимому без учёта (учёт забыт — clean --forget, диск вернулся)
   ownFile?(path: string, text: string): boolean;
   // Копия «до miksy» (miksy restore): что мастер когда-либо копировал (относительно ~) и что не возвращается
@@ -177,9 +183,11 @@ export type Inspected = { lines: string[]; data: unknown } | null;
 // Доверие проектам агента. Ядро (src/trust.ts) решает, ставить ли доверие, спрашивает пользователя, помнит решения
 // (local/trust.json) и отпечатки; адаптер говорит, где и как агент его хранит и что доверие выполнит без вопроса
 export interface TrustSpec {
-  // Файл доверия (относительно ~), формат, поле записи проекта и значение «доверяю»
+  // Файл доверия (относительно ~), формат, таблица записей проектов (ключ доверия — [table, <проект>, field]), поле
+  // записи проекта и значение «доверяю»
   file: string;
   format: "json" | "toml";
+  table: string;
   field: string;
   value: true | "trusted";
   // Значение поля, которое значит «вопрос ещё не задавался» (Claude: false — по умолчанию новой записи проекта): его

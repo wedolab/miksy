@@ -55,6 +55,8 @@ export const opencode: Adapter = {
   collections: [".opencode/skills"],
   // Пропускает skills, уже доставленные этим sync в .claude/skills или .agents/skills (render ниже)
   deliverLast: true,
+  // opencode сам читает skills проекта из каталогов Claude и Codex
+  sharedSkills: [".claude/skills", ".agents/skills"],
   teamScan: { roots: [".opencode"], priority: { ".opencode/skills": 2, ".opencode/skill": 3 }, commands: "\\.opencode\\/commands?" },
   ownFile: (path, text) => /(^|\/)opencode\.json$/.test(slash(path)) && miksyOpencodeJson(text),
   restore: {

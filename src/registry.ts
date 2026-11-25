@@ -1,5 +1,5 @@
 // Общее для команд CLI: адаптеры, построение целей, генерация для цели
-import { ADAPTERS } from "./agents";
+import { ADAPTERS, rulesExample } from "./agents";
 import { BUILTIN_SKILL, withBuiltin } from "./builtin";
 export { ADAPTERS };
 import type { Adapter, RenderedFile, RenderResult, Target } from "./adapter";
@@ -520,11 +520,13 @@ export function literalFindings(actions: Action[], secrets: Record<string, strin
   for (const a of values.length ? actions : []) {
     if (a.kind !== "conflict" || !/создан не miksy|записал не miksy|блок miksy, а учёта/.test(a.why)) continue;
     const merge = a.abs.match(/^(.*?) (\[".*"\])\.(.+)$/);
-    const toml = merge ? null : a.abs.match(/^(.*) mcp_servers\.(.+)$/);
+    // Таблица TOML агента (Adapter.mcpTable): «<файл> <таблица>.<имя>»
+    const table = ADAPTERS[agent]?.mcpTable;
+    const toml = merge || !table ? null : a.abs.match(new RegExp(`^(.*) ${table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(.+)$`));
     let text: string;
     try {
       text = merge ? JSON.stringify([...JSON.parse(merge[2]), merge[3]].reduce((o: any, k) => o?.[k], JSON.parse(readFileSync(merge[1], "utf8"))) ?? "")
-        : toml ? JSON.stringify(parseToml(readFileSync(toml[1], "utf8")).mcp_servers?.[toml[2]] ?? "")
+        : toml ? JSON.stringify(parseToml(readFileSync(toml[1], "utf8"))[table!]?.[toml[2]] ?? "")
         : readFileSync(a.abs, "utf8");
     } catch { continue; }
     const names = values.filter(([, v]) => text.includes(v) || text.includes(JSON.stringify(v).slice(1, -1))).map(([n]) => n);
@@ -544,28 +546,36 @@ export function argSecretWarnings(cfg: Resolved, agent: string): string[] {
 }
 
 // Учитываем только полностью доставленные skills; конфликт одного файла оставляет opencode свою копию.
+// Каталоги skills проекта, которые какой-то агент читает сам (Adapter.sharedSkills): «<каталог>/<имя skill><tail>»
+function sharedSkillsRx(tail: string): RegExp | null {
+  const dirs = [...new Set(Object.values(ADAPTERS).flatMap((a) => a.sharedSkills ?? []))].map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return dirs.length ? new RegExp(`^(?:${dirs.join("|")})/([^/]+)${tail}`) : null;
+}
 export function deliveredSkillNames(result: RenderResult, actions: Action[], target: Target): string[] {
   if (target.scope !== "project") return [];
   const groups = new Map<string, string[]>();
+  const rx = sharedSkillsRx("/");
   for (const f of result.files) {
-    const m = f.base === "project" && f.path.match(/^\.(?:claude|agents)\/skills\/([^/]+)\//);
+    const m = f.base === "project" && !!rx && f.path.match(rx);
     if (m) groups.set(m[1], [...(groups.get(m[1]) ?? []), pathKey(join(target.dir, f.path))]);
   }
   return [...groups].filter(([, paths]) => paths.some((p) => p.endsWith("/SKILL.md")) && !actions.some((a) => a.kind === "conflict" && paths.includes(pathKey(a.abs))))
     .map(([name]) => name);
 }
 
-// Skills, которые в каталоге цели уже доставил другой агент (по учёту: SKILL.md в .claude/skills или
-// .agents/skills записан и не изменён) — opencode их видит сам, своя копия была бы дублем. except —
+// Skills, которые в каталоге цели уже доставил другой агент (по учёту: SKILL.md в каталоге sharedSkills адаптеров
+// записан и не изменён) — агент с deliverLast их видит сам, своя копия была бы дублем. except —
 // агенты этого запуска: их доставку дают результаты запуска (deliveredSkillNames)
 export function ledgerSkills(manifest: Manifest, dir: string, except: Set<string>): string[] {
   const out = new Set<string>();
+  const rx = sharedSkillsRx("/SKILL\\.md$");
+  if (!rx) return [];
   for (const [id, st] of Object.entries(manifest.targets)) {
     const split = id.indexOf("|");
     const root = id.slice(split + 1);
     if (except.has(id.slice(0, split)) || fold(root) !== fold(pathKey(dir))) continue;
     for (const [p, hash] of Object.entries(st.files)) {
-      const m = fold(p).startsWith(fold(root) + "/") && p.slice(root.length).match(/^\/\.(?:claude|agents)\/skills\/([^/]+)\/SKILL\.md$/);
+      const m = fold(p).startsWith(fold(root) + "/") && p.slice(root.length + 1).match(rx);
       if (!m) continue;
       try { if (sha(readFileSync(p, "utf8")) === hash) out.add(m[1]); } catch {}
     }
@@ -644,9 +654,9 @@ export function rootedTargets(manifest: Manifest, machine: Machine): string[] {
 // корне (0.1.x) или workspace сменили на бывший проект (микроправка перед 0.2.0)
 export const isMainRoot = (dir: string, machine: Machine) => rootKey(machineRoots(machine)[0].path) === rootKey(dir);
 export function rootedText(dir: string, machine: Machine): string {
-  if (isMainRoot(dir, machine)) return `${dir} — основной корень workspace (папка с проектами), а не проект: miksy раньше записал настройки в сам корень (например, miksy sync в нём в 0.1.x или он был проектом до смены workspace) — CLAUDE.local.md и др. действуют, но больше не обновляются. Убрать записанное: miksy clean ${quoteArg(dir)}`;
+  if (isMainRoot(dir, machine)) return `${dir} — основной корень workspace (папка с проектами), а не проект: miksy раньше записал настройки в сам корень (например, miksy sync в нём в 0.1.x или он был проектом до смены workspace) — ${rulesExample()} и др. действуют, но больше не обновляются. Убрать записанное: miksy clean ${quoteArg(dir)}`;
   const outer = machineRoots(machine).find((r) => rootKey(r.path) !== rootKey(dir) && inside(dir, r.path));
-  return `${dir} — теперь корень workspace (папка с проектами), а не проект: записанное туда miksy раньше (CLAUDE.local.md и др.) действует, но больше не обновляется. Корень добавлен по ошибке — miksy root remove ${quoteArg(dir)}${outer ? ` (записанное останется; следующий miksy sync --all снова обновит его как проект корня ${outer.path})` : ""}; так и задумано — убрать записанное: miksy clean ${quoteArg(dir)}`;
+  return `${dir} — теперь корень workspace (папка с проектами), а не проект: записанное туда miksy раньше (${rulesExample()} и др.) действует, но больше не обновляется. Корень добавлен по ошибке — miksy root remove ${quoteArg(dir)}${outer ? ` (записанное останется; следующий miksy sync --all снова обновит его как проект корня ${outer.path})` : ""}; так и задумано — убрать записанное: miksy clean ${quoteArg(dir)}`;
 }
 
 export const movesText = (moves: Move[]) => moves.map((m) => `  ${m.from} → ${m.to}  (${HOW[m.how]})`);

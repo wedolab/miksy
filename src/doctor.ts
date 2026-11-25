@@ -288,7 +288,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const lost = Object.entries(manifest.targets)
     .filter(([id]) => adapters.some((a) => id.startsWith(a.id + "|")))
     .filter(([id]) => { const dir = id.slice(id.indexOf("|") + 1); return dir === "global" || !stranded(dir, machine); })
-    .flatMap(([id, st]) => verifyMerges(st).map((l) => ({ agent: id.split("|")[0], target: id.split("|")[1], detail: l })));
+    .flatMap(([id, st]) => verifyMerges(st, undefined, id.split("|")[0]).map((l) => ({ agent: id.split("|")[0], target: id.split("|")[1], detail: l })));
 
   // Глобальные skills, которые положил не miksy
   const owned = new Set(Object.values(manifest.targets).flatMap((s) => Object.keys(s.files)));

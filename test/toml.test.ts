@@ -3,9 +3,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { apply, plan, verifyMerges } from "../src/apply";
+import { apply, plan as planFor, verifyMerges as verifyFor } from "../src/apply";
+// Блок TOML — Codex: план и проверка — от его имени (таблица MCP — adapters/codex: mcpTable)
+const plan = (...a: Parameters<typeof planFor>) => planFor(a[0], a[1], a[2], a[3], a[4], a[5] ?? "codex", ...(a.slice(6) as []));
+const verifyMerges = (s: Parameters<typeof verifyFor>[0]) => verifyFor(s, undefined, "codex");
 import { emptyState } from "../src/manifest";
 import { mcpTables, replaceTomlBlock, splitToml, TOML_BEGIN, TOML_END, tomlValue } from "../src/toml";
+const T = "mcp_servers"; // таблица MCP Codex (adapters/codex: mcpTable)
 import type { RenderResult } from "../src/adapter";
 
 const temp = mkdtempSync(join(tmpdir(), "toml-test-"));
@@ -27,7 +31,7 @@ describe("TOML block", () => {
   test("quoted keys, Windows paths, nested raw, Unicode, escaping roundtrip", () => {
     const servers = { 'a.b"c': { command: 'C:\\Program Files\\tool.exe', args: ['a\nb\t"c', 'Русский'], env: { 'a.b': 'token' }, enabled: false,
       tools: { read: { approval_mode: "prompt" } }, arbitrary: [{ k: "v" }] } };
-    expect(Bun.TOML.parse(mcpTables(servers))).toEqual({ mcp_servers: servers });
+    expect(Bun.TOML.parse(mcpTables(T, servers))).toEqual({ mcp_servers: servers });
     expect(Bun.TOML.parse(`developer_instructions = ${tomlValue("line 1\nline 2\r\n'quotes' \\")}`)).toEqual({ developer_instructions: "line 1\nline 2\r\n'quotes' \\" });
     expect(() => tomlValue(null)).toThrow();
     expect(() => tomlValue(Infinity)).toThrow();
@@ -38,7 +42,7 @@ describe("TOML block", () => {
     const r = result({ one: { command: "bin", env: { TOKEN: "test-secret" } } });
     const { state } = apply(plan(r, target, machine, emptyState(), false), emptyState());
     const text = readFileSync(path, "utf8");
-    expect(splitToml(text).outside).toBe(prefix);
+    expect(splitToml(T, text).outside).toBe(prefix);
     expect(Bun.TOML.parse(text).model).toBe("user-model");
     expect(verifyMerges(state)).toEqual([]);
     expect(plan(r, target, machine, state, false)).toEqual([]);
@@ -71,7 +75,7 @@ describe("TOML block", () => {
     const layer = result({ tok: { command: "wrapper" } });
     const conflict = plan(layer, target, f2.machine, emptyState(), false);
     expect(conflict).toEqual([expect.objectContaining({ kind: "conflict", why: expect.stringContaining("поля: args, command, env)") })]);
-    expect(conflict[0].kind === "conflict" && conflict[0].why).toContain("miksy sync --global --agent miksy --force");
+    expect(conflict[0].kind === "conflict" && conflict[0].why).toContain("miksy sync --global --agent codex --force");
     expect(JSON.stringify(conflict)).not.toContain("value-12345678");
     apply(conflict, emptyState());
     const { state: forced } = apply(plan(layer, target, f2.machine, emptyState(), true), emptyState());
@@ -105,14 +109,14 @@ describe("TOML block", () => {
   // Круг 11u: блок miksy без учёта (новая машина, учёт забыт)
   test("unowned block: identical — taken silently; different — conflict, --force takes it, extra tables stay; clean ignores it", () => {
     const { path, machine, prefix } = fixture();
-    writeFileSync(path, replaceTomlBlock(splitToml(readFileSync(path, "utf8")), { a: { command: "bin" } }));
+    writeFileSync(path, replaceTomlBlock(T, splitToml(T, readFileSync(path, "utf8")), { a: { command: "bin" } }));
     expect(plan(empty, target, machine, emptyState(), false)).toEqual([]);
     const { state } = apply(plan(result({ a: { command: "bin" } }), target, machine, emptyState(), false), emptyState());
     expect(Object.values(state.toml!)[0].names).toEqual(["a"]);
-    expect(splitToml(readFileSync(path, "utf8")).outside).toBe(prefix);
+    expect(splitToml(T, readFileSync(path, "utf8")).outside).toBe(prefix);
 
     const f2 = fixture();
-    writeFileSync(f2.path, replaceTomlBlock(splitToml(f2.prefix), { a: { command: "old" }, extra: { command: "mine" } }));
+    writeFileSync(f2.path, replaceTomlBlock(T, splitToml(T, f2.prefix), { a: { command: "old" }, extra: { command: "mine" } }));
     const before = readFileSync(f2.path, "utf8");
     const conflict = plan(result({ a: { command: "bin" } }), target, f2.machine, emptyState(), false);
     expect(conflict.map((a) => a.kind)).toEqual(["conflict"]);
@@ -122,15 +126,15 @@ describe("TOML block", () => {
     const { state: taken } = apply(plan(result({ a: { command: "bin" } }), target, f2.machine, emptyState(), true), emptyState());
     const text = readFileSync(f2.path, "utf8");
     expect(Bun.TOML.parse(text).mcp_servers).toEqual({ extra: { command: "mine" }, a: { command: "bin" } });
-    expect(splitToml(text).servers).toEqual({ a: { command: "bin" } });
+    expect(splitToml(T, text).servers).toEqual({ a: { command: "bin" } });
     expect(text.startsWith(f2.prefix)).toBe(true);
     // Повторный sync стабилен: ни конфликтов, ни правок
     expect(plan(result({ a: { command: "bin" } }), target, f2.machine, taken, false)).toEqual([]);
   });
 
   test("broken/duplicate markers, alien tables, string markers rejected; comment after block is fine", () => {
-    const good = replaceTomlBlock(splitToml('model="x"\n'), { a: { command: "bin" } });
-    expect(splitToml(good + "# trailing\n").after).toBe("# trailing\n");
+    const good = replaceTomlBlock(T, splitToml(T, 'model="x"\n'), { a: { command: "bin" } });
+    expect(splitToml(T, good + "# trailing\n").after).toBe("# trailing\n");
     for (const text of [good + good, good.replace(TOML_END, ""),
       `\n${TOML_BEGIN}\n[features]\nx=true\n${TOML_END}\n`,
       `\n${TOML_BEGIN}\n[mcp_servers]\na={command="bin"}\n${TOML_END}\n`,
@@ -175,7 +179,7 @@ describe("TOML block", () => {
   });
 
   test("хвост без заголовка таблицы продолжил бы таблицу блока — конфликт", () => {
-    const good = replaceTomlBlock(splitToml('model="x"\n'), { a: { command: "bin" } });
+    const good = replaceTomlBlock(T, splitToml(T, 'model="x"\n'), { a: { command: "bin" } });
     for (const tail of ['model = "y"\n', "# comment\nenabled = false\n"]) {
       const { machine } = fixture(good + tail);
       expect(plan(result({ b: { command: "new" } }), target, machine, emptyState(), true)[0].kind).toBe("conflict");

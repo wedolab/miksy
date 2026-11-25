@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { codex } from "../adapters/codex";
 import type { Machine, Resolved } from "../src/types";
 import { replaceTomlBlock, splitToml, tomlValue } from "../src/toml";
+const T = "mcp_servers"; // таблица MCP Codex (adapters/codex: mcpTable)
 
 const out = resolve(import.meta.dir, "../out");
 mkdirSync(out, { recursive: true });
@@ -50,7 +51,7 @@ try {
     ["ancestor-drive-case", process.platform === "win32" ? ancestor[0].toUpperCase() + ancestor.slice(1) : ancestor, "trusted"],
     ["exact", project, "trusted"], ["untrusted", project, "untrusted"]]) {
     const prefix = trustPath ? `[projects.${tomlValue(trustPath)}]\ntrust_level=${tomlValue(level)}\n` : "";
-    writeFileSync(join(home, ".codex/config.toml"), replaceTomlBlock(splitToml(prefix), {
+    writeFileSync(join(home, ".codex/config.toml"), replaceTomlBlock(T, splitToml(T, prefix), {
       miksy_global: { command: "global-smoke-not-executed", env: { LITERAL_VALUE: "тест" } },
       miksy_http: { url: "http://127.0.0.1:1/mcp", http_headers: { "X-Miksy-Test": "literal-value" } },
     }));

@@ -25,6 +25,7 @@ import { runRestore } from "./restore";
 import { engineVersion, newerLedger, versionNote } from "./version";
 import { emptyState, joinStates, type ForgottenMark, type Manifest, otherOwners, saveManifest, splitState, strandedPaths, type TargetState, writeAtomic } from "./manifest";
 import { ADAPTERS, agentTitle, agentsFor, allProjects, allTargets, branchNote, branchNotes, clashNotes, formerGroups, stranded, formerTarget, globalTarget, type Group, groupRulesDelivered, agentDirs, enclosingTarget, layersOf, ledgerSkills, listGroups, markedKind, literalHints, outsideRoots, projectTarget, launcherFor, loadManifestMoved, movesText, READERS, renderFor, rootedTargets, rootedText, rootNotes, saveMoves, type TargetSpec, targetId, targetKey, titleOf, unprotectedSecrets, unsyncedGroups, vanishedTarget, workspaceRepoNote } from "./registry";
+import { rulesExample } from "./agents";
 import { merge, selectGlobal } from "./resolve";
 import { builtinCopies, builtinCopyText, builtinHash } from "./builtin";
 import { CommandNotFound, placeSkillSecrets, runWithSecret, secretValue } from "./secretcmd";
@@ -190,7 +191,7 @@ let secretsDirRefusal: string | null | undefined;
 // Цели этого запуска с ошибкой: пропущены целиком (ничего не записано) или записаны частично — в итоге отдельно от
 // конфликтов (выпуск 0.2.3, A6)
 let runFailed = { skipped: 0, partial: 0 };
-let writtenMerges: { state: TargetState; actions: Action[] }[] = [];
+let writtenMerges: { state: TargetState; actions: Action[]; agent: string }[] = [];
 let deliveredSkills = new Map<string, string[]>();
 // Доверие ждёт решения пользователя (исполняемые настройки агента): разбор в конце sync
 let pendingTrust = new Map<string, { p: PendingTrust; adapter: Adapter; t: TargetSpec }>();
@@ -463,7 +464,7 @@ function runTarget(
       console.log("  файл изменился во время sync — план пересчитан:\n" + again.map(describe).join("\n")), made);
     state = done.state;
     deliveredSkills.set(targetKey(t), [...(deliveredSkills.get(targetKey(t)) ?? []), ...deliveredSkillNames(result, done.actions, t.target)]);
-    writtenMerges.push(done);
+    writtenMerges.push({ ...done, agent: adapter.id });
     conflicts = done.actions.filter((a) => a.kind === "conflict").length;
   } catch (e) {
     // Ошибка одной цели не останавливает остальные; выполненное до ошибки — в учёт
@@ -659,7 +660,7 @@ export const strandedText = (s: Stranded, forgot: boolean, dryRun: boolean, mach
   // «Забыть» значит забыть: оригиналы (miksy когда-то заменил файлы пользователя) сами на место не вернутся
   const store = `${slash(join(configRoot(), "local", "backups", "originals"))}/`;
   const copies = (s.originals ? ` Копии ваших прежних файлов (${s.originals}), которые miksy когда-то заменил, ${dryRun ? "останутся" : "остаются"} в ${store} — сами на место не вернутся.` : "")
-    + (s.blocks ? ` В ${s.blocks} ${plural(s.blocks, "файле", "файлах", "файлах")} (CLAUDE.local.md и т. п.) miksy только дописал свой блок: файл ваш и остаётся на месте, miksy уберёт из него только свой блок; копию «до блока» в ${store} поверх него не возвращайте — потеряете дописанное позже.` : "");
+    + (s.blocks ? ` В ${s.blocks} ${plural(s.blocks, "файле", "файлах", "файлах")} (${rulesExample()} и т. п.) miksy только дописал свой блок: файл ваш и остаётся на месте, miksy уберёт из него только свой блок; копию «до блока» в ${store} поверх него не возвращайте — потеряете дописанное позже.` : "");
   // Агенты, которых нет в agents: их файлы sync и clean без --agent не тронут — команда для каждого (проверка 7b, B №1)
   const others = (s.others ?? []).length ? ` Файлы агентов, которых нет в agents, когда диск найдётся, уберёт ${s.others!.map((o) => `miksy clean ${quoteArg(s.dir)} --agent ${o.agent}`).join(", ")} (miksy узнает их сам; если clean напишет «Проект был забыт» — выполните и его подсказку).` : "";
   const done = `${dryRun ? "План: записанное" : "Записанное"} в ${s.dir} (${files(s.count)} на недоступном диске) ${dryRun ? "будет забыто" : "забыто"}.${copies}${others}`;
@@ -1026,7 +1027,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const list = allProjects(machine, flags.agent ? agentsFor(machine, flags.agent) : undefined, warn).filter((p) => !gdirs.has(fold(pathKey(p.abs))));
       const rows = [
         ...groups.map((g) => ({ rel: titleOf(g.rel, g.root, machine), note: `   (${markedKind(g)}: target: true в layer.yaml${g.git ? ", git-репо" : ""})` })),
-        ...list.map((p) => ({ rel: titleOf(p.rel, p.root, machine), note: p.nested ? "   (внутри есть другие проекты — CLAUDE.local.md сюда не пишется)" : "" })),
+        ...list.map((p) => ({ rel: titleOf(p.rel, p.root, machine), note: p.nested ? `   (внутри есть другие проекты — ${rulesExample()} сюда не пишется)` : "" })),
       ].sort((a, b) => a.rel.localeCompare(b.rel));
       for (const r of rows) console.log(r.rel + r.note);
       console.log(`\nВсего: ${list.length}${groups.length ? `; помечено целями (target: true): ${groups.length}` : ""}`);
@@ -1298,7 +1299,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         // Записанные ключи общих файлов — на месте ли сразу после записи (без паузы); перезапись
         // открытой сессией агента позже покажет doctor («ключи пропали»)
         const checking = writtenMerges.filter((x) => x.actions.some((a) => a.kind === "merge" || a.kind === "toml" || a.kind === "trust" || a.kind === "approve"));
-        const lost = checking.flatMap((x) => verifyMerges(x.state, x.actions));
+        const lost = checking.flatMap((x) => verifyMerges(x.state, x.actions, x.agent));
         if (checking.length) console.log(lost.length
           ? "ВНИМАНИЕ: часть ключей пропала — файл перезаписан другим процессом (сессией агента?):\n" + lost.map((l) => "  " + l).join("\n")
           : "Проверка: все ключи на месте (если их позже перезапишет открытая сессия агента — покажет miksy doctor).");
@@ -1364,7 +1365,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           ADAPTERS[tableSource.agent].adoptGlobal!(manifest, machine, name, tableSource.def);
           saveMoves(manifest, moves);
           saveManifest(manifest);
-          console.log(`  ${ADAPTERS[tableSource.agent].title}: таблица mcp_servers.${name} взята под учёт с бэкапом; следующий sync --global не требует --force.`);
+          console.log(`  ${ADAPTERS[tableSource.agent].title}: таблица ${ADAPTERS[tableSource.agent].mcpTable}.${name} взята под учёт с бэкапом; следующий sync --global не требует --force.`);
         }
         console.log(`✓ MCP ${name} → ${file}`);
         if (Object.keys(found).length) console.log(`  на другой машине эти секреты нужно добавить в её local/secrets.env`);

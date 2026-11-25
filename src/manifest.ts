@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync
 import { dirname, join, resolve } from "node:path";
 import { configRoot } from "./load";
 import { inside, pathKey, slash } from "./paths";
-import { splitToml } from "./toml";
+import { blockText } from "./toml";
 import type { TrustRecord } from "./trust";
 import { busyError } from "./locks";
 import { packageVersion } from "./version";
@@ -320,7 +320,8 @@ function mergeEntry(part: "files" | "merges" | "exclude" | "toml" | "blocks" | "
     else if (part === "blocks") dest[key] = UNKNOWN_HASH;
     else if (part === "originals") throw new ManifestError(`учёт: разные оригиналы для ${key} — восстановите manifest.json`);
     else {
-      const block = text === null ? null : sha(splitToml(text).block);
+      // Блок — по маркерам, без проверки таблиц (их знает адаптер): испорченный блок — «хеш неизвестен», конфликт файла
+      const block = text === null ? null : sha(blockText(text));
       dest[key] = [dest[key], value].find((t) => t.hash === block)
         ?? { hash: UNKNOWN_HASH, names: [...new Set([...dest[key].names, ...value.names])] };
     }

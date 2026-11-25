@@ -27,9 +27,9 @@ export function differingFields(a: unknown, b: unknown, prefix = ""): string[] {
 // Блок miksy без учёта (новая машина, учёт забыт): маркеры снимаются, его таблицы становятся обычными таблицами
 // файла; null — снять безопасно нельзя (разбор изменился бы)
 // (вместе с разделителем, который добавил блок: иначе новая запись блока оставила бы лишнюю пустую строку)
-export function stripMarkers(text: string): string | null {
+export function stripMarkers(table: string, text: string): string | null {
   try {
-    const parts = splitToml(text);
+    const parts = splitToml(table, text);
     const stripped = parts.before + parts.block.replace(/^\n/, "").replace(MARK_START, "").replace(MARK_STOP, "") + parts.after;
     return isDeepStrictEqual(parseToml(text), parseToml(stripped)) ? stripped : null;
   } catch { return null; }
@@ -60,20 +60,21 @@ export function tomlValue(value: unknown): string {
   throw new Error("TOML: поддерживаются только строки, конечные числа, boolean, массивы и объекты (без null)");
 }
 
-export function mcpTables(servers: Record<string, unknown>): string {
+// Таблицы MCP-серверов: [<table>.<имя>] и подтаблицы; table — таблица MCP агента (Adapter.mcpTable)
+export function mcpTables(table: string, servers: Record<string, unknown>): string {
   const lines: string[] = [];
-  function table(key: string[], values: Record<string, unknown>) {
+  function emit(key: string[], values: Record<string, unknown>) {
     lines.push(`[${key.map(tomlValue).join(".")}]`);
     for (const [k, v] of Object.entries(values)) if (!object(v)) lines.push(`${tomlValue(k)} = ${tomlValue(v)}`);
     for (const [k, v] of Object.entries(values)) if (object(v)) {
       lines.push("");
-      table([...key, k], v);
+      emit([...key, k], v);
     }
   }
   for (const [name, def] of Object.entries(servers)) {
     if (!object(def)) throw new Error("TOML: определение MCP-сервера должно быть объектом");
     if (lines.length) lines.push("");
-    table(["mcp_servers", name], def);
+    emit([table, name], def);
   }
   return lines.length ? lines.join("\n") + "\n" : "";
 }
@@ -90,13 +91,12 @@ export interface TomlParts {
 // Текст вне блока целиком; если служебный перевод строки был единственным разделителем — сохранить его
 const join2 = (before: string, after: string) => before + (after && before && !before.endsWith("\n") ? "\n" : "") + after;
 
-export function splitToml(text: string): TomlParts {
-  // Ошибки Bun могут содержать секретную строку: наружу только общий диагноз.
-  const parse = parseToml;
-  const full = parse(text);
+// Где блок miksy в тексте — по маркерам, без разбора содержимого; null — блока нет. Хеш блока при слиянии записей
+// учёта (manifest.ts) считается по тому же отрезку, что у splitToml
+export function blockSpan(text: string): { start: RegExpMatchArray; end: RegExpMatchArray; offset: number; close: number } | null {
   const starts = [...text.matchAll(MARK_START)];
   const ends = [...text.matchAll(MARK_STOP)];
-  if (!starts.length && !ends.length) return { before: text, after: "", outside: text, block: "", servers: {}, external: full.mcp_servers ?? {} };
+  if (!starts.length && !ends.length) return null;
   if (starts.length !== 1 || ends.length !== 1) throw new Error("TOML: повреждённые или повторные маркеры miksy");
   const start = starts[0], end = ends[0];
   if (!isBegin(start[0].trimEnd()) || !isEnd(end[0].trimEnd()) || end.index! < start.index!)
@@ -104,42 +104,54 @@ export function splitToml(text: string): TomlParts {
   let offset = start.index!;
   // Добавленный нами разделитель принадлежит блоку; исходный текст вне блока не меняется.
   if (offset > 0 && text[offset - 1] === "\n") offset -= 1;
-  const close = end.index! + end[0].length;
+  return { start, end, offset, close: end.index! + end[0].length };
+}
+export const blockText = (text: string) => { const s = blockSpan(text); return s ? text.slice(s.offset, s.close) : ""; };
+
+// table — таблица MCP агента (Adapter.mcpTable): в блоке разрешены только её подтаблицы
+export function splitToml(table: string, text: string): TomlParts {
+  // Ошибки Bun могут содержать секретную строку: наружу только общий диагноз.
+  const parse = parseToml;
+  const full = parse(text);
+  const span = blockSpan(text);
+  if (!span) return { before: text, after: "", outside: text, block: "", servers: {}, external: full[table] ?? {} };
+  const { start, end, offset, close } = span;
   const before = text.slice(0, offset);
   const after = text.slice(close);
   const outside = join2(before, after);
   const body = text.slice(start.index! + start[0].length, end.index);
   const parsed = parse(body);
-  if (Object.keys(parsed).some((key) => key !== "mcp_servers") || !object(parsed.mcp_servers)
-      || Object.values(parsed.mcp_servers).some((v) => !object(v)))
+  if (Object.keys(parsed).some((key) => key !== table) || !object(parsed[table])
+      || Object.values(parsed[table]).some((v) => !object(v)))
     throw new Error("TOML: в блоке разрешены только таблицы MCP");
   const first = body.split(/\r?\n/).find((line) => line.trim() && !line.trim().startsWith("#"));
   if (!first?.trim().startsWith("[")) throw new Error("TOML: блок должен начинаться с таблицы MCP");
   for (const line of body.split(/\r?\n/).filter((s) => s.trim().startsWith("["))) {
     const probe = parse(line + "\n__miksy_probe__ = 1\n");
-    if (Object.keys(probe).length !== 1 || !object(probe.mcp_servers)
-        || Object.values(probe.mcp_servers).some((v) => !object(v)))
-      throw new Error("TOML: в блоке разрешены только [mcp_servers.<name>] и их подтаблицы");
+    if (Object.keys(probe).length !== 1 || !object(probe[table])
+        || Object.values(probe[table]).some((v) => !object(v)))
+      throw new Error(`TOML: в блоке разрешены только [${table}.<name>] и их подтаблицы`);
   }
   const base = parse(outside);
-  const external = base.mcp_servers ?? {};
-  if (Object.keys(parsed.mcp_servers).some((name) => Object.hasOwn(external, name)))
+  const external = base[table] ?? {};
+  if (Object.keys(parsed[table]).some((name) => Object.hasOwn(external, name)))
     throw new Error("TOML: имя MCP определено и вне блока, и внутри него");
-  const expected = { ...base, mcp_servers: { ...external, ...parsed.mcp_servers } };
+  const expected = { ...base, [table]: { ...external, ...parsed[table] } };
   // Защита от маркеров внутри многострочных TOML-строк, от неоднозначной области таблиц и от хвоста
   // после блока, который без заголовка таблицы продолжил бы последнюю таблицу блока.
   if (!isDeepStrictEqual(full, expected)) throw new Error("TOML: маркеры не ограничивают самостоятельные таблицы MCP");
-  return { before, after, outside, block: text.slice(offset, close), servers: parsed.mcp_servers, external };
+  return { before, after, outside, block: text.slice(offset, close), servers: parsed[table], external };
 }
 
 // Блок заменяется на месте (текст до и после сохраняется побайтно); нового блока ещё не было — в конец файла
-export function replaceTomlBlock(parts: TomlParts, servers: Record<string, unknown>): string {
+export function replaceTomlBlock(table: string, parts: TomlParts, servers: Record<string, unknown>): string {
   for (const name of Object.keys(servers)) if (Object.hasOwn(parts.external, name))
     throw new Error(`TOML: имя MCP ${name} уже есть вне блока`);
-  const tables = mcpTables(servers);
+  const tables = mcpTables(table, servers);
   // Bun допускает расширение inline-таблицы, но TOML/Codex запрещает его.
-  if (tables && /^\s*(?:mcp_servers|"mcp_servers"|'mcp_servers')\s*=/m.test(parts.outside))
-    throw new Error("TOML: mcp_servers задан присваиванием вне блока; безопасно добавить таблицы нельзя");
+  const t = table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (tables && new RegExp(`^\\s*(?:${t}|"${t}"|'${t}')\\s*=`, "m").test(parts.outside))
+    throw new Error(`TOML: ${table} задан присваиванием вне блока; безопасно добавить таблицы нельзя`);
   const block = tables ? `\n${TOML_BEGIN}\n${tables}${TOML_END}\n` : "";
   const content = block ? parts.before + block + parts.after : join2(parts.before, parts.after);
   try { Bun.TOML.parse(content); } catch { throw new Error("TOML: итоговый файл не разбирается; запись отменена"); }
@@ -243,22 +255,22 @@ export function removeTables(text: string, prefix: string[]): string {
   return out;
 }
 
-export function ownedTomlParts(text: string, tracked = false): TomlParts {
-  try { return splitToml(text); }
+export function ownedTomlParts(table: string, text: string, tracked = false): TomlParts {
+  try { return splitToml(table, text); }
   catch (e) {
     if (!tracked) throw e;
     const stripped = text.replace(MARK_START, "").replace(MARK_STOP, "");
     if (!isDeepStrictEqual(parseToml(text), parseToml(stripped))) throw e;
-    return splitToml(stripped);
+    return splitToml(table, stripped);
   }
 }
 
-export function replaceOwnedMcp(text: string, names: string[], data: Record<string, unknown>, tracked = false): string {
-  const parts = ownedTomlParts(text, tracked);
+export function replaceOwnedMcp(table: string, text: string, names: string[], data: Record<string, unknown>, tracked = false): string {
+  const parts = ownedTomlParts(table, text, tracked);
   // Обычный блок: остаётся на прежнем месте, включая исходный prefix без перевода строки.
   if (parts.block && Object.keys(parts.servers).every((n) => names.includes(n)) && names.every((n) => !(n in parts.external)))
-    return replaceTomlBlock(parts, data);
+    return replaceTomlBlock(table, parts, data);
   let outside = parts.block ? parts.before + parts.block.replace(MARK_START, "").replace(MARK_STOP, "") + parts.after : parts.outside;
-  for (const name of names) outside = removeTables(outside, ["mcp_servers", name]);
-  return replaceTomlBlock(splitToml(outside), data);
+  for (const name of names) outside = removeTables(outside, [table, name]);
+  return replaceTomlBlock(table, splitToml(table, outside), data);
 }

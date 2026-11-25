@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, unlinkSync } from "node:fs";
-import { plan, apply } from "../src/apply";
+import { plan as planFor, apply } from "../src/apply";
+// TOML-слияние — Codex: план и проверка — от его имени (таблица MCP — adapters/codex: mcpTable)
+const plan = (...a: Parameters<typeof planFor>) => planFor(a[0], a[1], a[2], a[3], a[4], a[5] ?? "codex", ...(a.slice(6) as []));
 import { emptyState, loadManifest, sha } from "../src/manifest";
 import { cliFixture, put } from "./helpers";
 

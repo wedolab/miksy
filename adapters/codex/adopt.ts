@@ -14,7 +14,7 @@ export function adoptCodexTable(manifest: Manifest, machine: Machine, name: stri
   const file = join(machine.home, ".codex/config.toml");
   guard(file, machine.home);
   if (protectedBy(file)) throw new Error("Codex config отслеживается git — таблица не может перейти во владение miksy");
-  const text = readFileSync(file, "utf8"), doc = parseToml(text), parts = splitToml(text);
+  const text = readFileSync(file, "utf8"), doc = parseToml(text), parts = splitToml("mcp_servers", text);
   if (!doc.mcp_servers?.[name] || definitionHash(doc.mcp_servers[name]) !== definitionHash(expected))
     throw new Error("Codex: исходная таблица изменилась после чтения — повторите adopt");
   const prev = manifest.targets["codex|global"] ?? emptyState();

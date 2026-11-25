@@ -94,6 +94,7 @@ const helpers = (result: RenderResult) => [...new Set(result.files.flatMap((f) =
 export const claudeTrust: TrustSpec = {
   file: ".claude.json",
   format: "json",
+  table: "projects",
   field: "hasTrustDialogAccepted",
   value: true,
   // Claude: false — значение по умолчанию новой записи проекта (вопрос не задавался; в Zed он не задаётся), а не отказ

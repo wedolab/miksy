@@ -31,6 +31,7 @@ export function codexProjectKey(dir: string, machine: Machine, existing: string[
 export const codexTrust: TrustSpec = {
   file: ".codex/config.toml",
   format: "toml",
+  table: "projects",
   field: "trust_level",
   // untrusted — явный ответ пользователя, его не меняем
   value: "trusted",

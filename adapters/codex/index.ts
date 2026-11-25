@@ -31,8 +31,12 @@ export function nativeMcp(s: McpServer, launch?: Launcher): Record<string, unkno
     : { command: s.command, args: s.args ?? [], ...(s.env && { env: s.env }) };
   return special ? { ...base, ...special.raw } : base;
 }
+// Таблица MCP-серверов в config.toml (глобальном и проекта)
+export const MCP_TABLE = "mcp_servers";
+
 export const codex: Adapter = {
   id: "codex",
+  mcpTable: MCP_TABLE,
   title: "Codex",
   detect: { commands: ["codex"], dirs: [".codex"] },
   program: { name: "Codex", commands: ["codex"] },
@@ -120,7 +124,7 @@ export const codex: Adapter = {
         else files.push({ base: "home", path: ".codex/.env", mode: "own", block: true, content: line + "\n" });
       }
       if (Object.keys(servers).length)
-        files.push({ base: "home", path: ".codex/config.toml", mode: "merge", format: "toml", key: ["mcp_servers"], data: servers });
+        files.push({ base: "home", path: ".codex/config.toml", mode: "merge", format: "toml", key: [MCP_TABLE], data: servers });
       scripts();
     } else if (body || Object.keys(servers).length || keepOwn(ctx, join(target.dir, ".codex/config.toml"))) {
       const path = ".codex/config.toml";
@@ -136,9 +140,9 @@ export const codex: Adapter = {
         warnings.push(`${path} отслеживается git проекта — это файл команды; инструкции и MCP codex не записаны`);
       } else {
         const content = `# Сгенерировано miksy. Не править вручную — изменения вносить в конфигурацию miksy (слои).\n`
-          + (body ? `developer_instructions = ${tomlValue(body)}\n\n` : "") + mcpTables(servers);
+          + (body ? `developer_instructions = ${tomlValue(body)}\n\n` : "") + mcpTables(MCP_TABLE, servers);
         parseToml(content);
-        files.push({ base: "project", path, mode: "own", content, mcp: { format: "toml", key: "mcp_servers" } });
+        files.push({ base: "project", path, mode: "own", content, mcp: { format: "toml", key: MCP_TABLE } });
         scripts();
       }
     }
