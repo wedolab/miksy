@@ -60,7 +60,7 @@ export const COMMANDS: Record<string, Spec> = {
       if (p[0] === "remove" && p.length !== 2) throw new UsageError("miksy root remove <путь> — укажите, какой корень убрать");
       if ("tree" in f && p[0] !== "add") throw new UsageError("--tree — только для miksy root add");
       if ("forget" in f && p[0] !== "remove") throw new UsageError("--forget — только для miksy root remove");
-      if ("yes" in f && p[0] !== "add") throw new UsageError("--yes — только для miksy root add (добавить корнем каталог, который сам проект, без вопроса)");
+      if ("yes" in f && p[0] !== "add") throw new UsageError("--yes — только для miksy root add («да» на все вопросы)");
       if ("dry-run" in f && !p.length) throw new UsageError("--dry-run — для miksy root add и root remove");
     },
   },

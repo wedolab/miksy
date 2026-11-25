@@ -86,9 +86,9 @@ describe("B.1 — проект вне workspace: подсказка доводи
     const r = f.run(["root", "add", repo, "--tree", "New"]);
     expect({ code: r.code, why: (r.out + r.err).includes("папкой с проектами, а не проектом"), cmd: (r.out + r.err).includes(`miksy root add "${dirname(repo)}"`), yes: (r.out + r.err).includes(`miksy root add "${repo}" --tree New --yes`), dots: (r.out + r.err).includes(".."), yaml: yaml() }, said(r))
       .toEqual({ code: 2, why: true, cmd: true, yes: true, dots: false, yaml: before });
-    // Без --tree совет — с местом для ветки (иначе подсказанная команда дословно упала бы на «укажите ветку»)
+    // Без --tree совет — с предложенной веткой: дословно проходит (круг 11x; раньше — место «<ветка>»)
     const nt = f.run(["root", "add", repo]);
-    expect((nt.out + nt.err).includes(`miksy root add "${repo}" --tree <ветка> --yes`)).toBe(true);
+    expect((nt.out + nt.err).includes(`miksy root add "${repo}" --tree new-repo --yes`)).toBe(true);
     const q = inProcess(f, ["root", "add", repo, "--tree", "New"], f.dir, [false]);
     expect({ code: q.code, q: q.questions.length, none: q.out.includes("Корень не добавлен"), yaml: yaml() }, said(q)).toEqual({ code: 0, q: 1, none: true, yaml: before });
     const dry = f.run(["root", "add", repo, "--tree", "New", "--dry-run"]);

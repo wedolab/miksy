@@ -98,7 +98,8 @@ export const USAGE = `miksy — раскладывает ваши правила
   miksy root add [<путь>]      ещё одна папка с проектами — корень workspace (без пути —
                                текущая); --tree <ветка> — её место в layers/tree. Папку,
                                которая сама проект (git-репо или папка внутри него), miksy
-                               объяснит и спросит (--yes — без вопроса).
+                               объяснит и спросит. --yes — «да» на все вопросы, sync --all
+                               сразу (ветку тогда — через --tree).
                                miksy root remove <путь> — убрать (--forget — как у clean);
                                miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
@@ -1089,7 +1090,13 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const writeAll = cmd === "sync" && "all" in flags && !("dry-run" in flags);
       const roots = machineRoots(machine);
       const unsafe = roots.flatMap((r) => { const why = unsafeWorkspace(r.path, machine.home); return why ? [`${r.path} — ${why}`] : []; });
-      if (writeAll && unsafe.length) confirm(`workspace ${unsafe.join("; ")}: sync --all запишет конфиги во все git-репо внутри`, flags);
+      if (writeAll && unsafe.length) {
+        const reason = `workspace ${unsafe.join("; ")}: sync --all запишет конфиги во все git-репо внутри`;
+        // sync после root add --yes (круг 11x, решение владельца): этот вопрос --yes корня не снимает; без терминала —
+        // отказ с точной командой, корень уже записан
+        if ("root-add" in flags && !ask) throw new UsageError(`корень записан, настройки проектам — нет: ${reason}. Проверьте план (miksy sync --all --dry-run) и подтвердите: miksy sync --all --yes`);
+        confirm(reason, flags);
+      }
 
       const warn = (w: string) => console.log("предупреждение: " + w);
       allMode = "all" in flags;
@@ -1171,13 +1178,17 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const groupTitles = marked.filter((t) => t.target.scope === "project" && t.target.nested).map((t) => t.title);
         const bareTitles = marked.filter((t) => !groupTitles.includes(t.title)).map((t) => t.title);
         console.log(`${cmd} --all: workspace ${roots.map(rootText).join(", ")}; проектов: ${targets.length - marked.length}; агенты: ${adapters.map((a) => a.id).join(", ")}`);
+        // Проектов нет ни в одном корне — что делать дальше, а не голое «проектов: 0» (круг 11x)
+        if (cmd === "sync" && !targets.length && roots.some(rootExists))
+          console.log(`  проектов пока нет: положите в папку с проектами (корень workspace) git-репо (или создайте — git init в папке проекта) и запустите miksy sync --all снова — miksy их найдёт`);
         if (groupTitles.length) console.log(`  группы (${groupTitles.length}): ${groupTitles.join(", ")}`);
         if (bareTitles.length) console.log(`  цели без git (${bareTitles.length}): ${bareTitles.join(", ")}`);
         if (old.length) console.log(`  уже в учёте (${old.length}): ${old.map((t) => t.title).join(", ")}`);
         if (fresh.length) console.log(`  новые — miksy в них ещё не писал (${fresh.length}):\n${fresh.map((t) => "    " + t.title).join("\n")}`);
         const plain = cmd === "sync" ? plainDirs(roots, runGroups, targets) : [];
         if (plain.length) console.log(`  ${plainText(plain)}`);
-        if (writeAll && fresh.length > NEW_TARGETS_LIMIT)
+        // root add --yes — «да» и на этот вопрос (круг 11x)
+        if (writeAll && fresh.length > NEW_TARGETS_LIMIT && !("root-add" in flags))
           confirm(`новых целей: ${fresh.length} (больше ${NEW_TARGETS_LIMIT}) — miksy создаст файлы в каждом из этих репо`, flags);
       }
       // clean каталога, до которого не дотянуться: достижимое убирается, записанное внутри — остаётся в учёте
@@ -1591,7 +1602,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         // Каталог, который сам проект: корнем он станет папкой с проектами, а не проектом. Справка с рекомендацией;
         // в терминале — вопрос («нет» по умолчанию), без терминала — не добавляется без --yes (рецензия 6x, B3)
         const project = projectRoot(real, machine, roots);
-        const withYes = `miksy root add ${quoteArg(given)}${flags.tree !== undefined ? ` --tree ${shellArg(flags.tree)}` : " --tree <ветка>"} --yes`;
+        const taken = roots.map((r) => r.tree).filter(Boolean);
+        const suggestion = suggestTree(given, taken);
+        // Совет с --yes — команда, которая дословно проходит: ветка — указанная или предложенная (круг 11x)
+        const withYes = `miksy root add ${quoteArg(given)} --tree ${shellArg(flags.tree ?? suggestion)} --yes`;
+        // --yes — «да» на все вопросы, но ветку дерева за пользователя не выбрать: без --tree — точная команда
+        // с остальными флагами исходной (круг 11x)
+        if ("yes" in flags && flags.tree === undefined)
+          throw new UsageError(`--yes не выбирает ветку дерева слоёв — укажите её: ${withYes}${"dry-run" in flags ? " --dry-run" : ""} (слои корня будут в layers/tree/${suggestion}/; можно другое имя)`);
         if (project) {
           if ("yes" in flags) warn(project);
           // План — как настоящий запуск в этом же режиме (выпуск 0.2.1, A8): без терминала — отказ без --yes, в
@@ -1610,8 +1628,6 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
             }
           }
         }
-        const taken = roots.map((r) => r.tree).filter(Boolean);
-        const suggestion = suggestTree(given, taken);
         let answer = flags.tree;
         if (answer === undefined) {
           if (!ask) throw new UsageError(`укажите ветку дерева слоёв для нового корня: miksy root add ${quoteArg(given)} --tree <ветка> (например, --tree ${shellArg(suggestion)}) — его слои будут в layers/tree/<ветка>/`);
@@ -1638,28 +1654,42 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           if (o && (r === added || o === added)) console.log(`справка: ${nestedText(r, o)}`);
         }
         for (const n of branchNotes(grown)) if (n.includes(added.path)) console.log(`справка: ${n}`);
+        // Пустая папка (проектов внутри нет) — обычный случай: место под будущие проекты. Без вопроса о самой папке;
+        // вместо «Проектов в нём: 0» — что делать дальше (круг 11x, решение владельца). sync — как обычно: записанное
+        // в другие корни и в сам каталог (проект, ставший корнем) он обновит
+        const found = allProjects(grown).filter((p) => sameKey(p.root.path, added.path));
+        const empty = `Проектов в нём пока нет: положите сюда git-репо (или создайте — git init в папке проекта) и запустите miksy sync --all — miksy их найдёт.`;
+        const yes = "yes" in flags;
         if ("dry-run" in flags) {
-          console.log(ask ? "После записи — вопрос «Записать настройки проектам workspace сейчас (miksy sync --all)?», по умолчанию «да»."
-            : "После записи: miksy projects — проверить, что видно; miksy sync --all — записать настройки.");
+          if (!found.length) console.log(empty);
+          if (yes || ask || found.length)
+            console.log(yes ? "После записи — сразу miksy sync --all (--yes: без вопроса)."
+              : ask ? "После записи — вопрос «Записать настройки проектам workspace сейчас (miksy sync --all)?», по умолчанию «да»."
+              : "После записи: miksy projects — проверить, что видно; miksy sync --all — записать настройки.");
           console.log("\n--dry-run: ничего не записано.");
           break;
         }
         backup(file);
         writeAtomic(file, after);
         console.log("✓ записано");
-        const found = allProjects(grown).filter((p) => sameKey(p.root.path, added.path));
-        console.log(`Проектов в нём: ${found.length}${found.length ? ` — ${found.slice(0, 10).map((p) => p.rel).join(", ")}${found.length > 10 ? ", …" : ""}` : ""} (весь список — miksy projects)`);
-        if (!ask) {
-          console.log("Дальше: miksy projects — проверить, что видно; miksy sync --all — записать настройки");
+        console.log(found.length ? `Проектов в нём: ${found.length} — ${found.slice(0, 10).map((p) => p.rel).join(", ")}${found.length > 10 ? ", …" : ""} (весь список — miksy projects)` : empty);
+        if (!ask && !yes) {
+          if (found.length) console.log("Дальше: miksy projects — проверить, что видно; miksy sync --all — записать настройки");
           break;
         }
-        if (!ask.yes("Записать настройки проектам workspace сейчас (miksy sync --all)?", true)) {
+        if (!yes && !ask!.yes("Записать настройки проектам workspace сейчас (miksy sync --all)?", true)) {
           console.log("Позже: miksy sync --all");
           break;
         }
         console.log("");
         resetRun();
-        code = command("sync", { all: "" }, []);
+        // --yes: без вопроса «новых целей больше …»; вопрос о доме или корне диска остаётся (круг 11x)
+        try { code = command("sync", { all: "", ...(yes && { "root-add": "" }) }, []); }
+        catch (e) {
+          if (!(e instanceof Cancelled)) throw e;
+          console.log("Отменено: корень записан, настройки проектам — нет. Позже: miksy sync --all");
+          code = 1;
+        }
         break;
       }
       // remove: только дополнительный корень. Записанное в его проекты — с согласия (в терминале —
