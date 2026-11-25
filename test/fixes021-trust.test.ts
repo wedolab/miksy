@@ -122,7 +122,7 @@ describe("A2 — «нет» доверию Claude отзывает одобре�
   };
   // Пользователь сам принял доверие в окне Claude
   const acceptInClaude = (home: string, p: string) => {
-    const cj = JSON.parse(read(`${home}/.claude.json`));
+    const cj = JSON.parse(read(`${home}/.claude.json`) || "{}"); // файл создал miksy и убрал (круг 11v)
     cj.projects ??= {};
     cj.projects[p] = { ...(cj.projects[p] ?? {}), hasTrustDialogAccepted: true };
     put(`${home}/.claude.json`, JSON.stringify(cj, null, 2));

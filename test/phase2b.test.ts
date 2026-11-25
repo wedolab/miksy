@@ -81,8 +81,11 @@ test("2б/5: sync добавляет доверие Codex и Claude, clean сн�
   expect(existsSync(codexFile)).toBe(true);
   expect(Object.values((Bun.TOML.parse(readFileSync(codexFile, "utf8")) as any).projects).some((x: any) => x.trust_level === "trusted")).toBe(true);
   expect(Object.values(JSON.parse(readFileSync(`${f.home}/.claude.json`, "utf8")).projects).some((x: any) => x.hasTrustDialogAccepted === true)).toBe(true);
+  // Своё Claude в файле есть — доверие снимается, файл остаётся
+  put(`${f.home}/.claude.json`, JSON.stringify({ ...JSON.parse(readFileSync(`${f.home}/.claude.json`, "utf8")), numStartups: 1 }));
   expectCode(f.run(["clean", "--all"]), 0);
-  expect(JSON.stringify(Bun.TOML.parse(readFileSync(codexFile, "utf8")))).not.toContain("trusted");
+  // Файл доверия Codex создал miksy — снято своё, и в нём ничего не осталось: файла нет (круг 11v)
+  expect(existsSync(codexFile)).toBe(false);
   expect(readFileSync(`${f.home}/.claude.json`, "utf8")).not.toContain("hasTrustDialogAccepted");
 }, 30000);
 

@@ -142,10 +142,12 @@ export const antigravity: Adapter = {
       if (hasMcp) {
         // Настройки CLI и IDE хранятся раздельно:
         // CLI читает ~/.gemini/config/mcp_config.json
-        // IDE читает ~/.gemini/antigravity-ide/mcp_config.json
+        // IDE читает ~/.gemini/antigravity-ide/mcp_config.json — пишется, только если IDE на машине есть (её папку
+        // создаёт первый запуск IDE): иначе sync заводил папку IDE, которой нет (круг 11v). Поставят IDE позже —
+        // допишет sync после её первого запуска; записанное раньше снимает clean по учёту
         const configs = [
           { path: ".gemini/config/mcp_config.json", label: "CLI" },
-          { path: ".gemini/antigravity-ide/mcp_config.json", label: "IDE" },
+          ...(existsSync(join(machine.home, ".gemini/antigravity-ide")) ? [{ path: ".gemini/antigravity-ide/mcp_config.json", label: "IDE" }] : []),
         ];
         for (const { path } of configs) {
           const abs = join(machine.home, path);

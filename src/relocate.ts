@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { blockHash, splitInstructions } from "./instructions";
 import { type Manifest, normalizeManifest, sha, type TargetState } from "./manifest";
+import { normalizeMade } from "./made";
 import { fold } from "./paths";
 import { excludeText, machinesIn } from "./excludeblocks";
 import { machineId, machineUnknown, noteSkipped } from "./machineid";
@@ -171,7 +172,9 @@ export function applyMoves(m: Manifest, moves: Move[], roots: Move[] = []): Mani
   const trustedBefore = m.trustedBefore && Object.fromEntries(Object.entries(m.trustedBefore).map(([id, v]) => [before(id), v]));
   // Отпечаток папки к отметке — с ней же (переименование номер папки не меняет; круг 10l)
   const trustedFolder = m.trustedFolder && Object.fromEntries(Object.entries(m.trustedFolder).map(([id, v]) => [before(id), v]));
-  return normalizeManifest({ ...m, ...(forgotten && { forgotten }), ...(trustedBefore && { trustedBefore }), ...(trustedFolder && { trustedFolder }) }, entries);
+  // Учёт «создал miksy» — тоже (круг 11v)
+  const made = normalizeMade(m.made, mp);
+  return normalizeManifest({ ...m, made, ...(forgotten && { forgotten }), ...(trustedBefore && { trustedBefore }), ...(trustedFolder && { trustedFolder }) }, entries);
 }
 
 export const HOW: Record<Move["how"], string> = {

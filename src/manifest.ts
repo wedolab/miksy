@@ -8,6 +8,7 @@ import type { TrustRecord } from "./trust";
 import { busyError } from "./locks";
 import { packageVersion } from "./version";
 import { agentId } from "./agentid";
+import { type Made, normalizeMade, validMade } from "./made";
 
 // Что miksy записал на этой машине — по каждой цели (агент + глобально/проект)
 export interface TargetState {
@@ -40,6 +41,9 @@ export interface TargetState {
   // папки другая (удалили и положили чужую копию) — «доверие ставил miksy» ответы в окне Claude вашими не делает
   // (круг 10l). Поля нет — учёт прежней версии или ФС без номеров: как раньше
   folder?: string;
+  // Учёт «создал miksy» (Manifest.made) ведётся с первой записи цели (круг 11v): у цели, записанной прежней версией,
+  // поля нет — пустые папки и файлы, которые остались после clean, она не узнаёт и называет строкой «Остались пустые»
+  made?: true;
 }
 
 // Отметка «проект забыт» (clean --forget, root remove --forget, «да» на вопрос «забыть?»): учёт этой машины помнит
@@ -83,6 +87,8 @@ export interface Manifest {
   // Хеш встроенного skill miksy (builtin.ts: skillHash), который видел последний sync --global этой машины: строка
   // «ваша замена отстаёт от встроенного» — только когда встроенный сменился с тех пор (круг 11j). Поля нет — до 0.6.1
   builtinSkill?: string;
+  // Папки и файлы-обёртки, которые создал miksy (src/made.ts; круг 11v). Поля нет — учёт до 11v: ничего такого не убирается
+  made?: Made;
 }
 
 export const manifestPath = () => join(configRoot(), "local", "state", "manifest.json");
@@ -111,6 +117,7 @@ export function splitState(st: TargetState, dir: string): { near: TargetState; f
   if (st.everTrusted) near.everTrusted = true;
   if (st.dialog) near.dialog = st.dialog;
   if (st.folder) near.folder = st.folder;
+  if (st.made) near.made = far.made = true;
   return { near, far };
 }
 // Сколько путей учёта лежит внутри каталога (файлы, блоки, слияния, exclude, одобрения)
@@ -125,6 +132,8 @@ export function joinStates(a: TargetState, b: TargetState): TargetState {
   if (b.everTrusted) out.everTrusted = true;
   if (b.dialog) out.dialog ??= b.dialog;
   if (b.folder) out.folder ??= b.folder;
+  if (b.made && a.made) out.made = true;
+  else delete out.made;
   return out;
 }
 
@@ -154,6 +163,7 @@ function validState(state: unknown): state is TargetState {
   if (state.everTrusted !== undefined && state.everTrusted !== true) return false;
   if (state.dialog !== undefined && typeof state.dialog !== "string") return false;
   if (state.folder !== undefined && typeof state.folder !== "string") return false;
+  if (state.made !== undefined && state.made !== true) return false;
   if (state.blocks !== undefined && (!record(state.blocks) || !Object.values(state.blocks).every((v) => typeof v === "string"))) return false;
   if (state.originals !== undefined && (!record(state.originals) || !Object.values(state.originals).every((v) => record(v) && typeof v.path === "string" && typeof v.hash === "string"))) return false;
   for (const t of Object.values(state.toml ?? {})) if (t.definitions !== undefined && (!record(t.definitions) || !Object.values(t.definitions).every((v) => typeof v === "string"))) return false;
@@ -172,6 +182,7 @@ export function loadManifest(path = manifestPath()): Manifest {
     if (names(m.trustedBefore)) delete m.trustedBefore;
     if (m.trustedBefore !== undefined && (!record(m.trustedBefore) || !Object.entries(m.trustedBefore).every(([id, v]) => id.includes("|") && typeof v === "string"))) throw new Error();
     if (m.builtinSkill !== undefined && typeof m.builtinSkill !== "string") delete m.builtinSkill; // справочное поле — без отказа
+    if (m.made !== undefined && !validMade(m.made)) throw new Error();
     if (m.trustedFolder !== undefined && (!record(m.trustedFolder) || !Object.values(m.trustedFolder).every((v) => typeof v === "string"))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
       if (!id.includes("|") || !validState(state)) throw new Error();
@@ -223,7 +234,8 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
       && { machineOther: [...new Set(m.machineOther.filter((x) => typeof x === "string" && /^[0-9a-f]{6,32}$/.test(x)))].sort() }), targets, secretFiles, ...(roots && Object.keys(roots).length && { roots }),
     ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }),
     ...(Object.keys(folders).length > 0 && { trustedFolder: folders }),
-    ...(typeof m.builtinSkill === "string" && { builtinSkill: m.builtinSkill }) };
+    ...(typeof m.builtinSkill === "string" && { builtinSkill: m.builtinSkill }),
+    ...(normalizeMade(m.made) && { made: normalizeMade(m.made) }) };
 }
 
 // Хеш записи, для которой при миграции нашлись разные значения и ни одно не совпало с диском:
@@ -246,6 +258,7 @@ export function canonicalState(state: TargetState): TargetState {
 // Добавляет записи from в into (уже канонический). Одно отображение старый→новый (pathKey) для
 // всех структур: files, merges, exclude, toml, links и aliases — после переезда родителя
 // защита симлинка и логические пути остаются под тем же ключом, что и сам файл
+export const hasAny = (st: TargetState) => ["files", "merges", "exclude", "toml", "blocks", "originals", "trust", "approvals"].some((p) => Object.keys((st as any)[p] ?? {}).length);
 function mergeStates(into: TargetState, from: TargetState): TargetState {
   for (const part of ["files", "merges", "exclude", "toml", "blocks", "originals"] as const) {
     for (const [p, value] of Object.entries(from[part] ?? {})) {
@@ -269,6 +282,9 @@ function mergeStates(into: TargetState, from: TargetState): TargetState {
   if (from.everTrusted) into.everTrusted = true;
   if (from.dialog) into.dialog ??= from.dialog;
   if (from.folder) into.folder ??= from.folder;
+  // Две записи одной цели: «с первой записи» — только если обе такие
+  if (from.made && (into.made || !hasAny(into))) into.made = true;
+  else delete into.made;
   return into;
 }
 
@@ -325,6 +341,7 @@ export function saveManifest(m: Manifest, path = manifestPath()) {
   if (!savedOnce.has(path) && existsSync(path)) copyFileSync(path, `${path}.bak`);
   savedOnce.add(path);
   const { version, engine: _, ...rest } = m;
+  if (rest.made && !rest.made.dirs?.length && !Object.keys(rest.made.files ?? {}).length) delete rest.made;
   writeAtomic(path, JSON.stringify({ version, engine: packageVersion(), ...rest }, null, 2) + "\n");
 }
 

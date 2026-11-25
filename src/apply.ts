@@ -9,7 +9,8 @@ import { GitError, gitMemo, gitSpawn, gitWhy, protectedBy, trackedPaths } from "
 import { backup, neverCopied, originalBackup, runDir } from "./backup";
 import { blockHash, hashMarkers, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
-import { canonicalState, emptyState, type ForgottenMark, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
+import { blankText, createdAfter, emptyShape, forgetMade, linkOnWay, type Made, madeDir, madeFile, noteDirs, noteFile, pruneMade, skeleton } from "./made";
+import { canonicalState, emptyState, type ForgottenMark, hasAny, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
 import type { Machine } from "./types";
 import { configRoot } from "./load";
 import { ensurePrivateLocal } from "./secretfiles";
@@ -29,7 +30,11 @@ export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: b
   // Только права (секретный файл открыт группе, скрипту не хватает +x): chmod без перезаписи и бэкапа
   | { kind: "chmod"; abs: string; mode: number; roots?: string[] }
   | { kind: "forget-merge"; abs: string; key: string[]; beforeHash: string }
-  | { kind: "delete"; abs: string; roots?: string[] }
+  // wrapper — файл-обёртка, созданный miksy: после слияний в нём осталось только созданное miksy (круг 11v); проверяется
+  // ещё раз после записи слияний, хеша до записи у него нет
+  | { kind: "delete"; abs: string; roots?: string[]; wrapper?: "json" | "toml" }
+  // Папка, которую создал miksy, опустеет (круг 11v): root — корень цели, выше которого не ходим
+  | { kind: "rmdir"; abs: string; root: string }
   | { kind: "restore"; abs: string; source: string; sourceHash: string; roots: string[] }
   | { kind: "block"; abs: string; content: string; hash: string | null; roots: string[] }
   // Снять файл (блок) с учёта цели, не удаляя: им владеет другая цель (owner) или он нужен другой машине в общей
@@ -188,7 +193,7 @@ function filesUnder(dir: string, rel: string): string[] {
 // owners — файлы других целей (канонический путь → цель): второй владелец одного файла — конфликт
 // mark — отметка «проект забыт» этой цели (manifest.forgotten): только с ней план убирает файлы miksy без учёта,
 // которые miksy больше не пишет
-export function plan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, force: boolean, owner = "miksy", owners: Map<string, string> = new Map(), mark?: ForgottenMark, adopt?: string[]): Action[] {
+export function plan(result: RenderResult, target: Target, machine: Machine, prev: TargetState, force: boolean, owner = "miksy", owners: Map<string, string> = new Map(), mark?: ForgottenMark, adopt?: string[], made?: Made): Action[] {
   machine = { ...machine, home: canonical(machine.home), workspace: pathKey(machine.workspace) };
   // clean каталога, которого нет (диск не подключён): путь не раскрывается — как записан; писать в него
   // clean не будет, а записи учёта внутри недоступного каталога сюда не приходят (commands.ts: splitState)
@@ -786,6 +791,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
   // пишется и не удаляется (и доверие тоже: решается вместе с файлами); команда пишет одну строку и выходит с кодом 3
   // (commands.ts), doctor — так же
   if (ex && machineUnknown()) { noteSkipped(); return finishTrust([]); }
+  tidy(actions, target, machine, made, result.clean && !prev.made ? result.warnings : null);
 
   // .git/info/exclude: у каждого агента свой блок; сверяемся с файлом, а не с учётом —
   // блок мог быть стёрт (в т.ч. старым общим блоком другого агента).
@@ -931,6 +937,132 @@ export function conflictFile(abs: string): string | null {
   return null;
 }
 
+// Содержимое файла слияний после действий (ключи MCP, доверие): его пишет apply, по нему же план решает, останется ли
+// в файле что-то, кроме созданного miksy (круг 11v)
+function mergedFile(file: string, list: (Extract<Action, { kind: "merge" }> | TrustAction)[]): { text: string; doc: any } {
+  const tomlTrust = list.some((a) => a.kind === "trust" && a.format === "toml");
+  let text = existsSync(file) ? readFileSync(file, "utf8") : "";
+  const doc = tomlTrust ? parseToml(text) : readJson(file);
+  for (const a of list) {
+    if (a.kind === "trust") {
+      if (tomlTrust) text = editTrustToml(text, a);
+      else if (!a.remove) setAt(doc, a.key, a.value);
+      // Снять своё: вернуть значение до miksy (Claude false) или убрать поле
+      else if (trustValue(doc, a.key) === a.value) {
+        if (a.previous !== undefined) setAt(doc, a.key, a.previous);
+        else delete get(doc, a.key.slice(0, -1))[a.key.at(-1)!];
+      }
+      continue;
+    }
+    const obj: Record<string, unknown> = { ...(get(doc, a.key) ?? {}) };
+    Object.assign(obj, a.set);
+    for (const n of a.remove) delete obj[n];
+    setAt(doc, a.key, obj);
+  }
+  // Объекты, опустевшие после снятия своего (ключ проекта, созданный sync, — projects[<путь>]),
+  // уходят вместе с ним; верхний уровень (projects, mcpServers в корне) остаётся
+  if (!tomlTrust) for (const a of list) {
+    const removed = a.kind === "merge" ? a.remove.length > 0 && !Object.keys(a.set).length : !!a.remove;
+    if (!removed) continue;
+    const path = a.kind === "merge" ? a.key : a.key.slice(0, -1);
+    for (let i = path.length; i >= 2; i--) {
+      const v = get(doc, path.slice(0, i));
+      if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length) break;
+      delete get(doc, path.slice(0, i - 1))[path[i - 1]];
+    }
+  }
+  return { text, doc };
+}
+
+// Уборка начисто (круг 11v): файл-обёртка, в котором после плана останется только созданное miksy, — удалить (delete
+// с wrapper); папки, которые создал miksy и которые после плана опустеют, — удалить (rmdir), снизу вверх до корня цели.
+// Ссылки (symlink, junction) — сам путь или папка над ним — не трогаются. hints — clean цели, записанной до учёта
+// «создал miksy»: пустое, чего учёт не знает, — одной строкой (удалить вручную)
+function tidy(actions: Action[], target: Target, machine: Machine, made: Made | undefined, hints: string[] | null) {
+  const key = (p: string) => fold(pathKey(p));
+  const rootOf = (p: string) => (target.scope === "project" && inside(p, target.dir) ? target.dir : inside(p, machine.home) ? machine.home : null);
+  const conflicted = new Set(actions.filter((a) => a.kind === "conflict").map((a) => key(conflictFile(a.abs) ?? a.abs)));
+  const gone = new Map<string, string>(); // ключ → путь: файлы, которых после плана не станет
+  const hintGone = new Map<string, string>(); // то же и пустое без учёта (только для строки подсказки)
+  const leftovers: string[] = [];
+
+  const touched = new Map<string, Action[]>();
+  for (const a of actions) if (a.kind === "merge" || a.kind === "trust" || a.kind === "toml") touched.set(key(a.abs), [...(touched.get(key(a.abs)) ?? []), a]);
+  for (const [k, list] of touched) {
+    const abs = list[0].abs;
+    const root = rootOf(abs);
+    if (conflicted.has(k) || !root || linkOnWay(abs, root)) continue;
+    const toml = list.some((a) => a.kind === "toml" || (a.kind === "trust" && a.format === "toml"));
+    const mine = madeFile(made, abs);
+    let empty = false, bare = false;
+    try {
+      if (toml) {
+        let text = list.find((a): a is Extract<Action, { kind: "toml" }> => a.kind === "toml")?.content ?? (existsSync(abs) ? readFileSync(abs, "utf8") : "");
+        for (const a of list) if (a.kind === "trust") text = editTrustToml(text, a);
+        empty = bare = blankText(text);
+      } else {
+        const before = readJson(abs);
+        const { doc } = mergedFile(abs, list.filter((a): a is Extract<Action, { kind: "merge" }> | TrustAction => a.kind === "merge" || a.kind === "trust"));
+        empty = !!mine && skeleton(doc, createdAfter(mine, before, doc));
+        bare = emptyShape(doc);
+      }
+    } catch { continue; /* не разобрать — оставить, как есть */ }
+    if (mine && empty) {
+      actions.push({ kind: "delete", abs, roots: [root], wrapper: toml ? "toml" : "json" });
+      gone.set(k, abs);
+      hintGone.set(k, abs);
+    } else if (hints && !mine && bare && existsSync(abs)) {
+      leftovers.push(abs);
+      hintGone.set(k, abs);
+    }
+  }
+  for (const a of actions) {
+    if (gone.has(key(a.abs))) continue;
+    let removed = a.kind === "delete";
+    if (a.kind === "block" && !a.content.length && existsSync(a.abs)) removed = !lstatSync(a.abs).isSymbolicLink();
+    if (a.kind === "approve" && a.remove.length && !a.add.length) {
+      try {
+        const doc = readJson(a.abs);
+        const list = (Array.isArray(doc[a.key]) ? doc[a.key] : []).filter((n: string) => !a.remove.includes(n));
+        if (!list.length) delete doc[a.key];
+        removed = !Object.keys(doc).length;
+      } catch { /* не разобрать — файл останется */ }
+    }
+    if (removed) { gone.set(key(a.abs), a.abs); hintGone.set(key(a.abs), a.abs); }
+  }
+
+  // Папки над удаляемыми файлами — снизу вверх; папка уходит, если всё в ней уходит
+  const dirs = new Map<string, { dir: string; root: string }>();
+  for (const abs of hintGone.values()) {
+    const root = rootOf(abs);
+    if (!root) continue;
+    for (let d = slash(dirname(abs)); inside(d, root) && key(d) !== key(root); d = slash(dirname(d))) dirs.set(key(d), { dir: d, root });
+  }
+  const order = [...dirs.values()].sort((a, b) => b.dir.length - a.dir.length);
+  // Опустевшие папки удалённого skill убирает и apply сам (pruneSkillDirs) — для учёта прежней версии
+  const skillDir = (d: string) => { const parts = slash(d).split("/"); const at = parts.lastIndexOf("skills"); return at >= 0 && parts.length - at >= 2; };
+  const sweep = (removed: Map<string, string>, take: (dir: string, root: string) => boolean) => {
+    for (const { dir, root } of order) {
+      if (linkOnWay(dir, root)) continue;
+      let entries: string[];
+      try { entries = readdirSync(dir); } catch { continue; }
+      if (entries.every((e) => removed.has(key(`${dir}/${e}`))) && take(dir, root)) removed.set(key(dir), dir);
+    }
+  };
+  if (made) sweep(gone, (dir, root) => {
+    if (madeDir(made, dir)) actions.push({ kind: "rmdir", abs: dir, root });
+    return madeDir(made, dir) || skillDir(dir);
+  });
+  if (!hints) return;
+  sweep(hintGone, (dir) => {
+    if (!madeDir(made, dir) && !skillDir(dir)) leftovers.push(dir);
+    return true;
+  });
+  // Только верхние: папку с пустым внутри удаляют целиком
+  const top = leftovers.filter((p) => !leftovers.some((q) => q !== p && inside(p, q)));
+  if (top.length) hints.push(`пустые после уборки: ${top.join(", ")} — их, возможно, создал miksy прежней версии, но его учёт этого не знает, поэтому clean их не удаляет; не нужны — удалите вручную`);
+}
+
 // sensitive — на каждом выходе из plan: действие с секретным путём пишет 0600
 function markSensitive(actions: Action[], sensitivePaths: Set<string>): Action[] {
   for (const a of actions) if (a.kind !== "conflict" && sensitivePaths.has(pathKey(a.abs))) a.sensitive = true;
@@ -983,7 +1115,8 @@ export function describe(a: Action): string {
     case "adopt": return `  взять под учёт       ${a.abs} (${a.known ? "файл miksy, которого не было в учёте" : "содержимое уже совпадает"})`;
     case "chmod": return `  права ${a.mode.toString(8).padStart(4, "0")}           ${a.abs} (содержимое не меняется)`;
     case "forget-merge": return `  снять с учёта        ${a.abs} ${JSON.stringify(a.key)} (родитель отсутствует)`;
-    case "delete": return `  удалить              ${a.abs}${a.known ? " (файл miksy, которого не было в учёте, — больше не нужен)" : ""}`;
+    case "delete": return `  удалить              ${a.abs}${a.known ? " (файл miksy, которого не было в учёте, — больше не нужен)" : a.wrapper ? " (файл создал miksy, и в нём осталось только пустое)" : ""}`;
+    case "rmdir": return `  удалить папку        ${a.abs} (пустая, её создал miksy)`;
     case "restore": return `  восстановить оригинал ${a.abs} ← ${a.source}`;
     case "block": return `  блок инструкций     ${a.abs} (${a.known ? (a.hash ? "взять под учёт — блок miksy, которого не было в учёте" : "убрать только блок — блок miksy, которого не было в учёте, больше не нужен") : a.hash ? "обновить" : "убрать только блок"})`;
     case "trust": return `  доверие ${trustTitle(a.abs)}     ${a.key[1]} (${a.remove ? "снять своё" : "добавить"})`;
@@ -1017,12 +1150,13 @@ export function applyPlanned(
   prev: TargetState,
   first?: Action[],
   onReplan?: (actions: Action[]) => void,
+  made?: Made,
 ): { state: TargetState; actions: Action[] } {
   let state = prev;
   let actions = first ?? makePlan(prev);
   for (let attempt = 0; ; attempt++) {
     try {
-      return { state: apply(actions, state).state, actions };
+      return { state: apply(actions, state, made).state, actions };
     } catch (e) {
       if (!(e instanceof StaleError) || attempt >= 1) throw e;
       state = (e as Error & { partialState?: TargetState }).partialState ?? state;
@@ -1038,11 +1172,13 @@ export function applyPlanned(
 let note: (line: string) => void = () => {};
 export const onApplyNote = (f: (line: string) => void) => { note = f; };
 
-export function apply(actions: Action[], prev: TargetState): { state: TargetState; backupDir: string | null } {
+export function apply(actions: Action[], prev: TargetState, made?: Made): { state: TargetState; backupDir: string | null } {
   if (actions.some((a) => a.kind !== "conflict")) ensurePrivateLocal();
   const state: TargetState = structuredClone(canonicalState(prev ?? emptyState()));
+  // Цель без записей: учёт «создал miksy» для неё ведётся с первой записи (круг 11v)
+  if (made && !hasAny(state)) state.made = true;
   try {
-    return applyInto(actions, state);
+    return applyInto(actions, state, made);
   } catch (e) {
     // Уже выполненное должно попасть в учёт, иначе записанные файлы станут «чужими»
     (e as Error & { partialState?: TargetState }).partialState = state;
@@ -1050,7 +1186,11 @@ export function apply(actions: Action[], prev: TargetState): { state: TargetStat
   }
 }
 
-function applyInto(actions: Action[], state: TargetState): { state: TargetState; backupDir: string | null } {
+function applyInto(actions: Action[], state: TargetState, made?: Made): { state: TargetState; backupDir: string | null } {
+  // Корень цели для учёта созданных папок: проект или дом (не local/ — там свои правила уборки)
+  const local = join(configRoot(), "local");
+  const rootFor = (abs: string, roots?: string[]) => roots?.find((r) => inside(abs, r) && !inside(r, local));
+  const dirsFor = (abs: string, roots?: string[]) => noteDirs(made, abs, rootFor(abs, roots));
   // exclude — до файлов: новый файл скрыт от git с момента появления; удаляемые — пока не удалены
   const excludes = actions.filter((a): a is Extract<Action, { kind: "exclude" }> => a.kind === "exclude");
   for (const a of excludes) writeExclude(a, a.pre ?? a.lines, state);
@@ -1058,6 +1198,7 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
   // записи конфига оставляет и прежний скрипт, на который тот ссылается (Г6)
   const run = join(configRoot(), "local", "run");
   const late = actions.filter((a) => a.kind === "delete" && inside(a.abs, run));
+  const wrappers = actions.filter((a): a is Extract<Action, { kind: "delete" }> => a.kind === "delete" && !!a.wrapper);
   for (const a of actions) {
     if ("roots" in a && a.roots) guard(a.abs, ...a.roots);
     if (["write", "adopt", "delete", "restore", "block"].includes(a.kind) && a.beforeHash !== undefined && fileHash(a.abs) !== a.beforeHash)
@@ -1072,6 +1213,7 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
       // Свой TOML-конфиг агента с MCP (Codex: .codex/config.toml проекта) — разбирается до и после записи
       if (a.toml) parseToml(a.content);
       backup(a.abs);
+      dirsFor(a.abs, a.roots);
       writeAtomic(a.abs, a.content, { executable: a.executable, sensitive: a.sensitive });
       if (a.toml) parseToml(readFileSync(a.abs, "utf8"));
       if (lstatSync(a.abs).isSymbolicLink()) (state.links ??= {})[pathKey(a.abs)] = a.abs;
@@ -1081,7 +1223,7 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
       guard(a.abs, ...a.roots);
       backup(a.abs);
       // Пустым считается только пустой текст: пробелы и пустые строки вне блока — чужие, файл остаётся
-      if (a.content.length || state.links?.[pathKey(a.abs)] || (existsSync(a.abs) && lstatSync(a.abs).isSymbolicLink())) writeAtomic(a.abs, a.content);
+      if (a.content.length || state.links?.[pathKey(a.abs)] || (existsSync(a.abs) && lstatSync(a.abs).isSymbolicLink())) { dirsFor(a.abs, a.roots); writeAtomic(a.abs, a.content); }
       else if (existsSync(a.abs)) removeFile(a.abs);
       if (existsSync(a.abs) && lstatSync(a.abs).isSymbolicLink()) (state.links ??= {})[pathKey(a.abs)] = a.abs;
       delete state.files[pathKey(a.abs)];
@@ -1127,15 +1269,18 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
         if (!Object.keys(keys).length) delete state.merges[pathKey(a.abs)];
       }
     } else if (a.kind === "delete") {
-      if (!late.includes(a)) remove(a, state);
+      if (!late.includes(a) && !a.wrapper) remove(a, state);
     } else if (a.kind === "toml") {
       const text = existsSync(a.abs) ? readFileSync(a.abs, "utf8") : "";
       if (a.roots) guard(a.abs, ...a.roots);
       if (sha(text) !== a.beforeHash) throw new StaleError(`TOML изменился после планирования: ${a.abs}; повторите sync`);
       parseToml(a.content);
       backup(a.abs);
+      const existed = existsSync(a.abs);
+      dirsFor(a.abs, a.roots);
       writeAtomic(a.abs, a.content, { sensitive: a.sensitive });
       parseToml(readFileSync(a.abs, "utf8"));
+      noteFile(made, a.abs, existed, {}, {});
       state.toml ??= {};
       if (a.names.length) state.toml[pathKey(a.abs)] = { hash: sha(splitToml(a.content).block), names: a.names,
         definitions: a.definitions ?? Object.fromEntries(a.names.map((n) => [n, definitionHash(parseToml(a.content).mcp_servers[n])])) };
@@ -1157,7 +1302,7 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
       for (const n of a.add) if (!list.includes(n)) list.push(n);
       if (list.length) doc[a.key] = list;
       else delete doc[a.key];
-      if (Object.keys(doc).length) writeAtomic(a.abs, JSON.stringify(doc, null, 2) + "\n");
+      if (Object.keys(doc).length) { dirsFor(a.abs, a.roots); writeAtomic(a.abs, JSON.stringify(doc, null, 2) + "\n"); }
       else if (existsSync(a.abs)) removeFile(a.abs);
     }
     if (a.own.length) (state.approvals ??= {})[pathKey(a.abs)] = a.own;
@@ -1175,38 +1320,13 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
       throw new StaleError(`${file} изменился после планирования (другой процесс?) — не сливаю; повторите sync`);
     backup(file);
     const tomlTrust = list.some((a) => a.kind === "trust" && a.format === "toml");
-    let text = existsSync(file) ? readFileSync(file, "utf8") : "";
-    const doc = tomlTrust ? parseToml(text) : readJson(file);
-    for (const a of list) {
-      if (a.kind === "trust") {
-        if (tomlTrust) text = editTrustToml(text, a);
-        else if (!a.remove) setAt(doc, a.key, a.value);
-        // Снять своё: вернуть значение до miksy (Claude false) или убрать поле
-        else if (trustValue(doc, a.key) === a.value) {
-          if (a.previous !== undefined) setAt(doc, a.key, a.previous);
-          else delete get(doc, a.key.slice(0, -1))[a.key.at(-1)!];
-        }
-        continue;
-      }
-      const obj: Record<string, unknown> = { ...(get(doc, a.key) ?? {}) };
-      Object.assign(obj, a.set);
-      for (const n of a.remove) delete obj[n];
-      setAt(doc, a.key, obj);
-    }
-    // Объекты, опустевшие после снятия своего (ключ проекта, созданный sync, — projects[<путь>]),
-    // уходят вместе с ним; верхний уровень (projects, mcpServers в корне) остаётся
-    if (!tomlTrust) for (const a of list) {
-      const removed = a.kind === "merge" ? a.remove.length > 0 && !Object.keys(a.set).length : !!a.remove;
-      if (!removed) continue;
-      const path = a.kind === "merge" ? a.key : a.key.slice(0, -1);
-      for (let i = path.length; i >= 2; i--) {
-        const v = get(doc, path.slice(0, i));
-        if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length) break;
-        delete get(doc, path.slice(0, i - 1))[path[i - 1]];
-      }
-    }
+    const existed = existsSync(file);
+    const before = tomlTrust ? {} : readJson(file);
+    const { text, doc } = mergedFile(file, list);
     if (tomlTrust) parseToml(text);
+    dirsFor(file, list.find((a) => a.roots)?.roots);
     writeAtomic(file, tomlTrust ? text : JSON.stringify(doc, null, 2), { sensitive: true });
+    noteFile(made, file, existed, before, tomlTrust ? {} : doc);
     // Учёт доверия меняется только после подтверждённого изменения файла
     const written = list.some((a) => a.kind === "trust") ? readTrust(file, tomlTrust ? "toml" : "json").doc : null;
     for (const a of list)
@@ -1231,8 +1351,31 @@ function applyInto(actions: Action[], state: TargetState): { state: TargetState;
 
   for (const a of late) if (a.kind === "delete") remove(a, state);
 
+  // Файлы-обёртки и папки, которые создал miksy и которые опустели (круг 11v). Перед удалением — ещё раз: обёртка
+  // по-прежнему только из созданного miksy, папка пуста и не ссылка; иначе остаются, как есть
+  for (const a of wrappers) {
+    const mine = madeFile(made, a.abs);
+    if (!existsSync(a.abs) || !mine) continue;
+    const text = readFileSync(a.abs, "utf8");
+    let empty = false;
+    try { empty = a.wrapper === "toml" ? blankText(text) : skeleton(text.trim() ? JSON.parse(text) : {}, mine); } catch { /* не разобрать — оставить */ }
+    if (!empty) continue;
+    remove(a, state);
+    forgetMade(made, a.abs);
+  }
+
   // Всё удалено — блок сужается до итоговых строк
   for (const a of excludes) if (a.pre) writeExclude(a, a.lines, state);
+
+  for (const a of actions) {
+    if (a.kind !== "rmdir" || linkOnWay(a.abs, a.root)) continue;
+    try {
+      if (readdirSync(a.abs).length) continue;
+      rmdirSync(a.abs);
+      forgetMade(made, a.abs);
+    } catch { /* нет её или занята — не страшно, запись останется */ }
+  }
+  pruneMade(made, [...new Set(actions.flatMap((a) => (a.kind === "rmdir" ? [a.root] : "roots" in a && a.roots ? a.roots.filter((r) => !inside(r, local)) : [])))]);
 
   for (const f of Object.keys(state.files)) if (!existsSync(f)) delete state.files[f];
   // exclude репо, которого больше нет (каталог цели удалён): строки скрывать негде

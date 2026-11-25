@@ -1,9 +1,10 @@
-// Удалённый из слоя skill не оставляет у агентов пустых каталогов; каталог skills и чужие skills — на месте
+// Удалённый из слоя skill не оставляет у агентов пустых каталогов; каталог skills с чужим skill — на месте, а
+// опустевший, который создал miksy, уходит вместе с папкой над ним (круг 11v)
 import { expect, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { cliFixture, put, expectCode } from "./helpers";
 
-test("skill убран из слоя: его каталоги у агентов удаляются, skills и чужое остаются", () => {
+test("skill убран из слоя: его каталоги у агентов удаляются, skills с чужим и чужое остаются", () => {
   const f = cliFixture({ agents: ["claude", "codex"] });
   put(`${f.config}/layers/tree/skills/old/SKILL.md`, "---\nname: old\ndescription: d\n---\n");
   put(`${f.config}/layers/tree/skills/old/scripts/deep/run.sh`, "echo\n");
@@ -15,9 +16,8 @@ test("skill убран из слоя: его каталоги у агентов 
   rmSync(`${f.config}/layers/tree/skills`, { recursive: true });
   const r = f.run(["sync", p]);
   expectCode(r, 0);
-  for (const dir of [".claude/skills", ".agents/skills"]) {
-    expect(existsSync(`${p}/${dir}/old`)).toBe(false);
-    expect(existsSync(`${p}/${dir}`)).toBe(true);
-  }
+  for (const dir of [".claude/skills", ".agents/skills"]) expect(existsSync(`${p}/${dir}/old`)).toBe(false);
+  expect(existsSync(`${p}/.claude/skills`)).toBe(true);
+  expect(existsSync(`${p}/.agents`)).toBe(false);
   expect(existsSync(`${p}/.claude/skills/mine/SKILL.md`)).toBe(true);
 }, 60000);

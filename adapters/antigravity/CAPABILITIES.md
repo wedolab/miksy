@@ -35,7 +35,7 @@ MCP, plugins), встроенные руководства CLI
 | Skills проекта | `.agents/skills/<имя>/` (командные), `skills/` плагина | Own-файлы `.agents/plugins/miksy/skills/<имя>/`; агент активирует skill по запросу | Вживую: agy 1.3.3 Windows |
 | Импорт командных skills | Агент видит только `.agents/skills` | Skills команды из других каталогов (`.claude/skills` и т. п.) копируются в `skills/` плагина (`import_skills`) | По коду; читатель `.agents/skills` — вживую |
 | MCP глобально, CLI | `~/.gemini/config/mcp_config.json` → `mcpServers` (сюда пишет `agy mcp add`); также `~/.gemini/antigravity-cli/mcp_config.json` | Merge по именам в `~/.gemini/config/mcp_config.json` | Вживую: agy 1.4.2 Windows, macOS |
-| MCP глобально, IDE | `~/.gemini/antigravity-ide/mcp_config.json` → `mcpServers` | Merge по именам в этот же файл (одновременно с CLI) | Разбор бандла IDE |
+| MCP глобально, IDE | `~/.gemini/antigravity-ide/mcp_config.json` → `mcpServers` | Merge по именам в этот же файл (одновременно с CLI), только если папка `~/.gemini/antigravity-ide` есть (её создаёт первый запуск IDE): без IDE папку не заводим | Разбор бандла IDE |
 | MCP проекта | `mcp_config.json` плагина; также `.agents/mcp_config.json` | Own-файл `.agents/plugins/miksy/mcp_config.json` | Вживую: agy (Windows), IDE и 2.0 (Windows), вызов инструмента моделью |
 | Формат сервера | stdio: `command`, `args`, `env`; HTTP (Streamable): `url`, `headers`; `disabled` | Пишет эти поля; `agents.antigravity` слоя может дополнить или выключить (`skip`) | Вживую: `agy mcp list` |
 | stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал); у плагинов agy 1.5.9 — только `${PLUGIN_ROOT}`/`${PLUGIN_DATA}` в `args`, `env`, `cwd` (не в `command`) | глобально — `command` — обёртка `local/run/antigravity/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []`; в плагине проекта — `miksy mcp` (ниже) | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
@@ -87,7 +87,7 @@ MCP, plugins), встроенные руководства CLI
 
 IDE 2.6.0 (Windows, 2026-11-14): беседа легла в `~/.gemini/antigravity/brain/`, не в `antigravity-ide/`; сервер
 только из `~/.gemini/config/mcp_config.json` IDE увидела и вызвала. Читает ли она ещё
-`antigravity-ide/mcp_config.json` — не проверялось (miksy пишет в оба файла, вреда нет).
+`antigravity-ide/mcp_config.json` — не проверялось (miksy пишет в оба файла, вреда нет; в файл IDE — когда её папка есть).
 
 ## Поведение MCP
 

@@ -308,7 +308,9 @@ function runTarget(
   // sync --machine-was <номер>: блоки exclude с этим номером — свои (прежний номер этой машины; круг 10z-2), только в
   // целях из учёта этой машины
   const adopt = cmd === "sync" && flags["machine-was"] && id in manifest.targets ? [flags["machine-was"]] : undefined;
-  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners, mark, adopt);
+  // Учёт «создал miksy» (круг 11v) — общий для машины: план по нему убирает опустевшее, запись дополняет
+  const made = (manifest.made ??= {});
+  const makePlan = (p: TargetState) => plan(result, t.target, machine, p, "force" in flags, adapter.id, owners, mark, adopt, made);
   let actions: ReturnType<typeof plan>;
   let secrets: Record<string, string> = {};
   try {
@@ -458,7 +460,7 @@ function runTarget(
   let failed = 0;
   try {
     const done = applyPlanned(makePlan, prev, actions, (again) =>
-      console.log("  файл изменился во время sync — план пересчитан:\n" + again.map(describe).join("\n")));
+      console.log("  файл изменился во время sync — план пересчитан:\n" + again.map(describe).join("\n")), made);
     state = done.state;
     deliveredSkills.set(targetKey(t), [...(deliveredSkills.get(targetKey(t)) ?? []), ...deliveredSkillNames(result, done.actions, t.target)]);
     writtenMerges.push(done);
@@ -753,7 +755,7 @@ function applyTrust(adapter: Adapter, machine: Machine, t: TargetSpec, manifest:
   console.log(actions.map(describe).join("\n"));
   if (ban) console.log(`  ${decisionTitle(agent)} ${t.title}: доверие не ставится — ${ban}`);
   try {
-    const { state } = apply(actions, prev);
+    const { state } = apply(actions, prev, (manifest.made ??= {}));
     // Доверие ставил miksy (сейчас, раньше или до «забыть») — помнится и после отказа (trust --deny)
     if (remembersTrust(adapter) && t.target.scope === "project" && (trustedByMiksy(prev, trustMark(manifest, id)) || Object.keys(state.trust ?? {}).length > 0)) state.everTrusted = true;
     // «Да» и доверие поставлено — эта папка теперь своя: отпечаток нынешней (в том числе после подмены; круг 10l)

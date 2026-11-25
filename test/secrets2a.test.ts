@@ -1,7 +1,7 @@
 // Фаза 2а (Р1, B′): значений секретов нет ни в одном конфиге агента — ни в проекте, ни дома.
 // Сквозные проверки через CLI: sync, doctor, clean. Секреты искусственные.
 import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { aclProblem } from "../src/secretfiles";
 import { cliFixture, put, expectCode, expectNotCode } from "./helpers";
@@ -54,6 +54,7 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     layers(f, "global");
     layers(f, "tree");
     secretsEnv(f);
+    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её настройки тоже пишутся (круг 11v)
     const g = f.run(["sync", "--global"]);
     expectCode(g, 0);
     const p = f.run(["sync", `${f.ws}/Org/p1`]);
@@ -231,7 +232,8 @@ describe("п.8: отсутствующий секрет — keep обёртки"
     secretsEnv(f, { HTTP_TOKEN: TOKENS.HTTP_TOKEN });
     expectCode(f.run(["sync", "--global"]), 0);
     expectCode(f.run(["sync", `${f.ws}/Org/p1`]), 0);
-    const home = () => JSON.parse(readFileSync(`${f.home}/.config/opencode/opencode.json`, "utf8")).mcp ?? {};
+    // Файл создал miksy: снят последний сервер — файла нет (круг 11v)
+    const home = () => existsSync(`${f.home}/.config/opencode/opencode.json`) ? JSON.parse(readFileSync(`${f.home}/.config/opencode/opencode.json`, "utf8")).mcp ?? {} : {};
     const project = () => JSON.parse(readFileSync(`${f.ws}/Org/p1/opencode.json`, "utf8")).mcp ?? {};
     expect(home().h.headers.Authorization).toMatch(/\{file:/);
     expect(project().h2.command).toEqual(["miksy", "mcp", "opencode", "Org/p1", "h2", "--bridge"]);

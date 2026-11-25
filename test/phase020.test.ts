@@ -2,7 +2,7 @@
 // call_mcp_tool для Antigravity, PATH по содержимому rc-файла, идентификатор агента gemini → antigravity
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { antigravity, mcpHint } from "../adapters/antigravity";
@@ -115,6 +115,7 @@ describe("агент antigravity (прежнее имя gemini — синони�
   test("старая конфигурация и учёт: sync после обновления не считает записанное чужим, переносит учёт, обёртки и блок exclude; doctor подсказывает", () => {
     const f = cliFixture({ agents: ["antigravity"] });
     withShim(f); // MCP проекта запускает команда miksy — doctor её проверяет (круг 10v)
+    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её настройки тоже пишутся (круг 11v)
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/p.yaml`, "name: p\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/skipped.yaml`, "name: skipped\ncommand: echo\nagents:\n  gemini: skip\n");

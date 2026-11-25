@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { cliFixture, put, expectCode, expectNotCode } from "./helpers";
 
-const claudeProjects = (home: string) => JSON.parse(readFileSync(`${home}/.claude.json`, "utf8")).projects ?? {};
-const codexProjects = (home: string) => (Bun.TOML.parse(readFileSync(`${home}/.codex/config.toml`, "utf8")) as any).projects ?? {};
+// Файла нет — miksy создал его и убрал после снятия своего (круг 11v)
+const claudeProjects = (home: string) => existsSync(`${home}/.claude.json`) ? JSON.parse(readFileSync(`${home}/.claude.json`, "utf8")).projects ?? {} : {};
+const codexProjects = (home: string) => existsSync(`${home}/.codex/config.toml`) ? (Bun.TOML.parse(readFileSync(`${home}/.codex/config.toml`, "utf8")) as any).projects ?? {} : {};
 
 // Claude пишет hasTrustDialogAccepted: false в запись проекта по умолчанию (вопрос о доверии
 // ещё не задавался — например, в Zed он не задаётся). Это не отказ: отказ Claude не сохраняет.
@@ -13,7 +14,8 @@ test("доверие Claude: false по умолчанию → sync ставит
   const key = Object.keys(claudeProjects(f.home)).find((k) => claudeProjects(f.home)[k].hasTrustDialogAccepted === true)!;
   expect(key).toBeTruthy();
   expectCode(f.run(["clean", "--all"]), 0);
-  const cfg = JSON.parse(readFileSync(`${f.home}/.claude.json`, "utf8"));
+  // .claude.json создал miksy, и clean его убрал (круг 11v); Claude заводит свой — со своей записью проекта
+  const cfg: any = { projects: {} };
   cfg.projects[key] = { ...cfg.projects[key], hasTrustDialogAccepted: false, lastSessionId: "s1" };
   writeFileSync(`${f.home}/.claude.json`, JSON.stringify(cfg, null, 2));
 
