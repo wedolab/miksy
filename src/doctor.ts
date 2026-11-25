@@ -13,7 +13,7 @@ import type { Move } from "./relocate";
 import { fold, pathKey, quoteArg, slash } from "./paths";
 import { foreignMcp, foreignSkills } from "./foreign";
 import { connectHint, detectAgents } from "./agentid";
-import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalHints, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
+import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalFindings, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
 import { checkLocalAccess, checkSecretFiles, localAccessText, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
@@ -90,6 +90,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const undeliverable: Finding[] = []; // секрет есть, но доставить его нельзя (многострочный, символы)
   const texts = new Map<string, string | null>();
   const valueFiles = new Map<string, Set<string>>(); // конфиг агента → секреты, чьи значения в нём лежат
+  const explained = new Set<string>(); // «файл|ИМЯ» из literalFindings (круг 11u)
   let portableUsed = false; // MCP-серверы какой-то цели запускает команда miksy (miksy mcp)
   const advice: Finding[] = []; // нужно действие пользователя в агенте (доверие проекта Claude)
   const trust: Finding[] = [];
@@ -120,7 +121,10 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
         for (const detail of trustPlan(rendered.result, t.target, machine, before, actions, adapter.id, undefined, undefined, trustMark(manifest, id)).missing) trust.push({ ...where, detail });
         const p = rendered.result.trustPending;
         if (p) (p.declined ? declined : pendingTrust).push(p);
-        for (const detail of literalHints(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id)) literals.push({ ...where, detail });
+        for (const h of literalFindings(actions, secrets, t.target.scope === "global" ? "--global" : t.target.dir, adapter.id)) {
+          literals.push({ ...where, detail: h.text });
+          for (const n of h.names) explained.add(`${pathKey(h.file)}|${n}`);
+        }
       } catch (e) {
         // Ошибка одной цели (битая ссылка, нет доступа) — находка, проверка остальных продолжается
         persistent.push({ ...where, detail: `цель не проверена: ${(e as Error).message}` });
@@ -366,7 +370,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   section("Пометка target: true не действует", "target: true в layer.yaml; слой остаётся обычным промежуточным", badGroups.map((detail) => ({ agent: "—", target: "", detail })));
   section("Секреты открытым текстом в слоях", "уйдут в git конфигурации; вынесите значения в local/secrets.env, в слое — ${ИМЯ}", naked);
   section("Секреты в skills слоёв", SKILL_SECRETS_ADVICE, nakedSkills);
-  const values = [...valueFiles].map(([file, names]) => ({ agent: "—", target: file, detail: `значения ${[...names].sort().join(", ")}` }));
+  // Значения, о которых сказано в «Значение секрета в настройке, записанной не miksy», — там: sync без --force их не заменит
+  const values = [...valueFiles].map(([file, names]) => [file, [...names].filter((n) => !explained.has(`${pathKey(file)}|${n}`)).sort()] as const)
+    .filter(([, names]) => names.length).map(([file, names]) => ({ agent: "—", target: file, detail: `значения ${names.join(", ")}` }));
   section("Значения секретов в конфигах агентов", "miksy sync заменит серверы на обёртки (записанные keep-ом остаются, пока секрет не задан)", values);
   section("Значение секрета в настройке, записанной не miksy", "sync её не трогает (конфликт), и значение лежит в конфиге агента открытым текстом. Что сделать — в конце каждой строки", literals);
   section("Файлы секретов", "local/secrets/<ИМЯ>: нужны записанным конфигам", secretProblems);

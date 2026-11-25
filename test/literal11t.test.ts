@@ -1,8 +1,7 @@
 // Круг 11t: doctor «Значение секрета в настройке, записанной не miksy» — что сделать, и это работает: Claude --global
-// и Codex-проект — sync --force; глобальный Codex (TOML) — удалить таблицу вручную, затем sync --global (adopt такое
-// имя не берёт: оно уже есть в слое)
+// и Codex-проект — sync --force (глобальный Codex — test/codex11u.test.ts)
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { cliFixture, expectCode, put } from "./helpers";
 
 const PLAIN = "plainsecretvalue99";
@@ -42,33 +41,10 @@ describe("значение секрета в настройке, записан�
     expectCode(f.run(["sync", "--all", "--yes"]), 3);
     const d = f.run(["doctor"]).out;
     expect(d).toContain(HEAD);
-    expect(d).toContain(`.codex/config.toml: ${WHY}miksy sync "${f.ws}/Org/p1" --agent codex --force`);
+    expect(d).toContain(`.codex/config.toml: ${WHY}miksy sync "${f.ws}/Org/p1" --agent codex --force (файл уйдёт в бэкап, значение секрета в бэкап не попадёт; но точная копия файла, как он был, — со значением — останется в local/backups/originals: по ней miksy clean вернёт файл; доступ к ней только у вас)`);
     expectCode(f.run(["sync", `${f.ws}/Org/p1`, "--agent", "codex", "--force"]), 0);
     expect(readFileSync(`${f.ws}/Org/p1/.codex/config.toml`, "utf8")).not.toContain(PLAIN);
     expect(f.run(["doctor"]).out).not.toContain("записанной не miksy");
   }, 60000);
 
-  test("глобальный Codex: не adopt (он такое имя не берёт), а удалить таблицу и sync --global — это работает", () => {
-    const toml = (f: ReturnType<typeof cliFixture>) => `${f.home}/.codex/config.toml`;
-    const f = fixture("global", toml, `model = "x"\n\n${TABLE}`);
-    const s = f.run(["sync", "--global", "--yes"]);
-    expectCode(s, 3);
-    // Конфликт sync: не adopt, а что удалить и что запустить
-    expect(s.out).toContain(`config.toml mcp_servers.tok: TOML: сервер tok здесь записал не miksy — miksy его не трогает (и с --force). Чтобы miksy записал свой из слоя, удалите из файла таблицу [mcp_servers.tok] вместе с подтаблицами [mcp_servers.tok.…], затем miksy sync --global`);
-    expect(s.out).not.toContain("adopt");
-    const d = f.run(["doctor"]).out;
-    expect(d).toContain(HEAD);
-    expect(d).toContain(`config.toml mcp_servers.tok: ${WHY}удалите из ${toml(f)} таблицу [mcp_servers.tok] вместе с подтаблицами [mcp_servers.tok.…], затем выполните miksy sync --global — miksy запишет свой сервер`);
-    // adopt такое имя действительно не берёт — поэтому совет не про него
-    expect(f.run(["adopt", "--global", "tok", "--to", "global", "--agent", "codex"]).err).toContain("нет среди добавок");
-    // Совет выполним: таблицы убраны вручную — sync --global записывает сервер miksy, значение уходит
-    writeFileSync(toml(f), 'model = "x"\n');
-    expectCode(f.run(["sync", "--global"]), 0);
-    const after = readFileSync(toml(f), "utf8");
-    expect(after).not.toContain(PLAIN);
-    expect(after).toContain("# >>> miksy");
-    expect(after).toContain("tok-stdio-");
-    expect(after).toContain('model = "x"');
-    expect(f.run(["doctor"]).out).not.toContain("записанной не miksy");
-  }, 60000);
 });

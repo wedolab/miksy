@@ -509,12 +509,16 @@ export function httpEnvWarnings(cfg: Resolved, adapter: Adapter, http = adapter.
 // Конфликт «уже есть и создан не miksy», а в этом ключе (файле) — значение секрета из local/secrets.env:
 // похоже на сервер miksy до фазы 2а без учёта (новая машина, конфиг без manifest). Литерал остаётся в
 // конфиге агента, пока ключ не взят под учёт, — подсказка как (в бэкап значение не попадёт).
-// where — цель для команды: --global или путь проекта
-export function literalHints(actions: Action[], secrets: Record<string, string>, where: string, agent: string): string[] {
+// where — цель для команды: --global или путь проекта. Строки — для sync и doctor; file и names — doctor (круг 11u):
+// эти значения он не повторяет в «Значения секретов в конфигах агентов» — sync без --force их не заменит
+export type LiteralHint = { file: string; names: string[]; text: string };
+export const literalHints = (actions: Action[], secrets: Record<string, string>, where: string, agent: string): string[] =>
+  literalFindings(actions, secrets, where, agent).map((h) => h.text);
+export function literalFindings(actions: Action[], secrets: Record<string, string>, where: string, agent: string): LiteralHint[] {
   const values = Object.entries(secrets).filter(([, v]) => v.length >= 8);
-  const out: string[] = [];
+  const out: LiteralHint[] = [];
   for (const a of values.length ? actions : []) {
-    if (a.kind !== "conflict" || !/создан не miksy|записал не miksy/.test(a.why)) continue;
+    if (a.kind !== "conflict" || !/создан не miksy|записал не miksy|блок miksy, а учёта/.test(a.why)) continue;
     const merge = a.abs.match(/^(.*?) (\[".*"\])\.(.+)$/);
     const toml = merge ? null : a.abs.match(/^(.*) mcp_servers\.(.+)$/);
     let text: string;
@@ -525,11 +529,10 @@ export function literalHints(actions: Action[], secrets: Record<string, string>,
     } catch { continue; }
     const names = values.filter(([, v]) => text.includes(v) || text.includes(JSON.stringify(v).slice(1, -1))).map(([n]) => n);
     if (!names.length) continue;
-    // Чужое имя в глобальном TOML --force не захватывает, adopt — тоже (имя уже есть в слое): только ручная правка
-    const fix = toml && where === "--global"
-      ? `удалите из ${toml[1]} таблицу [mcp_servers.${toml[2]}] вместе с подтаблицами [mcp_servers.${toml[2]}.…], затем выполните miksy sync --global — miksy запишет свой сервер`
-      : `miksy sync ${where === "--global" ? where : quoteArg(where)} --agent ${agent} --force (файл уйдёт в бэкап, значение секрета в бэкап не попадёт)`;
-    out.push(`${a.abs}: записан не miksy, а в нём открытым текстом значение секрета ${names.join(", ")} — похоже, его записала старая версия miksy на машине без учёта (новая машина или конфигурация без local/state/manifest.json). Ничего не потеряется: значение уже лежит в local/secrets.env, а miksy запишет сервер, который берёт его оттуда при запуске. Что сделать: ${fix}`);
+    // Свой файл проекта при захвате ещё и копируется как был в originals/ (для clean) — со значением (круг 11u)
+    const whole = !merge && !toml && where !== "--global";
+    const fix = `miksy sync ${where === "--global" ? where : quoteArg(where)} --agent ${agent} --force (файл уйдёт в бэкап, значение секрета в бэкап не попадёт${whole ? "; но точная копия файла, как он был, — со значением — останется в local/backups/originals: по ней miksy clean вернёт файл; доступ к ней только у вас" : ""})`;
+    out.push({ file: merge?.[1] ?? toml?.[1] ?? a.abs, names, text: `${a.abs}: записан не miksy, а в нём открытым текстом значение секрета ${names.join(", ")} — похоже, его записала старая версия miksy на машине без учёта (новая машина или конфигурация без local/state/manifest.json). Ничего не потеряется: значение уже лежит в local/secrets.env, а miksy запишет сервер, который берёт его оттуда при запуске. Что сделать: ${fix}` });
   }
   return out;
 }

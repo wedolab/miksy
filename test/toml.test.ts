@@ -58,14 +58,36 @@ describe("TOML block", () => {
     expect(readFileSync(path, "utf8")).toBe(prefix);
   });
 
-  test("external name is always a conflict, even identical and --force", () => {
-    const { path, machine, prefix } = fixture('[mcp_servers.same]\ncommand="bin"\n');
-    for (const force of [false, true]) {
-      const actions = plan(result({ same: { command: "bin" } }), target, machine, emptyState(), force);
-      expect(actions).toEqual([expect.objectContaining({ kind: "conflict" })]);
-      apply(actions, emptyState());
-      expect(readFileSync(path, "utf8")).toBe(prefix);
-    }
+  // Круг 11u: чужая таблица с именем из слоя — как ключ JSON: одинаковая берётся молча, отличающаяся — по --force
+  test("external name: identical — taken silently; different — conflict with field names, --force replaces it", () => {
+    const head = 'model = "x" # keep\n';
+    const { path, machine } = fixture(`${head}[mcp_servers.same]\ncommand="bin"\n\n[mcp_servers.other]\ncommand = "keep"\nenv = { K = "v" }\n`);
+    const { state } = apply(plan(result({ same: { command: "bin" } }), target, machine, emptyState(), false), emptyState());
+    expect(state.toml![Object.keys(state.toml!)[0]].names).toEqual(["same"]);
+    expect(Bun.TOML.parse(readFileSync(path, "utf8"))).toEqual({ model: "x", mcp_servers: { same: { command: "bin" }, other: { command: "keep", env: { K: "v" } } } });
+    expect(plan(result({ same: { command: "bin" } }), target, machine, state, false)).toEqual([]);
+
+    const f2 = fixture(`${head}[mcp_servers.tok]\ncommand = "old"\nargs = ["-x"]\n\n[mcp_servers.tok.env]\nTOKEN = "value-12345678"\n`);
+    const layer = result({ tok: { command: "wrapper" } });
+    const conflict = plan(layer, target, f2.machine, emptyState(), false);
+    expect(conflict).toEqual([expect.objectContaining({ kind: "conflict", why: expect.stringContaining("поля: args, command, env)") })]);
+    expect(conflict[0].kind === "conflict" && conflict[0].why).toContain("miksy sync --global --agent miksy --force");
+    expect(JSON.stringify(conflict)).not.toContain("value-12345678");
+    apply(conflict, emptyState());
+    const { state: forced } = apply(plan(layer, target, f2.machine, emptyState(), true), emptyState());
+    const text = readFileSync(f2.path, "utf8");
+    expect(text.startsWith(head)).toBe(true);
+    expect(text).not.toContain("value-12345678");
+    expect(Bun.TOML.parse(text)).toEqual({ model: "x", mcp_servers: { tok: { command: "wrapper" } } });
+    expect(plan(layer, target, f2.machine, forced, false)).toEqual([]);
+  });
+
+  test("external inline table: conflict even with --force, file untouched", () => {
+    const { path, machine, prefix } = fixture('[mcp_servers]\ntok = { command = "old" }\n');
+    const actions = plan(result({ tok: { command: "new" } }), target, machine, emptyState(), true);
+    expect(actions).toEqual([expect.objectContaining({ kind: "conflict", why: expect.stringContaining("inline") })]);
+    apply(actions, emptyState());
+    expect(readFileSync(path, "utf8")).toBe(prefix);
   });
 
   test("manual block edits are detected by sync, clean and verification", () => {
@@ -80,12 +102,30 @@ describe("TOML block", () => {
     expect(verifyMerges(forced)).toEqual([]);
   });
 
-  test("unowned block conflicts even with force; clean ignores unowned block", () => {
-    const { path, machine } = fixture();
+  // Круг 11u: блок miksy без учёта (новая машина, учёт забыт)
+  test("unowned block: identical — taken silently; different — conflict, --force takes it, extra tables stay; clean ignores it", () => {
+    const { path, machine, prefix } = fixture();
     writeFileSync(path, replaceTomlBlock(splitToml(readFileSync(path, "utf8")), { a: { command: "bin" } }));
-    expect(plan(result({ a: { command: "bin" } }), target, machine, emptyState(), false)[0].kind).toBe("conflict");
     expect(plan(empty, target, machine, emptyState(), false)).toEqual([]);
-    expect(plan(result({ a: { command: "bin" } }), target, machine, emptyState(), true).map((a) => a.kind)).toEqual(["conflict"]);
+    const { state } = apply(plan(result({ a: { command: "bin" } }), target, machine, emptyState(), false), emptyState());
+    expect(Object.values(state.toml!)[0].names).toEqual(["a"]);
+    expect(splitToml(readFileSync(path, "utf8")).outside).toBe(prefix);
+
+    const f2 = fixture();
+    writeFileSync(f2.path, replaceTomlBlock(splitToml(f2.prefix), { a: { command: "old" }, extra: { command: "mine" } }));
+    const before = readFileSync(f2.path, "utf8");
+    const conflict = plan(result({ a: { command: "bin" } }), target, f2.machine, emptyState(), false);
+    expect(conflict.map((a) => a.kind)).toEqual(["conflict"]);
+    expect(conflict[0].kind === "conflict" && conflict[0].why).toContain("--force");
+    apply(conflict, emptyState());
+    expect(readFileSync(f2.path, "utf8")).toBe(before);
+    const { state: taken } = apply(plan(result({ a: { command: "bin" } }), target, f2.machine, emptyState(), true), emptyState());
+    const text = readFileSync(f2.path, "utf8");
+    expect(Bun.TOML.parse(text).mcp_servers).toEqual({ extra: { command: "mine" }, a: { command: "bin" } });
+    expect(splitToml(text).servers).toEqual({ a: { command: "bin" } });
+    expect(text.startsWith(f2.prefix)).toBe(true);
+    // Повторный sync стабилен: ни конфликтов, ни правок
+    expect(plan(result({ a: { command: "bin" } }), target, f2.machine, taken, false)).toEqual([]);
   });
 
   test("broken/duplicate markers, alien tables, string markers rejected; comment after block is fine", () => {

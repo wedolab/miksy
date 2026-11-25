@@ -13,6 +13,28 @@ export function definitionHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
 }
 
+// Имена полей, которыми два определения различаются (env.TOKEN, args) — без значений: в них бывают секреты
+// (круг 11u). Пустой args = отсутствующий, как в definitionHash
+export function differingFields(a: unknown, b: unknown, prefix = ""): string[] {
+  const norm = (v: unknown) => object(v) && Array.isArray(v.args) && !v.args.length && !prefix ? (({ args, ...rest }) => rest)(v) : v;
+  const x = norm(a), y = norm(b);
+  if (!object(x) || !object(y))
+    return x !== undefined && y !== undefined && definitionHash(x) === definitionHash(y) ? [] : [prefix || "(значение)"];
+  return [...new Set([...Object.keys(x), ...Object.keys(y)])].sort()
+    .flatMap((k) => differingFields(x[k], y[k], prefix ? `${prefix}.${k}` : k));
+}
+
+// Блок miksy без учёта (новая машина, учёт забыт): маркеры снимаются, его таблицы становятся обычными таблицами
+// файла; null — снять безопасно нельзя (разбор изменился бы)
+// (вместе с разделителем, который добавил блок: иначе новая запись блока оставила бы лишнюю пустую строку)
+export function stripMarkers(text: string): string | null {
+  try {
+    const parts = splitToml(text);
+    const stripped = parts.before + parts.block.replace(/^\n/, "").replace(MARK_START, "").replace(MARK_STOP, "") + parts.after;
+    return isDeepStrictEqual(parseToml(text), parseToml(stripped)) ? stripped : null;
+  } catch { return null; }
+}
+
 export const TOML_BEGIN = "# >>> miksy (сгенерировано, не править)";
 export const TOML_END = "# <<< miksy";
 const MARK_START = new RegExp(String.raw`^# >>> miksy[^\r\n]*(?:\r?\n|$)`, "gm");

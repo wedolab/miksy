@@ -16,7 +16,7 @@ import { ensurePrivateLocal } from "./secretfiles";
 import { agentId, aliasesOf } from "./agentid";
 import { allMiksyLines, blocksOf, coveredBy, type ExcludeBlock, lineAlive, removeBlock, setBlock } from "./excludeblocks";
 import { ensureMachineId, machineId, machineUnknown, noteSkipped } from "./machineid";
-import { definitionHash, mcpTables, ownedTomlParts, parseToml, replaceOwnedMcp, splitToml } from "./toml";
+import { definitionHash, differingFields, mcpTables, ownedTomlParts, parseToml, removeTables, replaceOwnedMcp, splitToml, stripMarkers } from "./toml";
 
 // roots — где путь обязан остаться после раскрытия симлинков (проект, домашний каталог);
 // apply перепроверяет непосредственно перед записью и удалением
@@ -687,10 +687,21 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       if (outside) throw new Error(`${outside} — не меняю TOML`);
       const git = gitRefusal(path);
       if (git) throw new Error(`${git} — не меняю TOML`);
-      const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+      const original = existsSync(path) ? readFileSync(path, "utf8") : "";
+      let text = original;
       const recorded = prev.toml?.[pathKey(path)];
+      const force_ = `miksy sync --global --agent ${owner} --force`;
+      // Блок miksy без учёта (новая машина, учёт забыт; круг 11u): маркеры снимаются, его таблицы — обычные таблицы
+      // файла. Все одинаковы со слоем — берутся под учёт молча; иначе — по --force; таблицы не из слоя остаются в файле
+      const unowned = recorded ? null : ownedTomlParts(text);
+      if (unowned?.block) {
+        const stripped = stripMarkers(text);
+        if (stripped === null) throw new Error("TOML: блок miksy без учёта, и снять его маркеры безопасно нельзя — проверьте файл по бэкапу");
+        const alike = Object.entries(unowned.servers).every(([n, v]) => n in data && !differingFields(v, data[n]).length);
+        if (!alike && !force) throw new Error(`TOML: в файле блок miksy, а учёта его на этой машине нет (новая машина или учёт забыт), и он отличается от слоя. Взять его: ${force_} (бэкап файла будет; таблицы блока, которых нет в слое, останутся в файле как есть)`);
+        text = stripped;
+      }
       const parts = ownedTomlParts(text, !!recorded?.definitions);
-      if (parts.block && !recorded) throw new Error("TOML: блок не учтён miksy — сначала miksy adopt --global <имя> --to global --agent codex; --force не захватывает чужие имена");
       if (recorded && !recorded.definitions && sha(parts.block) !== recorded.hash && !force)
         throw new Error(recorded.hash === UNKNOWN_HASH ? `TOML: ${UNKNOWN_WHY}` : "TOML: управляемый блок изменён или удалён вручную (--force перезапишет только блок)");
       const current = parseToml(text).mcp_servers ?? {};
@@ -702,9 +713,19 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
           actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: "TOML: таблица изменена или удалена вручную (--force перехватит учтённое имя)" });
         }
       }
+      // Таблица с именем из слоя, которую записал не miksy (круг 11u): одинаковая — под учёт молча, отличающаяся —
+      // конфликт, а с --force заменяется определением из слоя (бэкап файла — при записи), как ключ JSON
       for (const n of Object.keys(data)) if (Object.hasOwn(current, n) && !recorded?.names.includes(n)) {
-        conflicts.add(n);
-        actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy — miksy его не трогает (и с --force). Чтобы miksy записал свой из слоя, удалите из файла таблицу [mcp_servers.${n}] вместе с подтаблицами [mcp_servers.${n}.…], затем miksy sync --global` });
+        const fields = differingFields(current[n], data[n]);
+        if (fields.length && !force) {
+          conflicts.add(n);
+          actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy, и он отличается от слоя (поля: ${fields.join(", ")}). Заменить определением из слоя: ${force_} (бэкап файла будет)` });
+          continue;
+        }
+        try { removeTables(parts.outside, ["mcp_servers", n]); } catch {
+          conflicts.add(n);
+          actions.push({ kind: "conflict", abs: `${path} mcp_servers.${n}`, why: `TOML: сервер ${n} здесь записал не miksy в форме, которую miksy не заменит безопасно (inline-таблица или mcp_servers = {…}). Перепишите его как таблицу [mcp_servers.${n}] или удалите, затем miksy sync --global` });
+        }
       }
       data = Object.fromEntries(Object.entries(data).filter(([n]) => !conflicts.has(n)));
       // Пропущенный сервер (нет переменных), записанный раньше, остаётся в блоке как был
@@ -720,8 +741,8 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       const content = replace.length ? replaceOwnedMcp(text, replace, data, !!recorded?.definitions) : text;
       const names = [...new Set([...Object.keys(data), ...(recorded?.names ?? []).filter((n) => conflicts.has(n))])];
       const nextDefinitions = Object.fromEntries(names.map((n) => [n, conflicts.has(n) ? definitions[n] : definitionHash(data[n])]));
-      if (content !== text || (names.length > 0 && (!recorded?.definitions || !same(recorded.definitions, nextDefinitions))) || (recorded && !names.length))
-        actions.push({ kind: "toml", abs: path, content, beforeHash: sha(text), names, definitions: nextDefinitions, written: Object.keys(data), roots });
+      if (content !== original || (names.length > 0 && (!recorded?.definitions || !same(recorded.definitions, nextDefinitions))) || (recorded && !names.length))
+        actions.push({ kind: "toml", abs: path, content, beforeHash: sha(original), names, definitions: nextDefinitions, written: Object.keys(data), roots });
       else if (!conflicts.size) {
         const mode = modeFix(path);
         if (mode !== null) actions.push({ kind: "chmod", abs: path, mode, roots });
