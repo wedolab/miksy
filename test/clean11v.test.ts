@@ -92,7 +92,8 @@ describe("clean убирает начисто (круг 11v)", () => {
     put(`${f.home}/.claude/skills/mine.txt`, "моё");
     put(`${f.proj}/.codex/note.txt`, "файл другой машины");
     f.clean();
-    expect(readFileSync(`${f.home}/.gemini/config/mcp_config.json`, "utf8")).toBe('{\n  "mcpServers": {}\n}');
+    // Круг 11y: правка на месте — файл побайтно как до miksy (было: переформатирован JSON.stringify)
+    expect(readFileSync(`${f.home}/.gemini/config/mcp_config.json`, "utf8")).toBe('{"mcpServers":{}}');
     expect(existsSync(`${f.proj}/.claude`)).toBe(true);
     expect(readFileSync(`${f.home}/.claude/skills/mine.txt`, "utf8")).toBe("моё");
     expect(readFileSync(`${f.proj}/.codex/note.txt`, "utf8")).toBe("файл другой машины");

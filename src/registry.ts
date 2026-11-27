@@ -20,6 +20,7 @@ import type { Below, Layer, Machine, McpServer, Resolved } from "./types";
 import { bridgeEnv, refsIn, SECRET_MARK, type HttpDelivery, type SkippedMcp, substitute } from "./vars";
 import { readFileSync } from "node:fs";
 import { parseToml } from "./toml";
+import { readJsoncText } from "./jsonc";
 import { blockHash, splitInstructions } from "./instructions";
 import { MIN as MASK_MIN } from "./mask";
 import { count } from "./plural";
@@ -525,7 +526,7 @@ export function literalFindings(actions: Action[], secrets: Record<string, strin
     const toml = merge || !table ? null : a.abs.match(new RegExp(`^(.*) ${table.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(.+)$`));
     let text: string;
     try {
-      text = merge ? JSON.stringify([...JSON.parse(merge[2]), merge[3]].reduce((o: any, k) => o?.[k], JSON.parse(readFileSync(merge[1], "utf8"))) ?? "")
+      text = merge ? JSON.stringify([...JSON.parse(merge[2]), merge[3]].reduce((o: any, k) => o?.[k], readJsoncText(readFileSync(merge[1], "utf8"))) ?? "")
         : toml ? JSON.stringify(parseToml(readFileSync(toml[1], "utf8"))[table!]?.[toml[2]] ?? "")
         : readFileSync(a.abs, "utf8");
     } catch { continue; }

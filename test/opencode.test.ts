@@ -51,14 +51,15 @@ describe("opencode", () => {
     expect(r.warnings.join("\n")).toContain("instructions");
   });
 
-  test("глобально: JSONC-комментарии и дублирующий skill — предупреждения, mcp не записан", () => {
+  // Круг 11y: JSONC-комментарии больше не помеха — ядро правит файл на месте (было: «строгий JSON», mcp не записан)
+  test("глобально: JSONC-комментарии — mcp сливается в файл; дублирующий skill — предупреждение", () => {
     const { cfg, machine, home } = fixture();
     writeFileSync(join(home, ".config", "opencode", "opencode.json"), '{\n  // мой конфиг\n  "model": "x",\n}\n');
     mkdirSync(join(home, ".claude", "skills", "s"), { recursive: true });
     writeFileSync(join(home, ".claude", "skills", "s", "SKILL.md"), "dup\n");
     const r = opencode.render(cfg, { scope: "global" }, machine);
-    expect(r.files.some((f) => f.mode === "merge")).toBe(false);
-    expect(r.warnings.join("\n")).toContain("строгий JSON");
+    expect(r.files).toContainEqual(expect.objectContaining({ base: "home", path: ".config/opencode/opencode.json", mode: "merge", key: ["mcp"] }));
+    expect(r.warnings.join("\n")).not.toContain("строгий JSON");
     expect(r.warnings.join("\n")).toContain("duplicate skill name");
   });
 

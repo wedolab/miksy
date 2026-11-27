@@ -2,60 +2,16 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CurrentState } from "../../src/adapter";
+import { readJsoncText } from "../../src/jsonc";
 
-// JSONC-толерантное чтение (комментарии, концевые запятые) — без npm-зависимостей.
+// JSONC-толерантное чтение (комментарии, концевые запятые, BOM) — общий разбор src/jsonc.ts (круг 11y); не разобрать — {}
 export function readJsonc(path: string): Record<string, any> {
   if (!existsSync(path)) return {};
-  const src = readFileSync(path, "utf8");
-  if (!src.trim()) return {};
-  let out = "";
-  let str = "";
-  let block = false;
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    const n = src[i + 1];
-    if (block) {
-      if (c === "*" && n === "/") {
-        block = false;
-        i++;
-      }
-      continue;
-    }
-    if (str) {
-      if (c === "\\") {
-        out += c + (n ?? "");
-        i++;
-        continue;
-      }
-      if (c === str) str = "";
-      out += c;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      str = c;
-      out += c;
-      continue;
-    }
-    if (c === "/" && n === "/") {
-      while (i < src.length && src[i] !== "\n") i++;
-      continue;
-    }
-    if (c === "/" && n === "*") {
-      block = true;
-      i++;
-      continue;
-    }
-    out += c;
-  }
-  try {
-    return JSON.parse(out.replace(/,(\s*[}\]])/g, "$1")) ?? {};
-  } catch {
-    return {};
-  }
+  try { return readJsoncText(readFileSync(path, "utf8")); } catch { return {}; }
 }
 
-// Строгий JSON без комментариев — только такой файл miksy готов сливать (иначе потеряет JSONC-форматирование).
-// Пустой файл (0 байт — так его заводит Antigravity) — пустой объект, ядро сливает в него как в {}
+// Строгий JSON без комментариев — только такой файл miksy сливает: ядро правит и JSONC на месте (круг 11y), но читает ли
+// Antigravity комментарии, не проверено (BACKLOG). Пустой файл (0 байт — так его заводит Antigravity) — пустой объект, ядро сливает в него как в {}
 export function strictJson(path: string): boolean {
   if (!existsSync(path)) return false;
   const src = readFileSync(path, "utf8");

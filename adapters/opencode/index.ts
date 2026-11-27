@@ -5,7 +5,7 @@ import { deliver, type Launcher, nativeServers } from "../../src/launch";
 import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { serverSecrets } from "../../src/vars";
-import { configsOf, currentGlobal, currentProject, strictJson } from "./current";
+import { configsOf, currentGlobal, currentProject } from "./current";
 import { miksyOpencodeJson } from "./mark";
 import { opencodeMajor } from "./version";
 import { teamCollection } from "../../src/git";
@@ -148,14 +148,11 @@ export const opencode: Adapter = {
       const candidates = [".config/opencode/opencode.json", ".config/opencode/opencode.jsonc"];
       const existing = candidates.filter((p) => existsSync(join(anchor, p)));
       if (existing.length > 1)
-        warnings.push(`mcp opencode: несколько конфигов (${existing.join(", ")}) — miksy сливает в ${existing[0]}, остальные тоже загрузятся`);
+        warnings.push(`mcp opencode: несколько конфигов (${existing.join(", ")}) — miksy сливает в ${existing[0]}; ${existing[1]} тоже загрузится — позже, и его серверы с теми же именами перекроют серверы miksy`);
       const path = existing[0] ?? candidates[0];
-      if (existing.length && !strictJson(join(anchor, path)))
-        warnings.push(`mcp opencode: ${path} не парсится как строгий JSON (JSONC-комментарии? — DESIGN §11); серверы не записаны`);
-      else {
-        files.push({ base: "home", path, mode: "merge", format: "json", key: ["mcp"], data: servers });
-        files.push(...(ctx?.launch?.files() ?? []));
-      }
+      // Комментарии и концевые запятые (JSONC) — не помеха: ядро правит файл на месте (круг 11y)
+      files.push({ base: "home", path, mode: "merge", format: "json", key: ["mcp"], data: servers });
+      files.push(...(ctx?.launch?.files() ?? []));
       return done({ files, warnings });
     }
 
@@ -185,7 +182,7 @@ export const opencode: Adapter = {
     // Конфиги-соседи, которые тоже загрузятся (в ours-ветке rootJson — наш, в чужой — оба корневых учтены)
     const side = (skipRoot: boolean) => [
       ...(!skipRoot && existsSync(rootJsonc) ? ["opencode.jsonc"] : []),
-      ...(existsSync(join(anchor, ".opencode", "opencode.json")) ? [".opencode/opencode.json"] : []),
+      ...[".opencode/opencode.json", ".opencode/opencode.jsonc"].filter((p) => existsSync(join(anchor, p))),
     ];
     const sideConfigs = side(!ours);
 
@@ -209,17 +206,14 @@ export const opencode: Adapter = {
       // Чужой корневой конфиг: только mcp, поимённо внутри ключа mcp
       const existing = ROOT_CONFIGS.filter((p) => existsSync(join(anchor, p)));
       if (existing.length > 1)
-        warnings.push(`mcp opencode: несколько конфигов (${[...existing, ...sideConfigs].join(", ")}) — miksy сливает в ${existing[0]}, остальные тоже загрузятся`);
+        warnings.push(`mcp opencode: несколько конфигов (${[...existing, ...sideConfigs].join(", ")}) — miksy сливает в ${existing[0]}, остальные тоже загрузятся (позже — и перекроют серверы miksy с теми же именами)`);
       else if (sideConfigs.length)
         warnings.push(`mcp opencode: ${sideConfigs.join(", ")} тоже загрузится`);
       const path = existing[0]!;
-      if (!strictJson(join(anchor, path)))
-        warnings.push(`mcp opencode: ${path} не парсится как строгий JSON (JSONC-комментарии? — DESIGN §11); серверы не записаны`);
-      else {
-        files.push({ base: "project", path, mode: "merge", format: "json", key: ["mcp"], data: servers });
-        files.push(...(ctx?.launch?.files() ?? []));
-        warnings.push(`mcp opencode: ${path} — файл командной формы; miksy владеет только именами серверов внутри mcp (отслеживаемый git — конфликт) и не скрывает чужой файл через .git/info/exclude`);
-      }
+      // JSONC — правка на месте (круг 11y)
+      files.push({ base: "project", path, mode: "merge", format: "json", key: ["mcp"], data: servers });
+      files.push(...(ctx?.launch?.files() ?? []));
+      warnings.push(`mcp opencode: ${path} — файл командной формы; miksy владеет только именами серверов внутри mcp (отслеживаемый git — конфликт) и не скрывает чужой файл через .git/info/exclude`);
     }
 
     return done({ files, warnings });

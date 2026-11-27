@@ -9,7 +9,7 @@ import { GitError, gitMemo, gitSpawn, gitWhy, protectedBy, trackedPaths } from "
 import { backup, neverCopied, originalBackup, runDir } from "./backup";
 import { blockHash, hashMarkers, instructionBlock, joinOutside, splitInstructions } from "./instructions";
 import { type ApproveAction, editTrustToml, readTrust, trustId, trustPlan, trustValue, type TrustAction } from "./trust";
-import { blankText, createdAfter, emptyShape, forgetMade, linkOnWay, type Made, madeDir, madeFile, noteDirs, noteFile, pruneMade, skeleton } from "./made";
+import { blankText, createdAfter, emptyShape, forgetMade, linkOnWay, type Made, madeDir, madeFile, madeKeys, noteDirs, noteFile, pruneMade, skeleton } from "./made";
 import { canonicalState, emptyState, type ForgottenMark, hasAny, pruneState, rememberPath, removeFile, repairMode, sha, type TargetState, UNKNOWN_HASH, writeAtomic } from "./manifest";
 import type { Machine } from "./types";
 import { configRoot } from "./load";
@@ -17,6 +17,7 @@ import { ensurePrivateLocal } from "./secretfiles";
 import { agentId, aliasesOf } from "./agentid";
 import { allMiksyLines, blocksOf, coveredBy, type ExcludeBlock, lineAlive, removeBlock, setBlock } from "./excludeblocks";
 import { ensureMachineId, machineId, machineUnknown, noteSkipped } from "./machineid";
+import { editToValue, JsoncError, parseJsonc, readJsoncText, sameValue } from "./jsonc";
 import { definitionHash, differingFields, mcpTables, ownedTomlParts, parseToml, removeTables, replaceOwnedMcp, splitToml, stripMarkers } from "./toml";
 
 // roots — где путь обязан остаться после раскрытия симлинков (проект, домашний каталог);
@@ -54,11 +55,8 @@ export type Action = { sensitive?: boolean; original?: boolean; restoreBlock?: b
 const UNKNOWN_WHY = "учёт: при миграции для файла нашлись разные записи — хеш неизвестен, проверьте файл (--force перезапишет, бэкап будет)";
 
 
-const readJson = (p: string) => {
-  if (!existsSync(p)) return {};
-  const t = readFileSync(p, "utf8").trim();
-  return t ? JSON.parse(t) : {};
-};
+// JSON или JSONC (комментарии, концевые запятые, BOM — круг 11y); пустой файл — {}
+const readJson = (p: string) => (existsSync(p) ? readJsoncText(readFileSync(p, "utf8")) : {});
 const get = (o: any, key: string[]) => key.reduce((x, k) => (x == null ? undefined : x[k]), o);
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -599,6 +597,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
 
   const keep = new Set(result.keep ?? []);
   const docs = new Map<string, any>();
+  const notes = new Map<string, string[]>(); // комментарии файла (JSONC): закомментированный сервер miksy
   const hashes = new Map<string, string>(); // хеш файла на момент плана — apply сверяет перед записью
   const refused = new Set<string>();
   const chmodded = new Set<string>();
@@ -619,11 +618,14 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     if (!docs.has(path)) {
       // Битый JSON — конфликт этого файла, а не падение всего sync
       try {
-        docs.set(path, readJson(path));
+        const text = existsSync(path) ? readFileSync(path, "utf8") : "";
+        const parsed = parseJsonc(text);
+        docs.set(path, parsed.value ?? {});
+        notes.set(path, parsed.comments.map((c) => text.slice(c.start, c.end)));
         hashes.set(path, fileHash(path));
-      } catch {
+      } catch (e) {
         refused.add(path);
-        actions.push({ kind: "conflict", abs: path, why: "файл не разбирается как JSON — не сливаю ключи; исправьте файл и повторите sync" });
+        actions.push({ kind: "conflict", abs: path, why: `файл не разбирается как JSON (или JSONC)${e instanceof JsoncError ? `: ${e.message}` : ""} — не сливаю ключи; исправьте файл и повторите sync` });
         continue;
       }
     }
@@ -654,6 +656,11 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       }
       own.push(name);
       if (!same(current[name], value)) set[name] = value;
+      // Свой сервер, закомментированный в файле (круг 11y): разбор его не видит — записывается снова, с предупреждением
+      if (owned.includes(name) && !(name in current) && notes.get(path)?.some((c) => c.replace(/\s+/g, "").includes(`${JSON.stringify(name)}:`))) {
+        const w = `сервер ${name} закомментирован в ${path} — miksy записал его снова; выключить его на этой машине — miksy mcp off ${name}`;
+        if (!result.warnings.includes(w)) result.warnings.push(w);
+      }
     }
     // Сервер пропущен (нет переменных), но записан раньше — остаётся как был и в учёте
     for (const n of owned) if (!(n in data) && keep.has(n) && n in current) own.push(n);
@@ -794,7 +801,11 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
   // пишется и не удаляется (и доверие тоже: решается вместе с файлами); команда пишет одну строку и выходит с кодом 3
   // (commands.ts), doctor — так же
   if (ex && machineUnknown()) { noteSkipped(); return finishTrust([]); }
-  tidy(actions, target, machine, made, result.clean && !prev.made ? result.warnings : null);
+  mergedCache = new Map();
+  try {
+    checkMerged(actions, made);
+    tidy(actions, target, machine, made, result.clean && !prev.made ? result.warnings : null);
+  } finally { mergedCache = null; }
 
   // .git/info/exclude: у каждого агента свой блок; сверяемся с файлом, а не с учётом —
   // блок мог быть стёрт (в т.ч. старым общим блоком другого агента).
@@ -941,11 +952,26 @@ export function conflictFile(abs: string): string | null {
 }
 
 // Содержимое файла слияний после действий (ключи MCP, доверие): его пишет apply, по нему же план решает, останется ли
-// в файле что-то, кроме созданного miksy (круг 11v)
-function mergedFile(file: string, list: (Extract<Action, { kind: "merge" }> | TrustAction)[]): { text: string; doc: any } {
+// в файле что-то, кроме созданного miksy (круг 11v). JSON (и JSONC) — правка на месте (круг 11y): меняются только
+// расходящиеся значения, остальной текст — побайтно; разбор результата обязан совпасть с ожидаемым объектом, иначе
+// ошибка (JsoncError) — файл не пишется. created — объекты, которые miksy создал в чужом файле (made.keys): опустевший
+// такой объект уходит и на верхнем уровне
+// План считает файл дважды (сверка правки, уборка) — один раз (большой ~/.claude.json)
+let mergedCache: Map<string, { text: string; doc: any }> | null = null;
+function mergedFile(file: string, list: (Extract<Action, { kind: "merge" }> | TrustAction)[], created: string[] = []): { text: string; doc: any } {
+  const id = mergedCache && file + " " + JSON.stringify(list) + " " + JSON.stringify(created);
+  const hit = id ? mergedCache!.get(id) : undefined;
+  if (hit) return hit;
+  const r = mergedFileNow(file, list, created);
+  if (id) mergedCache!.set(id, r);
+  return r;
+}
+function mergedFileNow(file: string, list: (Extract<Action, { kind: "merge" }> | TrustAction)[], created: string[]): { text: string; doc: any } {
   const tomlTrust = list.some((a) => a.kind === "trust" && a.format === "toml");
   let text = existsSync(file) ? readFileSync(file, "utf8") : "";
-  const doc = tomlTrust ? parseToml(text) : readJson(file);
+  // JSON: копии только объектов на путях действий, остальное — общее с before (правка и сверка не обходят весь файл)
+  const before = tomlTrust ? null : readJsoncText(text);
+  const doc = tomlTrust ? parseToml(text) : cloneAlong(before, list.map((a) => a.key));
   for (const a of list) {
     if (a.kind === "trust") {
       if (tomlTrust) text = editTrustToml(text, a);
@@ -968,13 +994,56 @@ function mergedFile(file: string, list: (Extract<Action, { kind: "merge" }> | Tr
     const removed = a.kind === "merge" ? a.remove.length > 0 && !Object.keys(a.set).length : !!a.remove;
     if (!removed) continue;
     const path = a.kind === "merge" ? a.key : a.key.slice(0, -1);
-    for (let i = path.length; i >= 2; i--) {
+    for (let i = path.length; i >= 2 || (i >= 1 && created.includes(JSON.stringify(path.slice(0, i)))); i--) {
       const v = get(doc, path.slice(0, i));
       if (!v || typeof v !== "object" || Array.isArray(v) || Object.keys(v).length) break;
       delete get(doc, path.slice(0, i - 1))[path[i - 1]];
     }
   }
+  if (!tomlTrust) text = jsonText(text, doc, before);
   return { text, doc };
+}
+
+// Копия объекта с копиями вложенных объектов по путям (остальные — те же объекты)
+function cloneAlong(root: any, paths: string[][]): any {
+  if (!root || typeof root !== "object" || Array.isArray(root)) return root;
+  const copies = new WeakSet<object>();
+  const out = { ...root };
+  copies.add(out);
+  for (const p of paths) {
+    let cur = out;
+    for (const k of p) {
+      const child = cur[k];
+      if (!child || typeof child !== "object" || Array.isArray(child)) break;
+      if (!copies.has(child)) { cur[k] = { ...child }; copies.add(cur[k]); }
+      cur = cur[k];
+    }
+  }
+  return out;
+}
+
+// Текст JSON-файла с новым значением: пустой (или файла нет) — как прежде, JSON.stringify; иначе правка на месте и
+// сверка разбора с ожидаемым (круг 11y)
+export function jsonText(original: string, doc: unknown, before: unknown = readJsoncText(original)): string {
+  if (!original.trim()) return JSON.stringify(doc, null, 2);
+  const out = editToValue(original, before, doc);
+  if (!sameValue(readJsoncText(out), doc)) throw new JsoncError("после правки файл разбирается не так, как задумано");
+  return out;
+}
+
+// Правка JSON на месте (круг 11y) не дала ожидаемого — слияния и доверие этого файла заменяются конфликтом: файл не
+// пишется. apply проверяет то же перед записью (файл мог измениться после плана)
+function checkMerged(actions: Action[], made: Made | undefined) {
+  const byFile = new Map<string, (Extract<Action, { kind: "merge" }> | TrustAction)[]>();
+  for (const a of actions) if ((a.kind === "merge" || (a.kind === "trust" && a.format !== "toml"))) byFile.set(a.abs, [...(byFile.get(a.abs) ?? []), a]);
+  for (const [file, list] of byFile) {
+    if (list.some((a) => a.kind === "trust" && a.format === "toml")) continue;
+    try { mergedFile(file, list, madeKeys(made, file)); }
+    catch (e) {
+      for (let i = actions.length - 1; i >= 0; i--) if (list.includes(actions[i] as never)) actions.splice(i, 1);
+      actions.push({ kind: "conflict", abs: file, why: `не могу изменить файл, сохранив его вид${e instanceof Error ? ` (${e.message})` : ""} — не пишу; исправьте файл или уберите из него ключи miksy вручную и повторите sync` });
+    }
+  }
 }
 
 // Уборка начисто (круг 11v): файл-обёртка, в котором после плана останется только созданное miksy, — удалить (delete
@@ -1005,8 +1074,9 @@ function tidy(actions: Action[], target: Target, machine: Machine, made: Made | 
         empty = bare = blankText(text);
       } else {
         const before = readJson(abs);
-        const { doc } = mergedFile(abs, list.filter((a): a is Extract<Action, { kind: "merge" }> | TrustAction => a.kind === "merge" || a.kind === "trust"));
-        empty = !!mine && skeleton(doc, createdAfter(mine, before, doc));
+        const { text, doc } = mergedFile(abs, list.filter((a): a is Extract<Action, { kind: "merge" }> | TrustAction => a.kind === "merge" || a.kind === "trust"), madeKeys(made, abs));
+        // Комментарий в файле — это уже что-то ваше (круг 11y): файл остаётся
+        empty = !!mine && skeleton(doc, createdAfter(mine, before, doc)) && !parseJsonc(text).comments.length;
         bare = emptyShape(doc);
       }
     } catch { continue; /* не разобрать — оставить, как есть */ }
@@ -1300,12 +1370,14 @@ function applyInto(actions: Action[], state: TargetState, made?: Made): { state:
     if (fileHash(a.abs) !== a.beforeHash) throw new StaleError(`${a.abs} изменился после планирования — одобрение не меняю; повторите sync`);
     if (a.add.length || a.remove.length) {
       backup(a.abs);
-      const doc = readJson(a.abs);
+      const original = existsSync(a.abs) ? readFileSync(a.abs, "utf8") : "";
+      const doc = readJsoncText(original);
       const list: string[] = (Array.isArray(doc[a.key]) ? doc[a.key] : []).filter((n: string) => !a.remove.includes(n));
       for (const n of a.add) if (!list.includes(n)) list.push(n);
       if (list.length) doc[a.key] = list;
       else delete doc[a.key];
-      if (Object.keys(doc).length) { dirsFor(a.abs, a.roots); writeAtomic(a.abs, JSON.stringify(doc, null, 2) + "\n"); }
+      // Правка на месте (круг 11y); нового файла — как прежде
+      if (Object.keys(doc).length) { dirsFor(a.abs, a.roots); writeAtomic(a.abs, original.trim() ? jsonText(original, doc) : JSON.stringify(doc, null, 2) + "\n"); }
       else if (existsSync(a.abs)) removeFile(a.abs);
     }
     if (a.own.length) (state.approvals ??= {})[pathKey(a.abs)] = a.own;
@@ -1325,10 +1397,10 @@ function applyInto(actions: Action[], state: TargetState, made?: Made): { state:
     const tomlTrust = list.some((a) => a.kind === "trust" && a.format === "toml");
     const existed = existsSync(file);
     const before = tomlTrust ? {} : readJson(file);
-    const { text, doc } = mergedFile(file, list);
+    const { text, doc } = mergedFile(file, list, madeKeys(made, file));
     if (tomlTrust) parseToml(text);
     dirsFor(file, list.find((a) => a.roots)?.roots);
-    writeAtomic(file, tomlTrust ? text : JSON.stringify(doc, null, 2), { sensitive: true });
+    writeAtomic(file, text, { sensitive: true });
     noteFile(made, file, existed, before, tomlTrust ? {} : doc);
     // Учёт доверия меняется только после подтверждённого изменения файла
     const written = list.some((a) => a.kind === "trust") ? readTrust(file, tomlTrust ? "toml" : "json").doc : null;
@@ -1361,7 +1433,7 @@ function applyInto(actions: Action[], state: TargetState, made?: Made): { state:
     if (!existsSync(a.abs) || !mine) continue;
     const text = readFileSync(a.abs, "utf8");
     let empty = false;
-    try { empty = a.wrapper === "toml" ? blankText(text) : skeleton(text.trim() ? JSON.parse(text) : {}, mine); } catch { /* не разобрать — оставить */ }
+    try { empty = a.wrapper === "toml" ? blankText(text) : (() => { const p = parseJsonc(text); return !p.comments.length && skeleton(p.value ?? {}, mine); })(); } catch { /* не разобрать — оставить */ }
     if (!empty) continue;
     remove(a, state);
     forgetMade(made, a.abs);

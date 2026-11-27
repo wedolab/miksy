@@ -152,7 +152,7 @@ export const antigravity: Adapter = {
         for (const { path } of configs) {
           const abs = join(machine.home, path);
           if (existsSync(abs) && !strictJson(abs)) {
-            warnings.push(`mcp antigravity: ${path} не парсится как строгий JSON (JSONC-комментарии? — DESIGN §11); серверы не записаны`);
+            warnings.push(`mcp antigravity: ${path} не парсится как строгий JSON (комментарии?) — серверы не записаны: не проверено, читает ли Antigravity JSONC`);
           } else {
             files.push({
               base: "home",

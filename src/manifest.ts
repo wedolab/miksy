@@ -342,7 +342,7 @@ export function saveManifest(m: Manifest, path = manifestPath()) {
   if (!savedOnce.has(path) && existsSync(path)) copyFileSync(path, `${path}.bak`);
   savedOnce.add(path);
   const { version, engine: _, ...rest } = m;
-  if (rest.made && !rest.made.dirs?.length && !Object.keys(rest.made.files ?? {}).length) delete rest.made;
+  if (rest.made && !rest.made.dirs?.length && !Object.keys(rest.made.files ?? {}).length && !Object.keys(rest.made.keys ?? {}).length) delete rest.made;
   writeAtomic(path, JSON.stringify({ version, engine: packageVersion(), ...rest }, null, 2) + "\n");
 }
 
