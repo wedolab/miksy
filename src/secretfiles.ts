@@ -180,6 +180,28 @@ function walkLocal(root: string): Walk {
   return w;
 }
 
+// Обход папки оригиналов за ссылкой local/backups (круг 12d): как walkLocal, но папка, которую не прочесть даже вам
+// (права без записей — так их оставляли 0.2.1 и раньше), не останавливает обход, а попадает в locked
+function walkOriginals(root: string): Walk & { locked: string[] } {
+  const w: Walk & { locked: string[] } = { paths: [], links: [], linked: new Set(), locked: [] };
+  const go = (dir: string): boolean => {
+    w.paths.push(dir);
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { w.locked.push(dir); return false; }
+    let has = false;
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isSymbolicLink()) { w.links.push(p); has = true; }
+      else if (e.isDirectory()) { if (go(p)) has = true; }
+      else w.paths.push(p);
+    }
+    if (has) w.linked.add(dir);
+    return has;
+  };
+  go(root);
+  return w;
+}
+
 // local/ целиком может быть ссылкой (перенесён на другой том): права — у каталога назначения
 function localRoot(dir: string): string {
   if (!isLink(dir)) return dir;
@@ -296,12 +318,31 @@ export function backupsRefusal(dir = join(configRoot(), "local"), links?: string
       if (r) return r;
       const o = join(b, "originals");
       if (isLink(o)) return linkRefusal(o);
+      // originals и всё в ней — путь записи оригиналов: обход без захода в ссылки. Ссылка глубже — отказ сразу, а не на
+      // полпути записи (сквозь неё оригинал не пишется никогда; miksy сам ссылок в originals не кладёт — копирует
+      // содержимое). Цена — доли секунды и на тысячах файлов (круг 12d)
+      const deep = existsSync(o) ? walkOriginals(o) : { paths: [], links: [], linked: new Set<string>(), locked: [] };
+      for (const l of deep.links) { const r = linkRefusal(l); if (r) return r; }
       if (!win) return null;
-      // Свои папки за ссылкой: originals открыта или без доступа для вас, папка запуска без доступа (их оставила 0.2.1 —
-      // rotate падал бы на ней в каждом запуске). Одна команда на всю цель: закрыть её и сбросить права всего внутри к
-      // наследованию, ссылки пропускаются (круг 8d, E1; рецензия A №1)
-      const bad: [string, string][] = [];
-      if (existsSync(o)) { let why: string | null; try { why = aclProblem(o) ?? noAccess(o); } catch (e) { why = `права не прочитать (${(e as Error).message})`; } if (why) bad.push([o, why]); }
+      // Свои папки за ссылкой: originals или папка (файл) в ней открыты другим или без доступа для вас, папка запуска без
+      // доступа (их оставила 0.2.1 — rotate падал бы на ней в каждом запуске). Одна команда на всю цель: закрыть её и
+      // сбросить права всего внутри к наследованию, ссылки пропускаются (круг 8d, E1; рецензия A №1; глубже — круг 12d)
+      // Папки без доступа вам — отказ уже неизбежен, а команда закрывает всё: права остальных не проверяются (по одному icacls
+      // на файл — минуты на тысячах файлов). Иначе — один снимок; не удался — по одному до первой находки (для отказа хватит)
+      const bad: [string, string][] = deep.locked.map((p) => [p, noAccess(p) ?? "нет доступа даже вам"] as [string, string]);
+      if (!bad.length && deep.paths.length) {
+        let acl: Map<string, string> | null = null;
+        try { acl = snapshot(o, deep); } catch { acl = null; }
+        const me = mySid();
+        for (const p of deep.paths) {
+          let why: string | null;
+          const sddl = acl?.get(p.toLowerCase());
+          if (sddl !== undefined) { const f = foreignAces(sddl, me); why = f.length ? `доступ есть не только у владельца: ${f.join(", ")}` : null; }
+          else try { why = aclProblem(p) ?? (statSync(p).isDirectory() ? noAccess(p) : null); } catch (e) { why = `права не прочитать (${(e as Error).message})`; }
+          if (why) bad.push([p, why]);
+          if (bad.length && !acl) break;
+        }
+      }
       for (const e of readdirSync(b, { withFileTypes: true }))
         if (e.isDirectory() && /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.test(e.name)) { const why = noAccess(join(b, e.name)); if (why) bad.push([join(b, e.name), why]); }
       if (!bad.length) return null;

@@ -1,6 +1,6 @@
 // Выпуск 0.2.2, круг 8d, рецензия A №2 (A №3 не для всех путей): ссылка ниже originals/ на открытую, закрытую или
-// несуществующую цель — при обычной local/backups и при local/backups-ссылке на закрытую цель. Обычная — отказ в начале,
-// в --dry-run и doctor; ссылка — по решению «б» (круг 8c) устройство цели в начале не проверяется: отказ на записи. Текст
+// несуществующую цель — при обычной local/backups и при local/backups-ссылке на закрытую цель. В обоих случаях — отказ в
+// начале, в --dry-run и doctor (для ссылки — с круга 12d; раньше, по решению «б» круга 8c, — отказ на записи). Текст
 // везде — «замените … обычной папкой», без «закрыть цель» и без текста guard «не трогаю». Только временные каталоги
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -57,9 +57,5 @@ for (const linked of [true, false])
         dry: dry.code === 1 && text(dry.out), doctor: text(doc.out),
         first: first.code === 1 && text(first.out) && !/частично/.test(first.out),
         second: text(second.out),
-      }, said(dry, first)).toEqual(linked
-        // Ссылка local/backups: в начале не проверяется (решение «б») — отказ на записи, «частично», текст тот же
-        ? { dry: false, doctor: false, first: false, second: true }
-        : { dry: true, doctor: true, first: true, second: true });
-      if (linked) expect({ code: first.code, text: text(first.out) }, said(first)).toEqual({ code: 3, text: true });
+      }, said(dry, first)).toEqual({ dry: true, doctor: true, first: true, second: true });
     }, 300000);

@@ -244,20 +244,19 @@ test.skipIf(!KINDS.includes(win ? "junction" : "dir"))("doctor: строка о�
   expect(line).toMatch(win ? /Закрыть цель \(PowerShell\): icacls '.*' \/reset; icacls '.*' \/inheritance:r \/grant:r '\*S-[0-9-]+:\(OI\)\(CI\)F'$/ : /Закрыть цель: chmod 700 '.*'$/);
 }, 300000);
 
-// Решение основного агента (8c, вариант «б»): при ссылке local/backups на закрытую цель устройство цели не проверяется в
-// начале; отказ — на записи. Условие: отказ на полпути называет папку и даёт готовую команду, за ссылку ничего не пишется
-test.skipIf(!win)("Windows: закрытая цель local/backups, глубже открытая папка originals/C — отказ на записи: папка и команда", () => {
+// Круг 12d (прежде — решение «б» круга 8c: отказ на записи, «частично»): при ссылке local/backups на закрытую цель папка
+// оригиналов проверяется и глубже — отказ в начале команды, за ссылку ничего не пишется, строка называет папку и кончается
+// командой, которая закрывает папку бэкапов и всё в ней. Итог после ошибки на полпути — test/backups12d.test.ts
+test.skipIf(!win)("Windows: закрытая цель local/backups, глубже открытая папка originals/C — отказ в начале: папка и команда", () => {
   const w = world("backups", "junction", false);
   mkdirSync(`${w.vault}/originals/C`, { recursive: true });
   openDir(`${w.vault}/originals/C`);
   const before = walk(w.vault);
   const sync = w.run(["sync", "--global", "--force"]);
   expect({
-    // Строка: «ОШИБКА (цель синхронизирована частично): <папка>: … Закройте папку оригиналов и всё в ней: <команда>» —
-    // команда последней, закрывает всё поддерево originals (круг 8d, E1)
-    named: /ОШИБКА \(цель синхронизирована частично\): .*originals\/C: .*miksy не пишет туда бэкапы.*Закройте папку оригиналов и всё в ней \(PowerShell\): icacls '[^']*originals' \/reset; .*F'; function Reset-MiksyTree\(\$d\) \{ .* \}; Reset-MiksyTree '[^']*originals'$/m.test(sync.out),
+    code: sync.code,
+    named: /^Ошибка: .*originals\/C: .*miksy не пишет туда бэкапы.*Закройте папку бэкапов и всё в ней \(PowerShell\): icacls '[^']*'/m.test(sync.out),
+    partial: /частично/.test(sync.out),
     vault: walk(w.vault),
-  }).toEqual({ named: true, vault: before });
-  // Выпуск 0.2.3, A6: итог — «записано частично», а не «конфликтов … эти места не изменены»
-  expect({ partial: /Целей записано частично: [0-9]+ — запись остановилась на ошибке/.test(sync.out), conflicts: /Конфликтов: /.test(sync.out) }).toEqual({ partial: true, conflicts: false });
+  }, said(sync)).toEqual({ code: 1, named: true, partial: false, vault: before });
 }, 300000);
