@@ -36,7 +36,7 @@ test("G2: у нового основного своя одноимённая п�
   const s = inSetup(f, [[/Корень workspace/, [work]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = say(s);
   expect({
-    copy: line.includes(`(ветка Code; если новая папка — копия прежней, его копия — ${work}/Clients)`),
+    copy: line.includes(`(раздел Code; если новая папка — копия прежней, его копия — ${work}/Clients)`),
     plain: line.includes(`в новой папке — ${work}/Clients`),
   }).toEqual({ copy: true, plain: false });
 }, 300000);

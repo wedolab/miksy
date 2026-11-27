@@ -133,7 +133,7 @@ export function repoAbove(dir: string): string | null {
   }
 }
 
-// Ветка в команде — в кавычках, если в имени пробел и т. п.
+// Раздел в команде — в кавычках, если в имени пробел и т. п.
 const treeArg = (t: string) => quoteArg(t, true);
 
 // Как git-репо вне workspace сделать проектом: корнем — папка, в которой он лежит; если она — диск, дом или
@@ -141,7 +141,7 @@ const treeArg = (t: string) => quoteArg(t, true);
 export function outsideRepoAdvice(repo: string, home: string, roots: Root[]): string {
   const parent = slash(dirname(repo));
   return parent !== repo && !unsafeWorkspace(parent, home)
-    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add ${quoteArg(parent)} --tree ${treeArg(suggestTree(parent, roots.map((r) => r.tree).filter(Boolean)))} (её проекты — git-репо внутри; --tree — её ветка в layers/tree)`
+    ? `сделайте корнем workspace папку, в которой он лежит: miksy root add ${quoteArg(parent)} --tree ${treeArg(suggestTree(parent, roots.map((r) => r.tree).filter(Boolean)))} (её проекты — git-репо внутри; --tree — её раздел в layers/tree)`
     : `перенесите его в папку с проектами — корень workspace (${roots.map((r) => r.path).join(", ")}) или новую папку, которую добавите корнем (miksy root add "<папка>")`;
 }
 
@@ -535,9 +535,9 @@ export function setup(o: SetupOptions): number {
   };
   const first = prevRoots.length ? rootOf(prevRoots[0]) : null;
   const kept = first?.path ?? null;
-  // Ветка основного корня и форма записи (список) — как были
+  // Раздел основного корня и форма записи (список) — как были
   const keptTree = first?.tree ?? "";
-  // Ветка основного корня после выбора: прежняя; основным стал бывший дополнительный — его ветка
+  // Раздел основного корня после выбора: прежний; основным стал бывший дополнительный — его раздел
   let mainTree = keptTree;
   const listForm = Array.isArray(previous.workspace);
   // Ещё корни из файла (setup --force): остаются; убрать — правкой local/machine.yaml
@@ -560,20 +560,20 @@ export function setup(o: SetupOptions): number {
     // Основным стал один из дополнительных корней — из дополнительных он уходит (иначе один каталог дважды)
     const main = workspace;
     const was = main ? extra.findIndex((r) => rootKey(r.path) === rootKey(main)) : -1;
-    // Как вернуть прежний основной дополнительным корнем, когда основным стал бывший дополнительный: ветка обязательна.
-    // from — где сейчас его слои: null — в его ветке, она свободна (остаётся только root add); "" — в корне дерева
-    // (layers/tree/<папка>): их — под новую ветку (выпуск 0.2.1, A11). По порядку текста: сначала перенос слоёв, потом
+    // Как вернуть прежний основной дополнительным корнем, когда основным стал бывший дополнительный: раздел обязателен.
+    // from — где сейчас его слои: null — в его разделе, он свободен (остаётся только root add); "" — в корне дерева
+    // (layers/tree/<папка>): их — под новый раздел (выпуск 0.2.1, A11). По порядку текста: сначала перенос слоёв, потом
     // root add — его sync --all иначе снял бы с проектов слои, которые ещё не перенесены (проверка 7a выпуска 0.2.1,
-    // B №6). Ветка в команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5); с «,» или «}» —
+    // B №6). Раздел в команде — в кавычках, если в имени пробел и т. п. (рецензия 0.2.1 A, п. 5); с «,» или «}» —
     // отдельные привязки вместо {…} (круг 8b, C5). Основным стал новый каталог — рецепта нет: нужный прежний остаётся
     // основным по вопросу «Оставить её основной…» ниже (круг 10p)
     const backHint = (raw: string, from: string | null) => {
       const add = `miksy root add ${quoteArg(kept)} --tree ${treeArg(raw)}`;
       if (from === null) return `${add}.`;
       const braces = /[,}]/.test(raw)
-        ? `в {…} — отдельной привязкой к каждой его папке ({Org,Lab}/** → ${raw}/Org/** и ${raw}/Lab/**: запятая или } в имени ветки внутри {…} сломали бы шаблон)`
+        ? `в {…} — отдельной привязкой к каждой его папке ({Org,Lab}/** → ${raw}/Org/** и ${raw}/Lab/**: запятая или } в имени раздела внутри {…} сломали бы шаблон)`
         : `в {…} — к каждой его папке внутри скобок ({Org,Lab}/** → {${raw}/Org,${raw}/Lab}/**)`;
-      return `1) у дополнительного корня своя ветка — его слои из layers/tree/<папка>/… перенесите в layers/tree/${raw}/<папка>/…, а привязки map.yaml (match:) к его проектам — под ту же ветку: <папка>/** → ${raw}/<папка>/**, ${braces}, шаблоны, которые начинаются с **, не меняйте; 2) ${add} (docs/roots.md, «Вернуть прежний основной дополнительным корнем»).`;
+      return `1) у дополнительного корня свой раздел дерева слоёв — его слои из layers/tree/<папка>/… перенесите в layers/tree/${raw}/<папка>/…, а привязки map.yaml (match:) к его проектам — под тот же раздел: <папка>/** → ${raw}/<папка>/**, ${braces}, шаблоны, которые начинаются с **, не меняйте; 2) ${add} (docs/roots.md, «Вернуть прежний основной дополнительным корнем»).`;
     };
     // Проект — не только git-репо: и папка, куда miksy уже писал (проект из реестра агента, в учёте) — рецензия A круга
     // 8d, №5. full — папка проекта не пуста (для вопроса «Оставить её основной…»: перенесли, а пустые папки остались, —
@@ -592,7 +592,7 @@ export function setup(o: SetupOptions): number {
         .filter((r) => inside(rootKey(kept!), rootKey(r.path))).sort((a, b) => rootKey(b.path).length - rootKey(a.path).length)[0];
       if (holder) return `прежний основной ${kept} лежит внутри ${holder.path === main ? "нового" : `корня ${slash(holder.path)}`}: его проекты остаются в workspace, ${below(holder)}`;
       // Как передумать: новый каталог — тот же мастер ещё раз с прежним (там прежний — уже новый, вопрос «Оставить её
-      // основной…» — «нет»); бывший дополнительный — по docs/roots.md (вернуть ветки корням вручную)
+      // основной…» — «нет»); бывший дополнительный — по docs/roots.md (вернуть разделы корням вручную)
       const undo = fresh
         ? `miksy setup --force ещё раз, корень workspace — ${kept} (на вопрос «Оставить её основной…», если он будет, — «нет»)`
         : "docs/roots.md, «Сменить основной корень»";
@@ -611,7 +611,7 @@ export function setup(o: SetupOptions): number {
         // Вложенные корни переехали вместе с папкой, а их путь в machine.yaml прежний: их проекты на новом месте стали бы
         // проектами основного — назвать их и что сделать (круг 8d, E3)
         const inner = nested.length
-          ? `; но внутри неё ${nested.length === 1 ? "был ещё корень" : "были ещё корни"} — ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если папку перенесли сюда — теперь ${moved(r)}` : ""})`).join(", ")}: в local/machine.yaml ${nested.length === 1 ? "его путь" : "их путь"} прежний, и, если папку перенесли в новую, ${nested.length === 1 ? "его проекты" : "их проекты"} на новом месте — проекты основного корня. Если папку перенесли в новую — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${nested.length === 1 ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на новое место, затем miksy sync --global и miksy sync --all — слои ветки вернутся; до этого --force из строки конфликта о ${nested.length === 1 ? "его проектах" : "их проектах"} не выполняйте: он заменил бы правила ветки правилами основного. Новая папка — не та, куда перенесли прежнюю: path: не меняйте (одноимённая папка в ней — не ${nested.length === 1 ? "его" : "их"} новое место)`
+          ? `; но внутри неё ${nested.length === 1 ? "был ещё корень" : "были ещё корни"} — ${nested.map((r) => `${slash(r.path)} (раздел ${r.tree}${existsSync(moved(r)) ? `; если папку перенесли сюда — теперь ${moved(r)}` : ""})`).join(", ")}: в local/machine.yaml ${nested.length === 1 ? "его путь" : "их путь"} прежний, и, если папку перенесли в новую, ${nested.length === 1 ? "его проекты" : "их проекты"} на новом месте — проекты основного корня. Если папку перенесли в новую — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${nested.length === 1 ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на новое место, затем miksy sync --global и miksy sync --all — слои раздела вернутся; до этого --force из строки конфликта о ${nested.length === 1 ? "его проектах" : "их проектах"} не выполняйте: он заменил бы правила раздела правилами основного. Новая папка — не та, куда перенесли прежнюю: path: не меняйте (одноимённая папка в ней — не ${nested.length === 1 ? "его" : "их"} новое место)`
           : "";
         return `${empty ? `в прежнем основном ${kept} проектов нет: перенесли его содержимое или их там не было` : `прежнего основного ${kept} нет на месте: перенесли папку`} — ${nested.length ? "учёт" : "делать ничего не нужно, учёт"} обычно переедет сам при sync --all (README, «Переименовали или перенесли каталог»)${inner}; это диск, который сейчас не подключён, — когда подключите, верните прежний корень по docs/roots.md, «Сменить основной корень». \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
       }
@@ -620,7 +620,7 @@ export function setup(o: SetupOptions): number {
       // основного, пока не поправлен его path: (круг 8e, F1: папку скопировали или перенесли, оставив пустые папки)
       const one = nested.length === 1;
       const nestedText = nested.length
-        ? ` Внутри него ${one ? "ещё корень" : "ещё корни"} ${nested.map((r) => `${slash(r.path)} (ветка ${r.tree}${existsSync(moved(r)) ? `; если новая папка — копия прежней, его копия — ${moved(r)}` : ""})`).join(", ")}: ${one ? "он остаётся" : "они остаются"} в workspace по прежнему пути, ${one ? "его проекты" : "их проекты"} miksy обновляет, как раньше. Если папку скопировали или перенесли и вы переходите на новую целиком — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${one ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на ${one ? "его копию" : "их копии"} в новой папке, затем miksy sync --global и miksy sync --all — слои ${one ? "его ветки" : "их веток"} перейдут туда; до этого ${one ? "его копия" : "их копии"} в новой папке — проекты основного корня: --force из строки конфликта о них не выполняйте, он заменил бы правила ветки правилами основного. Новая папка — не копия прежней: path: не меняйте (одноимённая папка в ней — не ${one ? "его копия" : "их копии"}).`
+        ? ` Внутри него ${one ? "ещё корень" : "ещё корни"} ${nested.map((r) => `${slash(r.path)} (раздел ${r.tree}${existsSync(moved(r)) ? `; если новая папка — копия прежней, его копия — ${moved(r)}` : ""})`).join(", ")}: ${one ? "он остаётся" : "они остаются"} в workspace по прежнему пути, ${one ? "его проекты" : "их проекты"} miksy обновляет, как раньше. Если папку скопировали или перенесли и вы переходите на новую целиком — на вопрос «Записать настройки агентам сейчас?» в конце мастера ответьте «нет», после мастера поправьте path: ${one ? "этого корня" : "этих корней"} в local/machine.yaml (workspace) на ${one ? "его копию" : "их копии"} в новой папке, затем miksy sync --global и miksy sync --all — слои ${one ? "его раздела" : "их разделов"} перейдут туда; до этого ${one ? "его копия" : "их копии"} в новой папке — проекты основного корня: --force из строки конфликта о них не выполняйте, он заменил бы правила раздела правилами основного. Новая папка — не копия прежней: path: не меняйте (одноимённая папка в ней — не ${one ? "его копия" : "их копии"}).`
         : "";
       // В новой копии файлы с путями — конфликт до --force (B №5); во вложенных — только после правки path:
       const conflicts = `miksy sync "<путь проекта>" --force в её проектах (бэкап будет)${nested.length ? `; в ${one ? "копии вложенного корня" : "копиях вложенных корней"} — только после правки ${one ? "его" : "их"} path:` : ""}`;
@@ -632,41 +632,41 @@ export function setup(o: SetupOptions): number {
           : `Прежняя папка не нужна — уберите записанное в неё: miksy clean "<путь проекта>" в её проектах; если новая — её копия, файлы miksy с путями в ней (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните ${conflicts}.`;
         return `прежний основной ${kept} из workspace уходит${mainIn ? ` (кроме проектов внутри нового основного: они остаются в workspace, ${below({ path: main!, tree: mainTree })})` : ""}: ${mainIn ? "остальные его проекты" : "его проекты"}${nested.length ? ` (кроме ${one ? "вложенного корня" : "вложенных корней"} — ниже)` : ""} miksy больше не обновляет.${nestedText} ${drop} Передумали — ${undo}. \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
       }
-      // Основным стал бывший дополнительный корень, а у прежнего основного (без ветки) есть папка с именем его ветки:
-      // рецепт перенёс бы layers/tree/<ветка нового основного> — рецепта нет (выпуск 0.2.3, A10)
-      // Так же — ветка любого другого корня (рецензия 9a, №4)
+      // Основным стал бывший дополнительный корень, а у прежнего основного (без раздела) есть папка с именем его раздела:
+      // рецепт перенёс бы layers/tree/<раздел нового основного> — рецепта нет (выпуск 0.2.3, A10)
+      // Так же — раздел любого другого корня (рецензия 9a, №4)
       const dirs = (p: string) => { try { return readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } };
       const fold = (s: string) => (process.platform === "linux" ? s : s.toLowerCase());
       const copied = `папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните ${conflicts}.`;
       const branchRoots = [{ path: main!, tree: mainTree }, ...extra.filter((_, i) => i !== was)].filter((r) => r.tree);
       const hit = from === "" ? dirs(kept!).map((d) => ({ d, r: branchRoots.find((r) => fold(d) === fold(r.tree.split("/")[0])) })).find((x) => x.r) : undefined;
       const back = hit?.r
-        ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — его папка ${hit.d} совпадает с веткой ${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} (layers/tree/${hit.r.tree}): layers/tree/${hit.d} — слои и той ветки, и если их переложить, проекты ${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} потеряют правила, MCP и skills из них. Если ${copied}`
+        ? `Вернуть его — docs/roots.md, «Сменить основной корень»: переносить его слои miksy не подсказывает — его папка ${hit.d} совпадает с разделом ${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} (layers/tree/${hit.r.tree}): layers/tree/${hit.d} — слои и того раздела, и если их переложить, проекты ${hit.r.path === main ? "нового основного" : `корня ${slash(hit.r.path)}`} потеряют правила, MCP и skills из них. Если ${copied}`
         : `Вернуть его: ${backHint(raw, from)} Это — если новый основной другая папка, а прежняя нужна; ${copied}`;
       return `прежний основной ${kept} из workspace уходит${mainIn ? ` (кроме проектов внутри нового основного: они остаются в workspace, ${below({ path: main!, tree: mainTree })})` : ""}: ${mainIn ? "остальные его проекты" : "его проекты"}${nested.length ? ` (кроме ${one ? "вложенного корня" : "вложенных корней"} — ниже)` : ""} miksy больше не обновляет.${nestedText} ${back} \${WORKSPACE} в слоях теперь — ${slash(main!)}`;
     };
     if (was >= 0) {
       mainTree = extra[was].tree;
       const raw = keptTree || suggestTree(kept ?? "", [mainTree, ...extra.map((r) => r.tree)].filter(Boolean));
-      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; ${leaving(raw, keptTree ? null : "", false)}` : ""}`);
+      log(`  ${extra[was].path} был дополнительным корнем — теперь основной, раздел дерева слоёв тот же: layers/tree/${mainTree}${kept && rootKey(kept) !== rootKey(extra[was].path) ? `; ${leaving(raw, keptTree ? null : "", false)}` : ""}`);
       extra.splice(was, 1);
     } else if (main && kept && rootKey(kept) !== rootKey(main)) {
       // Основным выбран новый каталог, а прежний на месте, доступен и с проектами, и ни один не внутри другого (или
-      // дополнительного корня): скорее всего, завели ещё одну папку — тогда прежний остаётся основным (его ветка, слои и
+      // дополнительного корня): скорее всего, завели ещё одну папку — тогда прежний остаётся основным (его раздел, слои и
       // ${WORKSPACE} не меняются, слои переносить не нужно ни здесь, ни на других машинах), а новая — дополнительным
-      // корнем со своей веткой, как в «Есть ещё папки…». «Нет» — смена основного, как при переносе. Умолчание «нет»,
+      // корнем со своим разделом, как в «Есть ещё папки…». «Нет» — смена основного, как при переносе. Умолчание «нет»,
       // если движок лежит в новой папке: её скопировали или перенесли вместе с ним (круг 10p)
       const a = rootKey(main), b = rootKey(kept);
       const apart = existsSync(kept) && !unreachable(kept) && (containsProjects(kept) || recordedIn(kept, true))
         && !inside(a, b) && !inside(b, a) && !extra.some((r) => inside(a, rootKey(r.path)) || inside(b, rootKey(r.path)));
       if (apart && ask.yes(`Прежняя папка с проектами ${kept} на месте, в ней есть проекты. Оставить её основной, а ${main} добавить ещё одной папкой с проектами? (нет — основной станет ${main}, как при переносе папки)`, !inside(rootKey(engine), a))) {
         workspace = kept;
-        log(`  основной остаётся ${kept} (его ветка дерева слоёв, слои и \${WORKSPACE} — как были); ${main} — ещё одна папка с проектами:`);
+        log(`  основной остаётся ${kept} (его раздел дерева слоёв, слои и \${WORKSPACE} — как были); ${main} — ещё одна папка с проектами:`);
         if (!addRoot(ask, kept, main, true)) log(`  ${main} не добавлена — добавить позже: miksy root add ${quoteArg(main)}`);
       } else {
-        // Основным стал новый каталог: он берёт ветку прежнего основного (если была) — её называет и подсказка clean
+        // Основным стал новый каталог: он берёт раздел прежнего основного (если был) — его называет и подсказка clean
         // забытой папки вне workspace (выпуск 0.2.2, круг 8b, C6)
-        log(`  ${keptTree ? `ветка layers/tree/${keptTree} перешла к новому основному ${slash(main)}; ` : ""}${leaving("", null, true)}`);
+        log(`  ${keptTree ? `раздел layers/tree/${keptTree} перешёл к новому основному ${slash(main)}; ` : ""}${leaving("", null, true)}`);
       }
     }
     if (workspace) moreRoots(ask, workspace);
@@ -731,7 +731,7 @@ export function setup(o: SetupOptions): number {
   if (ask && absent.length) log(`  не найдены: ${absent.join(", ")} — miksy их не ставит; как поставить — docs/install.md, «Установка агентов». Поставите — запустите setup снова`);
   if (newAgents.length) log(`  найдены ещё: ${newAgents.join(", ")} — не добавлены; нужны — допишите в agents в local/machine.yaml`);
   if (kept && workspace !== kept) log(`  workspace меняется: было ${kept}`);
-  if (mainTree && workspace && !inFile.length) log(`  ветка основного корня в дереве слоёв: layers/tree/${mainTree}`);
+  if (mainTree && workspace && !inFile.length) log(`  раздел основного корня в дереве слоёв: layers/tree/${mainTree}`);
   for (const k of Object.keys(vars)) log(`${k}: задано`);
   const layout = workspace && layoutWarning(workspace, canonical(engine), config);
   if (layout) log(`\n• ${layout}`);
@@ -740,7 +740,7 @@ export function setup(o: SetupOptions): number {
   const yaml = [
     "# Настройки этой машины. Создано miksy setup — можно править вручную.",
     ...(extra.length || mainTree || listForm ? [
-      "# Корни workspace: первый — основной; tree — ветка корня в дереве слоёв layers/tree (у основного можно не указывать — корень дерева)",
+      "# Корни workspace: первый — основной; tree — раздел корня в дереве слоёв layers/tree (у основного можно не указывать — корень дерева)",
       "workspace:",
       ...[{ path: workspace, tree: mainTree }, ...extra].map((r) => (r.tree ? `  - { path: ${JSON.stringify(r.path)}, tree: ${JSON.stringify(r.tree)} }` : `  - ${JSON.stringify(r.path)}`)),
     ] : [`workspace: ${JSON.stringify(workspace)}`]),
@@ -1144,7 +1144,7 @@ export function setup(o: SetupOptions): number {
     }
   }
 
-  // Ещё один корень: проверки и вопрос ветки; true — добавлен (вопрос «Есть ещё папки…» и «Оставить прежнюю основной»)
+  // Ещё один корень: проверки и вопрос раздела; true — добавлен (вопрос «Есть ещё папки…» и «Оставить прежнюю основной»)
   function addRoot(a: Ask, main: string, path: string, checked = false): boolean {
     if ([main, ...extra.map((r) => r.path)].some((p) => rootKey(p) === rootKey(path))) { log(`  ${path} — уже указан (тот же каталог) — не добавляю`); return false; }
     const why = checked ? null : unsafeWorkspace(path, home);
@@ -1166,14 +1166,14 @@ export function setup(o: SetupOptions): number {
         if (!a.yes(`Всё равно сделать ${path} корнем workspace?`, false)) return false;
       }
     }
-    // Ветка обязательна и своя у каждого корня: иначе правила одной ветки молча доставались бы папкам с
+    // Раздел обязателен и свой у каждого корня: иначе правила одного раздела молча доставались бы папкам с
     // тем же именем в другом корне
     const taken = [mainTree, ...extra.map((r) => r.tree)].filter(Boolean);
     const suggestion = suggestTree(path, taken);
-    const answer = a.line(`Ветка этой папки в дереве слоёв — её слои будут в layers/tree/<ветка>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
+    const answer = a.line(`Раздел этой папки в дереве слоёв — её слои будут в layers/tree/<раздел>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
     const tree = checkTree(answer);
-    if (!tree) { log(`  «${answer}» — не ветка дерева (имена каталогов через «/», без «..» и имён ${[...LAYER_PARTS].join(", ")}) — папка не добавлена`); return false; }
-    if (taken.some((t) => t.toLowerCase() === tree.toLowerCase())) { log(`  ветка ${tree} уже у другой папки — выберите другое имя; папка не добавлена`); return false; }
+    if (!tree) { log(`  «${answer}» — не раздел дерева (имена каталогов через «/», без «..» и имён ${[...LAYER_PARTS].join(", ")}) — папка не добавлена`); return false; }
+    if (taken.some((t) => t.toLowerCase() === tree.toLowerCase())) { log(`  раздел ${tree} уже у другой папки — выберите другое имя; папка не добавлена`); return false; }
     extra.push({ path, tree });
     log(`  ✓ ещё корень: ${path}${tree ? ` → layers/tree/${tree}` : ""}${existsSync(path) ? "" : " (каталога сейчас нет — miksy пропускает его, пока он не появится)"}`);
     return true;

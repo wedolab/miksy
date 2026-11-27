@@ -27,9 +27,9 @@ describe("корни: путь → корень и место в дереве, �
     expect(parseRoots([f.ws, { path: f.drive, tree: "/Clients/A/" }], "m.yaml")[1].tree).toBe("Clients/A");
     // Основной — можно со своей веткой; дополнительный — только с веткой, и ветки разные (без учёта регистра)
     expect(parseRoots([{ path: f.ws, tree: "Main" }, { path: f.drive, tree: "Clients" }], "m.yaml").map((r) => r.tree)).toEqual(["Main", "Clients"]);
-    expect(() => parseRoots([f.ws, f.drive], "m.yaml")).toThrow(`у корня ${f.drive} не указана ветка дерева слоёв — укажите: { path: "${f.drive}", tree: <ветка, например Clients> }`);
-    expect(() => parseRoots([f.ws, { path: f.drive, tree: "" }], "m.yaml")).toThrow(/не указана ветка дерева слоёв/);
-    expect(() => parseRoots([f.ws, { path: f.drive, tree: "Clients" }, { path: f.archive, tree: "clients" }], "m.yaml")).toThrow(`tree: clients уже у корня ${f.drive} — выберите корню ${f.archive} другое имя ветки`);
+    expect(() => parseRoots([f.ws, f.drive], "m.yaml")).toThrow(`у корня ${f.drive} не указан раздел дерева слоёв — укажите: { path: "${f.drive}", tree: <раздел, например Clients> }`);
+    expect(() => parseRoots([f.ws, { path: f.drive, tree: "" }], "m.yaml")).toThrow(/не указан раздел дерева слоёв/);
+    expect(() => parseRoots([f.ws, { path: f.drive, tree: "Clients" }, { path: f.archive, tree: "clients" }], "m.yaml")).toThrow(`tree: clients уже у корня ${f.drive} — выберите корню ${f.archive} другое имя раздела`);
     expect(() => parseRoots([{ path: f.ws, tree: "Main" }, { path: f.drive, tree: "Main" }], "m.yaml")).toThrow(/tree: Main уже у корня/);
     expect(() => parseRoots([f.ws, { path: f.drive, tree: "../x" }], "m.yaml")).toThrow(/tree «\.\.\/x»/);
     expect(() => parseRoots([f.ws, { path: f.drive, tree: "Org/mcp" }], "m.yaml")).toThrow(/имён instructions, mcp/);
@@ -42,7 +42,7 @@ describe("корни: путь → корень и место в дереве, �
     expectCode(r, 1);
     expect(r.err).toContain(`корень ${f.ws} указан дважды (${f.ws} и ${f.dir}/wslink — один и тот же каталог: повтор, junction или симлинк)`);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, f.drive])}agents: [claude]\n`);
-    expect(f.run(["projects"]).err).toContain("не указана ветка дерева слоёв");
+    expect(f.run(["projects"]).err).toContain("не указан раздел дерева слоёв");
   }, 30000);
 });
 

@@ -62,7 +62,7 @@ for (const agents of [["claude"], ["claude", "codex"]])
     const line = s.out.split("\n").find((l) => l.includes("нет на месте"))!;
     // Текст: корень назван, его новое место, что сделать; не «делать ничего не нужно»
     expect(line).not.toContain("делать ничего не нужно");
-    const m = line.match(/был ещё корень — (\S+) \(ветка Code; если папку перенесли сюда — теперь (\S+)\): .*Если папку перенесли в новую — на вопрос «Записать настройки агентам сейчас\?» в конце мастера ответьте «нет», после мастера поправьте path: этого корня в local\/machine\.yaml \(workspace\) на новое место, затем miksy sync --global и miksy sync --all/)!;
+    const m = line.match(/был ещё корень — (\S+) \(раздел Code; если папку перенесли сюда — теперь (\S+)\): .*Если папку перенесли в новую — на вопрос «Записать настройки агентам сейчас\?» в конце мастера ответьте «нет», после мастера поправьте path: этого корня в local\/machine\.yaml \(workspace\) на новое место, затем miksy sync --global и miksy sync --all/)!;
     expect(m).toBeTruthy();
     expect([m[1], m[2]]).toEqual([`${ws}/Inner`, `${ws2}/Inner`]);
     expect(line).toContain("--force из строки конфликта о его проектах не выполняйте");

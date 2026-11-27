@@ -311,7 +311,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const roots = machineRoots(machine);
   const treeUnused = orphanTreeDirs(roots);
   const typos = treeUnused.filter((d) => d.suggestion && !d.other).map((d) => ({ agent: "—", target: `layers/tree/${d.path}`, detail: `↔ в workspace есть ${d.suggestion}` }));
-  // Ветка верхнего уровня, похожая на папку основного корня: опечатка или ветка корня другой машины — справочно
+  // Раздел верхнего уровня, похожий на папку основного корня: опечатка или раздел корня другой машины — справочно
   const maybeOther = treeUnused.filter((d) => d.suggestion && d.other);
   const unused = treeUnused.filter((d) => !d.suggestion && !d.unmounted).map((d) => d.path);
   const unmounted = treeUnused.filter((d) => d.unmounted).map((d) => d.path);
@@ -364,9 +364,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   );
   section("Каталоги слоёв отличаются только регистром", "на этой машине (ФС с учётом регистра) применяется один из них; перенесите файлы в один каталог и удалите остальные (на Windows и macOS git сложил бы их в один)", twins);
   section("Похоже на опечатку или переименование", "слой дерева не совпадает с каталогом workspace, но есть похожий — переименуйте слой", typos);
-  // Ветка корня совпала с папкой другого корня: правила ветки молча достаются обеим папкам
+  // Раздел корня совпал с папкой другого корня: правила раздела молча достаются обеим папкам
   const clashes = clashNotes(machine).map((detail) => ({ agent: "—", target: "", detail }));
-  section("Ветка корня совпадает с папкой другого корня", "слои у них общие", clashes);
+  section("Раздел дерева слоёв корня совпадает с папкой другого корня", "слои у них общие", clashes);
   section("Пометка target: true не действует", "target: true в layer.yaml; слой остаётся обычным промежуточным", badGroups.map((detail) => ({ agent: "—", target: "", detail })));
   section("Секреты открытым текстом в слоях", "уйдут в git конфигурации; вынесите значения в local/secrets.env, в слое — ${ИМЯ}", naked);
   section("Секреты в skills слоёв", SKILL_SECRETS_ADVICE, nakedSkills);
@@ -441,7 +441,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const nested = nestedNotes(machine);
   if (nested.length) info.push(`Вложенные корни (${nested.length}):`, ...nested.map((n) => "  " + n));
   const branches = branchNotes(machine);
-  if (branches.length) info.push(`Ветки корней внутри чужих мест (${branches.length}) — не ошибка, но проекты этих корней получают слои этих мест:`, ...branches.map((n) => "  " + n));
+  if (branches.length) info.push(`Разделы дерева слоёв корней внутри чужих мест (${branches.length}) — не ошибка, но проекты этих корней получают слои этих мест:`, ...branches.map((n) => "  " + n));
   if (outside.length) info.push(`Цели учёта вне workspace (${outside.length}) — их корень убран или workspace сменился: miksy их больше не обновляет; убрать записанное туда — miksy clean <путь>${othersNote(new Set(outside)) ? ` (агентам, которых нет в agents, — с --agent: команды в строке «Учёт агентов, которых нет в agents»)` : ""}${trustNote(new Set(outside)) ? `. ${trustNote(new Set(outside))}` : ""}:`, ...outside.map((d) => "  " + d));
   if (awayTargets.size) info.push(`Учёт целей недоступного корня (${awayTargets.size}) не проверяется — подключите диск: ${[...awayTargets].join(", ")}. Убрать записанное туда (${ownFiles(awayTargets)}): ${bothWays}${othersNote(awayTargets)}${trustNote(awayTargets) ? `. ${trustNote(awayTargets)}` : ""}`);
   // Учёт агентов, которых убрали из agents без clean: записанное им действует у агента, sync его не обновляет
@@ -471,7 +471,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const unread = ignoredLayerParts();
   if (unread.length) info.push(`Не читается: ${ignoredText(unread)}`);
   if (unused.length) info.push(`Слои, которые на этой машине ни к чему не применяются (проектов нет): ${unused.join(", ")}`);
-  if (maybeOther.length) info.push(`Ветки дерева слоёв без папки на этой машине, но с похожей папкой (${maybeOther.length}) — если это ветка корня другой машины (там в machine.yaml { path: …, tree: <ветка> }), всё в порядке, ничего не делайте; если опечатка — переименуйте слой:`,
+  if (maybeOther.length) info.push(`Разделы дерева слоёв без папки на этой машине, но с похожей папкой (${maybeOther.length}) — если это раздел корня другой машины (там в machine.yaml { path: …, tree: <раздел> }), всё в порядке, ничего не делайте; если опечатка — переименуйте слой:`,
     ...maybeOther.map((d) => `  layers/tree/${d.path} ↔ в workspace есть ${d.suggestion}`));
   if (unmounted.length) info.push(`Части дерева слоёв, которых нет на этой машине (над ними нет корня workspace — для других машин): ${unmounted.join(", ")}`);
   const env = environment({ env: process.env, home: machine.home, os: machine.os, bun: stableBun(process.execPath), agents: adapters.map((a) => a.id), engine: ENGINE, config: configRoot() });
@@ -486,7 +486,7 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   const plain = plainDirs(roots, groups, targets);
   if (plain.length) info.push(`Каталоги без git на уровне проектов (${plain.length}) — настроек не получат: git init в каталоге или miksy target <путь>:`,
     ...(verbose ? plain : plain.slice(0, 15)).map((d) => "  " + d), ...(!verbose && plain.length > 15 ? [`  … ещё ${plain.length - 15} (--verbose)`] : []));
-  if (rootGroups.length) info.push(`Цели target: true, чей каталог стал корнем workspace (пометка в этом месте дерева не действует; слои его проектов — в ветке корня): ${rootGroups.join(", ")}`);
+  if (rootGroups.length) info.push(`Цели target: true, чей каталог стал корнем workspace (пометка в этом месте дерева не действует; слои его проектов — в разделе корня): ${rootGroups.join(", ")}`);
   if (absentGroups.length) info.push(`Цели target: true, каталогов которых на этой машине нет (пометка здесь не действует): ${absentGroups.join(", ")}`);
   if (moves.length) info.push(`Каталоги переехали (${moves.length}) — учёт следует за ними, sync сохранит перенос:`, ...movesText(moves));
   if (foreign.length) info.push(`Глобальные skills не от miksy (${foreign.length}): ${foreign.join(", ")}`);

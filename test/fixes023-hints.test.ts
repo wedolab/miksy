@@ -26,7 +26,7 @@ test("A10: папка прежнего основного = ветка ново�
   f.run(["sync", "--all"]);
   expect({
     recipe: line.includes("Вернуть его: 1)") || line.includes("Вернуть его: miksy root add"),
-    why: line.includes("его папка Clients совпадает с веткой нового основного (layers/tree/Clients): layers/tree/Clients — слои и той ветки, и если их переложить, проекты нового основного потеряют правила, MCP и skills из них"),
+    why: line.includes("его папка Clients совпадает с разделом нового основного (layers/tree/Clients): layers/tree/Clients — слои и того раздела, и если их переложить, проекты нового основного потеряют правила, MCP и skills из них"),
     x: layers(f, `${drive}/Org/x`),
   }).toEqual({ recipe: false, why: true, x: before });
 }, 300000);

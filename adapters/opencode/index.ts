@@ -179,7 +179,7 @@ export const opencode: Adapter = {
     const managed = existsSync(rootJson) && (isOwned(rootJson, ctx) || forgotten());
     const rootFree = !existsSync(rootJson) && !existsSync(rootJsonc);
     const ours = managed || rootFree;
-    // Конфиги-соседи, которые тоже загрузятся (в ours-ветке rootJson — наш, в чужой — оба корневых учтены)
+    // Конфиги-соседи, которые тоже загрузятся (в случае ours rootJson — наш, в чужом — оба корневых учтены)
     const side = (skipRoot: boolean) => [
       ...(!skipRoot && existsSync(rootJsonc) ? ["opencode.jsonc"] : []),
       ...[".opencode/opencode.json", ".opencode/opencode.jsonc"].filter((p) => existsSync(join(anchor, p))),

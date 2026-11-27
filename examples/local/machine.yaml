@@ -1,7 +1,7 @@
 # Настройки этой машины. Обычно их создаёт miksy setup.
 workspace: ~/Projects      # корень workspace (на Windows, например, D:/work)
-# Несколько не связанных корней — списком (или miksy root add <путь> --tree <ветка>); первый — основной,
-# у остальных tree — своя ветка дерева слоёв layers/tree (обязательна):
+# Несколько не связанных корней — списком (или miksy root add <путь> --tree <раздел>); первый — основной,
+# у остальных tree — свой раздел дерева слоёв layers/tree (обязателен):
 # workspace:
 #   - ~/Projects
 #   - { path: "/Volumes/Data/Clients", tree: Clients }

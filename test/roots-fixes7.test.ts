@@ -141,7 +141,7 @@ describe("B.5 — документация по правде", () => {
 
   test("справочник команд README: root add … [--yes] — каталог, который сам проект, объясняет и спрашивает, без терминала — только с --yes", () => {
     const r = readme();
-    const line = r.split("\n").find((l) => l.startsWith("| `root [add [<путь>] [--tree <ветка>] [--yes]"));
+    const line = r.split("\n").find((l) => l.startsWith("| `root [add [<путь>] [--tree <раздел>] [--yes]"));
     expect(line).toMatch(/сама? проект[^|]*спрашивает, без терминала добавляет только с `--yes`/);
   });
 });

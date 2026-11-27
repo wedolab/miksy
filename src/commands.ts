@@ -96,10 +96,10 @@ export const USAGE = `miksy — раскладывает ваши правила
   miksy target [<путь>]        папка без git (без пути — текущая) получает настройки, как
                                проект: пометка target: true в её слое. --remove — снять пометку
   miksy root add [<путь>]      ещё одна папка с проектами — корень workspace (без пути —
-                               текущая); --tree <ветка> — её место в layers/tree. Папку,
+                               текущая); --tree <раздел> — её место в layers/tree. Папку,
                                которая сама проект (git-репо или папка внутри него), miksy
                                объяснит и спросит. --yes — «да» на все вопросы, sync --all
-                               сразу (ветку тогда — через --tree).
+                               сразу (раздел тогда — через --tree).
                                miksy root remove <путь> — убрать (--forget — как у clean);
                                miksy root — список
   miksy skills <путь> | --all  skills из репо проекта (от команды) и кто из агентов их видит
@@ -556,7 +556,7 @@ function forgottenHint(dirs: string[], manifest: Manifest, machine: Machine, age
     const out = outsideRoots(d, machine) || (removingRoot !== null && !!locate(d, [removingRoot]));
     outside ||= out;
     const into = onlyOthers.has(d) ? others : main;
-    if (out) into.push(`  miksy root add "<корень workspace, в котором лежала папка>" --tree <его ветка>`);
+    if (out) into.push(`  miksy root add "<корень workspace, в котором лежала папка>" --tree <его раздел>`);
     const pair = (a?: string) => `  miksy sync ${quoteArg(d)}${a ? ` --agent ${a}` : ""}; miksy clean ${quoteArg(d)}${a ? ` --agent ${a}` : ""}`;
     if (!onlyOthers.has(d)) into.push(pair(agent));
     if (!agent) for (const id of Object.keys(manifest.forgotten ?? {})) {
@@ -569,12 +569,12 @@ function forgottenHint(dirs: string[], manifest: Manifest, machine: Machine, age
   const parts: string[] = [];
   if (main.length) parts.push(`${dryRun ? "План: проект забыт" : "Проект был забыт"} (miksy clean --forget или root remove --forget): учёта записанного туда нет, и clean убирает только файлы miksy, которые узнаёт сам. ${left} ${how(main)}`);
   if (others.length) parts.push(`${main.length ? "В этих папках " : ""}${dryRun ? `${main.length ? "о" : "План: о"}станутся` : `${main.length ? "о" : "О"}стались`} файлы агентов, которых нет в agents: проект был забыт (miksy clean --forget или root remove --forget), учёта их файлов нет, а clean без --agent их не трогает.${main.length ? "" : ` ${left}`} ${how(others)}`);
-  // Как вернуть корень: его убрал root remove (путь и ветку он печатал, они же — в копии machine.yaml до него) или
-  // основной корень сменил setup --force — выпуск 0.2.2, A3 а, б; слои — копией под новую ветку, с веткой и без (круг 8e, F2)
+  // Как вернуть корень: его убрал root remove (путь и раздел он печатал, они же — в копии machine.yaml до него) или
+  // основной корень сменил setup --force — выпуск 0.2.2, A3 а, б; слои — копией под новый раздел, с разделом и без (круг 8e, F2)
   const copy = `${slash(configRoot())}/local/backups/<запуск>/${backupRel(slash(join(configRoot(), "local", "machine.yaml")))}`;
-  const back = `\nПапка вне workspace: sync работает только в нём — сначала верните корень, в котором она лежала (строка miksy root add выше); после clean его можно снова убрать (root remove). Путь и ветка корня:
-  - корень убрали командой root remove — их печатала она («Убрать корень <путь> → layers/tree/<ветка>»); они же — в копии local/machine.yaml до неё, если копия ещё хранится (miksy хранит копии ${KEEP_RUNS} последних запусков): ${copy}; <запуск> — дата и время запуска miksy, все копии этого файла покажет ${process.platform === "win32" ? `(PowerShell) Get-ChildItem -LiteralPath '${slash(configRoot()).replace(/['‘’‚‛]/g, "$&$&")}/local/backups' -Recurse -Filter machine.yaml` : `find '${slash(configRoot()).replaceAll("'", "'\\''")}/local/backups/' -name machine.yaml`}, нужна последняя, где этот корень ещё записан (значения секретов в копии заменены на <secret:ИМЯ>);
-  - корень был основным, а основной сменил miksy setup --force: путь — прежний основной (его называл тот setup: «прежний основной …» или «прежнего основного …»), ветка — любая новая, которой нет в layers/tree. Слои его проектов под неё скопируйте, а не переносите: ветки у него не было — layers/tree/<папка> → layers/tree/<ветка>/<папка>; была (её забрал новый основной, «ветка layers/tree/<прежняя> перешла к новому основному») — всё содержимое layers/tree/<прежняя> → layers/tree/<ветка>. К привязкам map.yaml (match:) его папок допишите такие же с новой веткой в начале (<папка>/** или <прежняя>/<папка>/** → ещё и <ветка>/<папка>/**), прежние не трогайте — тогда sync узнает всё записанное туда (и skills), clean уберёт всё, а слои одноимённых папок нового основного не изменятся (перенос снял бы их). На вопрос root add «Записать настройки проектам workspace сейчас?» ответьте «нет» — иначе sync --all перепишет остальные его проекты по новой ветке, без слоёв, которых вы не скопировали; на вопрос root remove «Убрать записанное miksy в эти проекты сейчас?» — тоже «нет», если остальные его проекты трогать не нужно. После root remove копию слоёв (layers/tree/<ветка>) и дописанные привязки удалите. Вернуть его насовсем, со слоями, — docs/roots.md, «Сменить основной корень».`;
+  const back = `\nПапка вне workspace: sync работает только в нём — сначала верните корень, в котором она лежала (строка miksy root add выше); после clean его можно снова убрать (root remove). Путь и раздел дерева слоёв корня:
+  - корень убрали командой root remove — их печатала она («Убрать корень <путь> → layers/tree/<раздел>»); они же — в копии local/machine.yaml до неё, если копия ещё хранится (miksy хранит копии ${KEEP_RUNS} последних запусков): ${copy}; <запуск> — дата и время запуска miksy, все копии этого файла покажет ${process.platform === "win32" ? `(PowerShell) Get-ChildItem -LiteralPath '${slash(configRoot()).replace(/['‘’‚‛]/g, "$&$&")}/local/backups' -Recurse -Filter machine.yaml` : `find '${slash(configRoot()).replaceAll("'", "'\\''")}/local/backups/' -name machine.yaml`}, нужна последняя, где этот корень ещё записан (значения секретов в копии заменены на <secret:ИМЯ>);
+  - корень был основным, а основной сменил miksy setup --force: путь — прежний основной (его называл тот setup: «прежний основной …» или «прежнего основного …»), раздел — любой новый, которого нет в layers/tree. Слои его проектов под него скопируйте, а не переносите: раздела у него не было — layers/tree/<папка> → layers/tree/<раздел>/<папка>; был (его забрал новый основной, «раздел layers/tree/<прежний> перешёл к новому основному») — всё содержимое layers/tree/<прежний> → layers/tree/<раздел>. К привязкам map.yaml (match:) его папок допишите такие же с новым разделом в начале (<папка>/** или <прежний>/<папка>/** → ещё и <раздел>/<папка>/**), прежние не трогайте — тогда sync узнает всё записанное туда (и skills), clean уберёт всё, а слои одноимённых папок нового основного не изменятся (перенос снял бы их). На вопрос root add «Записать настройки проектам workspace сейчас?» ответьте «нет» — иначе sync --all перепишет остальные его проекты по новому разделу, без слоёв, которых вы не скопировали; на вопрос root remove «Убрать записанное miksy в эти проекты сейчас?» — тоже «нет», если остальные его проекты трогать не нужно. После root remove копию слоёв (layers/tree/<раздел>) и дописанные привязки удалите. Вернуть его насовсем, со слоями, — docs/roots.md, «Сменить основной корень».`;
   return `\n${parts.join("\n")}${outside ? back : ""}`;
 }
 
@@ -640,7 +640,7 @@ function strandedTargets(targets: TargetSpec[], manifest: Manifest, adapters: Ad
 // После «забыть» — как вернуть файлы под учёт, если диск найдётся: sync проекта (совпадающие с нынешним
 // выводом miksy узнает и возьмёт сам, изменённые — --force), не нужны — затем clean. sync работает только
 // в workspace: проект вне всех корней — сначала вернуть его папку корнем (root add). root remove --forget
-// печатает подсказку один раз на корень (regainRoot) — с путём и веткой корня
+// печатает подсказку один раз на корень (regainRoot) — с путём и разделом корня
 let regainRoot: Root | null = null;
 // Корень, который root remove убирает этим запуском (clean его проектов — до правки machine.yaml): подсказки о его папках
 // — как о папках вне workspace (выпуск 0.2.3, A3)
@@ -667,7 +667,7 @@ export const strandedText = (s: Stranded, forgot: boolean, dryRun: boolean, mach
   const done = `${dryRun ? "План: записанное" : "Записанное"} в ${s.dir} (${files(s.count)} на недоступном диске) ${dryRun ? "будет забыто" : "забыто"}.${copies}${others}`;
   if (regainRoot && locate(s.dir, [regainRoot])) return done;
   if (machine && outsideRoots(s.dir, machine))
-    return `${done} Если диск найдётся: сначала верните прежний корень workspace, в котором лежал проект, с его прежней веткой (miksy root add "<прежний корень>" --tree <прежняя ветка>), затем ${syncBack(s.dir, agent)}.`;
+    return `${done} Если диск найдётся: сначала верните прежний корень workspace, в котором лежал проект, с его прежним разделом дерева слоёв (miksy root add "<прежний корень>" --tree <прежний раздел>), затем ${syncBack(s.dir, agent)}.`;
   return `${done} Если диск найдётся: ${syncBack(s.dir, agent)}.`;
 };
 
@@ -965,9 +965,9 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const t = projectTarget(p.abs, p.rel, machine, p.nested);
         cfg = t.cfg;
         title = [[t.target.scope === "project" && t.target.group ? (t.target.nested ? "Цель-группа" : "Цель без git") : plain ? "Каталог без git" : "Проект", t.title], ["Каталог", p.abs], ...rootRows(p.root, p.rel), ["ОС", machine.os]];
-        // Ветка корня внутри чужого места — справка с рекомендацией
+        // Раздел корня внутри чужого места — справка с рекомендацией
         const note = branchNote(p.root, roots);
-        if (note) title.push(["Ветка корня", note]);
+        if (note) title.push(["Раздел дерева слоёв", note]);
         if (plain)
           title.push(["Цель", `не проект и не цель — sync --all его не обновит (sync <путь> запишет разово); сделать целью — miksy target, проектом — git init`]);
         // Ниже группы: агенты, читающие правила родительских каталогов (Claude), получают здесь только отрезок
@@ -1061,7 +1061,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         throw new UsageError("clean убирает записанное — только явно: укажите путь проекта, --global или --all");
       if (single?.plain && !("out" in flags))
         console.log(`предупреждение: ${one!.rel} — каталог без git и не цель: sync --all его не обновит (и doctor не проверит). Сделать целью — miksy target ${quoteArg(one!.abs)}\n`);
-      // Ветка этой цели совпала с веткой другого корня: её слои получат обе папки
+      // Раздел этой цели совпал с разделом другого корня: его слои получат обе папки
       if (one) for (const c of treeClashes(machineRoots(machine)).filter((c) => inside(one.abs, c.dir) || inside(one.abs, c.root.path)))
         console.log(`предупреждение: ${clashText(c)}\n`);
 
@@ -1590,7 +1590,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           const o = outerRoot(r, roots);
           console.log(`  ${rootText(r)}${i === 0 ? "  (основной)" : ""}${o ? `  (внутри корня ${o.path})` : ""}${rootExists(r) ? "" : `  — недоступен (${r.away ?? "каталога нет"})`}`);
         }
-        console.log("\nДобавить — miksy root add <путь> --tree <ветка>, убрать — miksy root remove <путь>");
+        console.log("\nДобавить — miksy root add <путь> --tree <раздел>, убрать — miksy root remove <путь>");
         break;
       }
       const given = trimSlash(slash(resolve(process.cwd(), driveRoot(positional[1] ?? "."))));
@@ -1604,12 +1604,12 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const project = projectRoot(real, machine, roots);
         const taken = roots.map((r) => r.tree).filter(Boolean);
         const suggestion = suggestTree(given, taken);
-        // Совет с --yes — команда, которая дословно проходит: ветка — указанная или предложенная (круг 11x)
+        // Совет с --yes — команда, которая дословно проходит: раздел — указанный или предложенный (круг 11x)
         const withYes = `miksy root add ${quoteArg(given)} --tree ${shellArg(flags.tree ?? suggestion)} --yes`;
-        // --yes — «да» на все вопросы, но ветку дерева за пользователя не выбрать: без --tree — точная команда
+        // --yes — «да» на все вопросы, но раздел дерева за пользователя не выбрать: без --tree — точная команда
         // с остальными флагами исходной (круг 11x)
         if ("yes" in flags && flags.tree === undefined)
-          throw new UsageError(`--yes не выбирает ветку дерева слоёв — укажите её: ${withYes}${"dry-run" in flags ? " --dry-run" : ""} (слои корня будут в layers/tree/${suggestion}/; можно другое имя)`);
+          throw new UsageError(`--yes не выбирает раздел дерева слоёв — укажите его: ${withYes}${"dry-run" in flags ? " --dry-run" : ""} (слои корня будут в layers/tree/${suggestion}/; можно другое имя)`);
         if (project) {
           if ("yes" in flags) warn(project);
           // План — как настоящий запуск в этом же режиме (выпуск 0.2.1, A8): без терминала — отказ без --yes, в
@@ -1630,21 +1630,21 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         }
         let answer = flags.tree;
         if (answer === undefined) {
-          if (!ask) throw new UsageError(`укажите ветку дерева слоёв для нового корня: miksy root add ${quoteArg(given)} --tree <ветка> (например, --tree ${shellArg(suggestion)}) — его слои будут в layers/tree/<ветка>/`);
-          answer = ask.line(`Ветка дерева слоёв для ${given} — его слои будут в layers/tree/<ветка>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
+          if (!ask) throw new UsageError(`укажите раздел дерева слоёв для нового корня: miksy root add ${quoteArg(given)} --tree <раздел> (например, --tree ${shellArg(suggestion)}) — его слои будут в layers/tree/<раздел>/`);
+          answer = ask.line(`Раздел дерева слоёв для ${given} — его слои будут в layers/tree/<раздел>/ (Enter — ${suggestion}):`)?.trim() || suggestion;
         }
         const tree = checkTree(answer);
-        if (!tree) throw new UsageError(`«${answer}» — не ветка дерева слоёв: имена каталогов через «/» (например, Clients), без «..», дисков и имён ${[...LAYER_PARTS].join(", ")}`);
+        if (!tree) throw new UsageError(`«${answer}» — не раздел дерева слоёв: имена каталогов через «/» (например, Clients), без «..», дисков и имён ${[...LAYER_PARTS].join(", ")}`);
         const busy = roots.find((r) => r.tree.toLowerCase() === tree.toLowerCase());
-        if (busy) throw new UsageError(`tree: ${tree} уже у корня ${busy.given ?? busy.path} — выберите другое имя ветки (например, ${suggestion})`);
+        if (busy) throw new UsageError(`tree: ${tree} уже у корня ${busy.given ?? busy.path} — выберите другое имя раздела (например, ${suggestion})`);
         const next: RootItem[] = [...items, { path: given, tree }];
-        // Проверки — как при загрузке (дубль, ветка), затем текст файла
+        // Проверки — как при загрузке (дубль, раздел), затем текст файла
         const newRoots = parseRoots(next, slash(file), ledgerRoots());
         const after = rewriteRoots(text, next, [...items.keys(), -1]);
         const added = newRoots[newRoots.length - 1];
         const grown = { ...machine, roots: newRoots };
         console.log(`Новый корень: ${rootText(added)} — local/machine.yaml: workspace ${typeof (parseYaml(text) as { workspace?: unknown }).workspace === "string" ? "станет списком корней" : "— ещё один элемент списка"}`);
-        // Предупреждения и справка: домашний каталог, корень в чужом проекте или группе, совпадение веток
+        // Предупреждения и справка: домашний каталог, корень в чужом проекте или группе, совпадение разделов
         const why = unsafeWorkspace(given, machine.home);
         if (why) warn(`${given} — ${why}: sync --all обойдёт все каталоги внутри (и спросит подтверждение)`);
         const before = new Set([...rootNotes(machine, listGroups(machine)), ...clashNotes(machine)]);
@@ -1696,7 +1696,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // вопрос, без него — подсказка команд); учёт и файлы без согласия не трогаются
       const idx = roots.findIndex((r) => rootKey(r.path) === rootKey(given) || (r.given !== undefined && rootMemoryKey(r.given) === rootMemoryKey(given)));
       if (idx < 0) throw new UsageError(`${given} — не корень workspace. Корни: ${roots.map((r) => r.path).join(", ")} (список — miksy root)`);
-      if (idx === 0) throw new UsageError(`${roots[0].path} — основной корень, его нельзя убрать: на нём \${WORKSPACE} и ветка дерева без префикса. Сменить основной — miksy setup --force`);
+      if (idx === 0) throw new UsageError(`${roots[0].path} — основной корень, его нельзя убрать: на нём \${WORKSPACE} и раздел дерева без префикса. Сменить основной — miksy setup --force`);
       const gone = roots[idx];
       const outer = outerRoot(gone, roots);
       let cleaned = false;

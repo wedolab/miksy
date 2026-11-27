@@ -37,7 +37,7 @@ for (const o of [{ name: "без ветки" }, { name: "с веткой W", mai
     expectCode(f.run(["clean", `${ws}/Org/p1`, "--forget"]), 0);
     renameSync(`${ws}.off`, ws);
     const c = f.run(["clean", `${ws}/Org/p1`]);
-    expect(c.out).toContain("Слои его проектов под неё скопируйте, а не переносите: ветки у него не было — layers/tree/<папка> → layers/tree/<ветка>/<папка>; была");
+    expect(c.out).toContain("Слои его проектов под него скопируйте, а не переносите: раздела у него не было — layers/tree/<папка> → layers/tree/<раздел>/<папка>; был");
     // Дословно: копия слоёв под новую ветку Old, привязки — дописать; root add («нет»), строки sync; root remove («нет»)
     const B = "Old";
     if (o.mainTree) cpSync(`${f.config}/layers/tree/${o.mainTree}`, `${f.config}/layers/tree/${B}`, { recursive: true });

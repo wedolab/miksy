@@ -56,7 +56,7 @@ test("E3: основной с веткой и два вложенных корн
   // Дословно: «поправьте path: этих корней в local/machine.yaml (workspace) на новое место» — новое место из строки
   const file = `${f.config}/local/machine.yaml`;
   let text = readFileSync(file, "utf8");
-  for (const m of line.matchAll(/(\S+) \(ветка \w+; если папку перенесли сюда — теперь ([^)]+)\)/g)) text = text.replace(m[1], () => m[2]);
+  for (const m of line.matchAll(/(\S+) \(раздел \w+; если папку перенесли сюда — теперь ([^)]+)\)/g)) text = text.replace(m[1], () => m[2]);
   writeFileSync(file, text);
   const a = f.run(["sync", "--all"]);
   const after = { p1: layers(f, `${ws2}/Org/p1`), site: layers(f, `${ws2}/Inner/Acme/site`), d1: layers(f, `${ws2}/Grp/Deep/d1`) };
@@ -99,7 +99,7 @@ test("B №3: подсказка clean забытого проекта вне wo
   const hint = c.out + c.err;
   // Дословно (рецензия A круга 8d, №4): root add прежнего основного с любой новой веткой, layers/tree не переносить; затем
   // строки sync; clean из подсказки
-  expect(hint).toContain("ветка — любая новая, которой нет в layers/tree. Слои его проектов под неё скопируйте, а не переносите");
+  expect(hint).toContain("раздел — любой новый, которого нет в layers/tree. Слои его проектов под него скопируйте, а не переносите");
   const add = f.run(["root", "add", ws, "--tree", "Old", "--yes"]);
   for (const l of hint.split("\n").filter((x) => /^\s+miksy sync /.test(x))) for (const part of l.trim().split("; ")) {
     const args = [...part.matchAll(/"([^"]+)"|(\S+)/g)].map((m) => m[1] ?? m[2]).slice(1);

@@ -51,11 +51,11 @@ export const COMMANDS: Record<string, Spec> = {
   // secret <ИМЯ> — значение в трубу; --show — человеку в терминал
   secret: { valued: ["line", "env"], bool: ["show"], positional: [1, 1], tail: true },
   target: { bool: ["remove", "dry-run"], positional: [0, 1] },
-  // root — список корней; root add [<путь>] [--tree <ветка>]; root remove <путь>
+  // root — список корней; root add [<путь>] [--tree <раздел>]; root remove <путь>
   root: {
     valued: ["tree"], bool: ["dry-run", "forget", "yes"], positional: [0, 2],
     check: (f, p) => {
-      const usage = "использование: miksy root add [<путь>] [--tree <ветка>]  |  miksy root remove <путь>  |  miksy root (список корней)";
+      const usage = "использование: miksy root add [<путь>] [--tree <раздел>]  |  miksy root remove <путь>  |  miksy root (список корней)";
       if (p.length && p[0] !== "add" && p[0] !== "remove") throw new UsageError(usage);
       if (p[0] === "remove" && p.length !== 2) throw new UsageError("miksy root remove <путь> — укажите, какой корень убрать");
       if ("tree" in f && p[0] !== "add") throw new UsageError("--tree — только для miksy root add");

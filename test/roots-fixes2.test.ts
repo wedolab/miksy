@@ -236,19 +236,19 @@ describe("A.1 и R9: ветка корня внутри чужого места 
     put(`${f.config}/layers/tree/Org/instructions/10-org.md`, "# org\n");
     const add = f.run(["root", "add", `${f.dir}/drive`, "--tree", "Org/Sub"]);
     expectCode(add, 0);
-    const note = `корень ${f.dir}/drive: ветка layers/tree/Org/Sub лежит внутри места Org (там же: ${f.ws}/Org — папка корня ${f.ws}) — его проекты получают и слои layers/tree/Org (правила 10-org.md; MCP org). Не нужно — вынесите ветку из Org (например, tree: Org-Sub), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
+    const note = `корень ${f.dir}/drive: раздел дерева слоёв layers/tree/Org/Sub лежит внутри места Org (там же: ${f.ws}/Org — папка корня ${f.ws}) — его проекты получают и слои layers/tree/Org (правила 10-org.md; MCP org). Не нужно — вынесите раздел из Org (например, tree: Org-Sub), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
     expect(add.out).toContain(`справка: ${note}`);
     expectCode(f.run(["sync", "--all", "--yes"]), 0);
     expectCode(f.run(["sync", "--global"]), 0);
     expect(Object.keys(JSON.parse(read(`${f.home}/.claude.json`)).projects[`${f.dir}/drive/site`].mcpServers)).toContain("org");
     const d = f.run(["doctor"]);
-    expect(d.out).toContain(`Ветки корней внутри чужих мест (1) — не ошибка, но проекты этих корней получают слои этих мест:\n  ${note}`);
+    expect(d.out).toContain(`Разделы дерева слоёв корней внутри чужих мест (1) — не ошибка, но проекты этих корней получают слои этих мест:\n  ${note}`);
     expectCode(d, 0);
-    expect(f.run(["explain", `${f.dir}/drive/site`]).out).toContain("Ветка корня");
+    expect(f.run(["explain", `${f.dir}/drive/site`]).out).toContain("Раздел дерева слоёв");
     // Вложенный корень на своём месте (ws/Org/Deep, tree Org/Deep) — не справка
     git(`${f.ws}/Org/Deep/x`);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: `${f.ws}/Org/Deep`, tree: "Org/Deep" }])}agents: [claude]\n`);
-    expect(f.run(["doctor"]).out).not.toContain("Ветки корней внутри чужих мест");
+    expect(f.run(["doctor"]).out).not.toContain("Разделы дерева слоёв корней внутри чужих мест");
   }, 90000);
 });
 

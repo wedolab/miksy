@@ -7,7 +7,7 @@ export function selectGlobal(map: MiksyMap, os: Os): string[] {
 }
 
 // rel — путь проекта относительно workspace через «/»; "" — сам корень workspace. Без учёта регистра, как слои
-// дерева, на всех ОС: ветка корня в machine.yaml другой машины может быть набрана иначе (выпуск 0.2.1, A5)
+// дерева, на всех ОС: раздел корня в machine.yaml другой машины может быть набран иначе (выпуск 0.2.1, A5)
 export function selectProject(map: MiksyMap, rel: string, os: Os): string[] {
   const hit = (e: MapEntry) =>
     e.match !== undefined && (e.match === "**" || (rel !== "" && new Bun.Glob(e.match.toLowerCase()).match(rel.toLowerCase())));

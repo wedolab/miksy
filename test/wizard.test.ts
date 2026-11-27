@@ -407,11 +407,11 @@ describe("мастер setup", () => {
       { q: /Откуда её взять/, a: "2" }, { q: /Где хранить/, a: "" }, { q: /git-репо/, a: "n" },
       { q: /Корень workspace/, a: "" },
       { q: /Есть ещё папки/, a: `${f.ws}/` },
-      { q: /Есть ещё папки/, a: drive }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — drive\)/, a: "../x" },
-      { q: /Есть ещё папки/, a: drive }, { q: /Ветка этой папки в дереве слоёв/, a: "Clients" },
-      { q: /Есть ещё папки/, a: `${f.dir}/other` }, { q: /Ветка этой папки в дереве слоёв/, a: "clients" },
-      { q: /Есть ещё папки/, a: `${f.dir}/later` }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — later\)/, a: "" },
-      { q: /Есть ещё папки/, a: away }, { q: /Ветка этой папки в дереве слоёв.*\(Enter — Projects\)/, a: "" },
+      { q: /Есть ещё папки/, a: drive }, { q: /Раздел этой папки в дереве слоёв.*\(Enter — drive\)/, a: "../x" },
+      { q: /Есть ещё папки/, a: drive }, { q: /Раздел этой папки в дереве слоёв/, a: "Clients" },
+      { q: /Есть ещё папки/, a: `${f.dir}/other` }, { q: /Раздел этой папки в дереве слоёв/, a: "clients" },
+      { q: /Есть ещё папки/, a: `${f.dir}/later` }, { q: /Раздел этой папки в дереве слоёв.*\(Enter — later\)/, a: "" },
+      { q: /Есть ещё папки/, a: away }, { q: /Раздел этой папки в дереве слоёв.*\(Enter — Projects\)/, a: "" },
       { q: /Есть ещё папки/, a: "" },
       { q: /Записать local\/machine\.yaml/, a: "y" },
       ...ifInstaller([{ q: /Выполнить «/, a: "n" }]),
@@ -422,8 +422,8 @@ describe("мастер setup", () => {
     expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toContain(`${f.ws} — уже указан (тот же каталог) — не добавляю`);
-    expect(t).toContain("«../x» — не ветка дерева");
-    expect(t).toContain("ветка clients уже у другой папки — выберите другое имя; папка не добавлена");
+    expect(t).toContain("«../x» — не раздел дерева");
+    expect(t).toContain("раздел clients уже у другой папки — выберите другое имя; папка не добавлена");
     expect(t).toContain(`✓ ещё корень: ${drive} → layers/tree/Clients`);
     expect(t).toContain(`✓ ещё корень: ${f.dir}/later → layers/tree/later (каталога сейчас нет — miksy пропускает его, пока он не появится)`);
     expect(t).toContain(`✓ ещё корень: ${away} → layers/tree/Projects (каталога сейчас нет`);
@@ -457,7 +457,7 @@ describe("мастер setup", () => {
       { q: /Записать настройки агентам сейчас/, a: "n" },
     ], { force: true });
     expectCode({ code, out: f.text() }, 0);
-    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, ветка дерева слоёв та же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его: miksy root add "${f.ws}" --tree Main. Это — если новый основной другая папка, а прежняя нужна; папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет). \${WORKSPACE} в слоях теперь — ${drive}`);
+    expect(f.text()).toContain(`${drive} был дополнительным корнем — теперь основной, раздел дерева слоёв тот же: layers/tree/Clients; прежний основной ${f.ws} из workspace уходит: его проекты miksy больше не обновляет. Вернуть его: miksy root add "${f.ws}" --tree Main. Это — если новый основной другая папка, а прежняя нужна; папку скопировали, и прежняя копия не нужна, — не возвращайте, уберите записанное туда: miksy clean "<путь проекта>" в её проектах; в новой копии файлы miksy с путями (например, .codex/config.toml с \${WORKSPACE}) — конфликт, пока не выполните miksy sync "<путь проекта>" --force в её проектах (бэкап будет). \${WORKSPACE} в слоях теперь — ${drive}`);
     expect(f.text()).not.toContain("указан дважды");
     // Проекты drive получали слои layers/tree/Clients/… — и после смены основного тоже
     const machine = Bun.YAML.parse(readFileSync(`${f.config}/local/machine.yaml`, "utf8")) as { workspace: unknown };

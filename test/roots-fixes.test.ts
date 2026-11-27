@@ -60,9 +60,9 @@ describe("A.1: ветка корня обязательна и своя; сов�
     git(`${drive}/Acme/site`);
     put(`${f.config}/layers/tree/Clients/instructions/10-clients.md`, "# rule clients\n");
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: drive, tree: "Clients" }])}agents: [claude]\n`);
-    const clash = `ветка layers/tree/Clients корня ${drive} совпадает с папкой ${f.ws}/Clients корня ${f.ws}: слои этой ветки получат обе`;
+    const clash = `раздел дерева слоёв layers/tree/Clients корня ${drive} совпадает с папкой ${f.ws}/Clients корня ${f.ws}: слои этого раздела получат обе`;
     const d = f.run(["doctor"]);
-    expect(d.out).toContain(`Ветка корня совпадает с папкой другого корня (1) — слои у них общие\n  —    ${clash}`);
+    expect(d.out).toContain(`Раздел дерева слоёв корня совпадает с папкой другого корня (1) — слои у них общие\n  —    ${clash}`);
     expect(d.out).toMatch(/Проблем: \d+/);
     expect(f.run(["sync", "--all", "--dry-run"]).out).toContain(`предупреждение: ${clash}`);
     // Одно и то же место в двух корнях — заголовок с корнем
@@ -165,7 +165,7 @@ describe("A.6: miksy root add / remove", () => {
     put(file, machineText(f.ws));
     const noTree = f.run(["root", "add", `${f.dir}/drive`]);
     expectCode(noTree, 2);
-    expect(noTree.err).toContain(`укажите ветку дерева слоёв для нового корня: miksy root add "${f.dir}/drive" --tree <ветка> (например, --tree drive)`);
+    expect(noTree.err).toContain(`укажите раздел дерева слоёв для нового корня: miksy root add "${f.dir}/drive" --tree <раздел> (например, --tree drive)`);
     const dry = f.run(["root", "add", `${f.dir}/drive`, "--tree", "Clients", "--dry-run"]);
     expectCode(dry, 0);
     expect(dry.out).toContain("--dry-run: ничего не записано.");
@@ -182,11 +182,11 @@ describe("A.6: miksy root add / remove", () => {
     expect(read(file)).toContain(`  - { path: "${f.dir}/drive", tree: "Clients" }\n  - { path: "${f.dir}/books", tree: "Books" }\nvars:`);
     expect(f.run(["root", "add", `${f.dir}/books`, "--tree", "B2"]).err).toContain(`${f.dir}/books — уже корень workspace`);
     mkdirSync(`${f.dir}/other`);
-    expect(f.run(["root", "add", `${f.dir}/other`, "--tree", "clients"]).err).toContain(`tree: clients уже у корня ${f.dir}/drive — выберите другое имя ветки`);
+    expect(f.run(["root", "add", `${f.dir}/other`, "--tree", "clients"]).err).toContain(`tree: clients уже у корня ${f.dir}/drive — выберите другое имя раздела`);
     expect(f.run(["root", "add", `${f.dir}/missing`, "--tree", "M"]).err).toContain(`${f.dir}/missing: каталога нет`);
     // Совпадение ветки — предупреждение; вложенный корень на своём месте — справка
     const clash = f.run(["root", "add", `${f.dir}/other`, "--tree", "Org", "--dry-run"]);
-    expect(clash.out).toContain(`предупреждение: ветка layers/tree/Org корня ${f.dir}/other совпадает с папкой ${f.ws}/Org корня ${f.ws}`);
+    expect(clash.out).toContain(`предупреждение: раздел дерева слоёв layers/tree/Org корня ${f.dir}/other совпадает с папкой ${f.ws}/Org корня ${f.ws}`);
     const nested = f.run(["root", "add", `${f.ws}/Org`, "--tree", "Org", "--dry-run"]);
     expect(nested.out).not.toContain("совпадает с папкой");
     expect(nested.out).toContain(`справка: корень ${f.ws}/Org внутри корня ${f.ws}, место в дереве — layers/tree/Org`);
@@ -210,7 +210,7 @@ describe("A.6: miksy root add / remove", () => {
     expectCode(f.run(["sync", "--all", "--yes"]), 0);
     const primary = f.run(["root", "remove", f.ws]);
     expectCode(primary, 2);
-    expect(primary.err).toContain(`${f.ws} — основной корень, его нельзя убрать: на нём \${WORKSPACE} и ветка дерева без префикса. Сменить основной — miksy setup --force`);
+    expect(primary.err).toContain(`${f.ws} — основной корень, его нельзя убрать: на нём \${WORKSPACE} и раздел дерева без префикса. Сменить основной — miksy setup --force`);
     expect(f.run(["root", "remove", `${f.dir}/nowhere`]).err).toContain(`${f.dir}/nowhere — не корень workspace`);
     // Без терминала: корень убран, записанное и учёт — как были
     const before = ledger(f.config).targets;
@@ -435,7 +435,7 @@ describe("находки рецензии: недоступный корень, 
     git(`${f.dir}/sub/proj`);
     git(`${f.ws}/Cloud/c1`);
     put(`${f.config}/local/machine.yaml`, `${yamlRoots([f.ws, { path: `${f.dir}/drive`, tree: "Clients" }, { path: `${f.dir}/sub`, tree: "Clients/Sub" }, { path: `${f.ws}/Cloud`, tree: "Cloud" }])}agents: [claude]\n`);
-    expect(f.run(["doctor"]).out).toContain(`Ветки корней внутри чужих мест (1) — не ошибка, но проекты этих корней получают слои этих мест:\n  корень ${f.dir}/sub: ветка layers/tree/Clients/Sub лежит внутри места Clients (там же: ${f.dir}/drive — корень, ветка Clients) — своих слоёв у Clients пока нет, но всё, что там появится, получат и его проекты.`);
+    expect(f.run(["doctor"]).out).toContain(`Разделы дерева слоёв корней внутри чужих мест (1) — не ошибка, но проекты этих корней получают слои этих мест:\n  корень ${f.dir}/sub: раздел дерева слоёв layers/tree/Clients/Sub лежит внутри места Clients (там же: ${f.dir}/drive — корень, раздел Clients) — своих слоёв у Clients пока нет, но всё, что там появится, получат и его проекты.`);
     const r = f.run(["root", "remove", `${f.ws}/Cloud`, "--dry-run"]);
     expectCode(r, 0);
     const rm = f.run(["root", "remove", `${f.ws}/Cloud`]);

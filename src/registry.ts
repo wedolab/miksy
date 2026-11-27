@@ -47,10 +47,10 @@ export interface TargetSpec {
 }
 
 // Ключ цели для сведений одного запуска (skills, доставленные другими агентами): каталог, а не
-// заголовок — при совпадении ветки корня с папкой другого корня заголовки могут совпасть
+// заголовок — при совпадении раздела корня с папкой другого корня заголовки могут совпасть
 export const targetKey = (t: TargetSpec) => (t.target.scope === "project" ? fold(pathKey(t.target.dir)) : "global");
 
-// Заголовок цели: место в дереве слоёв; если то же место есть на машине и в другом корне (ветка корня
+// Заголовок цели: место в дереве слоёв; если то же место есть на машине и в другом корне (раздел корня
 // совпала с папкой другого корня — treeClashes) — и корень
 export function titleOf(rel: string, root: Root | undefined, machine: Machine): string {
   const title = rel || "(корень workspace)";
@@ -96,7 +96,7 @@ export function enclosingTarget(dir: string, root: Root, machine: Machine): Proj
   return null;
 }
 
-// Группы этой машины: каталоги всех корней на месте помеченного слоя (ветка корня совпала с папкой
+// Группы этой машины: каталоги всех корней на месте помеченного слоя (раздел корня совпал с папкой
 // другого корня — два каталога). Неверная пометка (нет каталога, служебный каталог, содержит дом, внутри проекта,
 // корень дерева или корень workspace) — предупреждение warn, слой остаётся обычным промежуточным
 export function listGroups(machine: Machine, warn?: (msg: string) => void): Group[] {
@@ -114,7 +114,7 @@ export function listGroups(machine: Machine, warn?: (msg: string) => void): Grou
     if (!places.length) {
       // Каталог есть, но сам стал корнем workspace (root add … --yes): пометка в этом месте дерева не действует
       const rooted = dirsOf(g, roots, true).find((p) => roots.some((r) => sameKey(r.path, p.dir)));
-      warn?.(rooted ? `цель ${g} (target: true): каталог ${rooted.dir} стал корнем workspace — пометка здесь не действует (слои его проектов — в ветке корня)` : `цель ${g} (target: true): каталога нет в workspace — пометка не действует`);
+      warn?.(rooted ? `цель ${g} (target: true): каталог ${rooted.dir} стал корнем workspace — пометка здесь не действует (слои его проектов — в разделе корня)` : `цель ${g} (target: true): каталога нет в workspace — пометка не действует`);
       continue;
     }
     for (const { root, dir, link } of places) {
@@ -170,12 +170,12 @@ export function rootNotes(machine: Machine, groups: Group[]): string[] {
   return out;
 }
 
-// Совпадения веток корней с папками других корней (src/roots.ts: treeClashes) — предупреждения
+// Совпадения разделов корней с папками других корней (src/roots.ts: treeClashes) — предупреждения
 export const clashNotes = (machine: Machine) => treeClashes(machineRoots(machine)).map(clashText);
 
-// Ветка корня внутри чужого места — справка с рекомендацией (не проблема). Место — предок ветки (кроме
+// Раздел корня внутри чужого места — справка с рекомендацией (не проблема). Место — предок раздела (кроме
 // корня дерева: он общий у всех корней по замыслу), у которого есть свои слои (layers/tree/<предок>/…)
-// или каталог другого корня: ветка другого корня (tree: Clients/Sub при tree: Clients) или папка основного
+// или каталог другого корня: раздел другого корня (tree: Clients/Sub при tree: Clients) или папка основного
 // (tree: Org/Sub при папке Org). Проекты корня получают слои предка — что именно, перечисляется. Корень,
 // который физически лежит в каталоге своего места-родителя (вложенный на естественном месте), — не справка
 export function branchNote(r: Root, roots: Root[]): string | null {
@@ -185,7 +185,7 @@ export function branchNote(r: Root, roots: Root[]): string | null {
   if (dirsOf(ancestors[ancestors.length - 1], roots).some((d) => d.root !== r && inside(r.path, d.dir))) return null;
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   const layers = treeLayers(r.tree).filter((l) => ancestors.some((a) => same(a, l.name)));
-  const dirs = ancestors.flatMap((a) => dirsOf(a, roots).filter((d) => d.root !== r)).map((d) => `${d.dir}${sameKey(d.dir, d.root.path) ? ` — корень, ветка ${d.root.tree}` : ` — папка корня ${d.root.path}`}`);
+  const dirs = ancestors.flatMap((a) => dirsOf(a, roots).filter((d) => d.root !== r)).map((d) => `${d.dir}${sameKey(d.dir, d.root.path) ? ` — корень, раздел ${d.root.tree}` : ` — папка корня ${d.root.path}`}`);
   if (!layers.length && !dirs.length) return null;
   const parts = (l: Layer) => [
     l.instructions.length && `правила ${l.instructions.map((i) => i.file).join(", ")}`,
@@ -196,8 +196,8 @@ export function branchNote(r: Root, roots: Root[]): string | null {
     ? `его проекты получают и слои ${layers.map((l) => `layers/tree/${l.name} (${parts(l)})`).join(", ")}`
     : `своих слоёв у ${ancestors.join(", ")} пока нет, но всё, что там появится, получат и его проекты`;
   const top = segs[0];
-  return `корень ${r.path}: ветка layers/tree/${r.tree} лежит внутри места ${ancestors[ancestors.length - 1]}${dirs.length ? ` (там же: ${dirs.join("; ")})` : ""} — ${inherit}. ` +
-    `Не нужно — вынесите ветку из ${top} (например, tree: ${top}-${segs[segs.length - 1]}), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
+  return `корень ${r.path}: раздел дерева слоёв layers/tree/${r.tree} лежит внутри места ${ancestors[ancestors.length - 1]}${dirs.length ? ` (там же: ${dirs.join("; ")})` : ""} — ${inherit}. ` +
+    `Не нужно — вынесите раздел из ${top} (например, tree: ${top}-${segs[segs.length - 1]}), а общее задайте явно слоем в map.yaml (docs/roots.md, «Правила нескольких корней»)`;
 }
 export const branchNotes = (machine: Machine) => {
   const roots = machineRoots(machine);
@@ -384,7 +384,7 @@ export function launcherFor(adapter: Adapter, target: Target, machine: Machine) 
     ...(portable !== undefined && { portable }), ...(blocked && { portableBlocked: blocked }) });
 }
 
-// Место в дереве, которое есть у двух корней (ветка корня совпадает с папкой другого — treeClashes, и в обоих есть
+// Место в дереве, которое есть у двух корней (раздел корня совпадает с папкой другого — treeClashes, и в обоих есть
 // эта папка): у обеих целей был бы один каталог обёрток, и miksy mcp не различил бы их — переносимая форма не пишется
 function sharedPlace(rel: string, machine: Machine): string | undefined {
   const roots = machineRoots(machine);

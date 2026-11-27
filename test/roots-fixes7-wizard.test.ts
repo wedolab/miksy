@@ -129,7 +129,7 @@ describe("B.3 — мастер: «Есть ещё папки с проектам
     project(f.dir, "other/my-repo");
     const code = f.wizard([...start,
       { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: repo }, { q: /Всё равно сделать .*корнем workspace/, a: "y" },
-      { q: /Ветка этой папки/, a: "" }, { q: /Есть ещё папки/, a: "" }, ...finish]);
+      { q: /Раздел этой папки/, a: "" }, { q: /Есть ещё папки/, a: "" }, ...finish]);
     expectCode({ code, out: f.text() }, 0);
     expect(f.text()).toContain(`✓ ещё корень: ${repo}`);
     expect(yamlOf(f)).toContain("my-repo");
@@ -143,7 +143,7 @@ describe("B.3 — мастер: «Есть ещё папки с проектам
     project(f.dir, "mono/inner");
     const code = f.wizard([...start,
       { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: `${f.ws}/Acme/app` }, { q: /Всё равно сделать .*корнем workspace/, a: "n" },
-      { q: /Есть ещё папки/, a: mono }, { q: /Ветка этой папки/, a: "" }, { q: /Есть ещё папки/, a: "" }, ...finish]);
+      { q: /Есть ещё папки/, a: mono }, { q: /Раздел этой папки/, a: "" }, { q: /Есть ещё папки/, a: "" }, ...finish]);
     expectCode({ code, out: f.text() }, 0);
     const t = f.text();
     expect(t).toContain("Он и так в workspace и получает настройки: miksy sync");
@@ -159,7 +159,7 @@ describe("B.4 — мастер: путь в кавычках («Копирова
     project(f.dir, "My Cloud/Clients/site");
     const shown = win ? other.replaceAll("/", "\\") : other;
     const code = f.wizard([...start,
-      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: `"${shown}"` }, { q: /Ветка этой папки.*Enter — Clients\)/, a: "" }, { q: /Есть ещё папки/, a: "" },
+      { q: /Корень workspace/, a: "" }, { q: /Есть ещё папки/, a: `"${shown}"` }, { q: /Раздел этой папки.*Enter — Clients\)/, a: "" }, { q: /Есть ещё папки/, a: "" },
       ...finish]);
     expectCode({ code, out: f.text() }, 0);
     const t = f.text();

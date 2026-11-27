@@ -25,7 +25,7 @@ function rewrite(text: string, items: RootItem[], keep: number[]): string {
   const head = lines[r.at].replace(/^workspace:[ \t]*/, "");
   const block = !head || head.startsWith("#");
   let next: string[] | null = null;
-  // Остался один корень без ветки — строкой, как пишет мастер (0.1.x список не понимает): элемент — как был
+  // Остался один корень без раздела — строкой, как пишет мастер (0.1.x список не понимает): элемент — как был
   // записан (кавычки, комментарий), если это был элемент блочного списка
   const only = items.length === 1 && (typeof items[0] === "string" || !items[0].tree) ? items[0] : null;
   if (only !== null) {

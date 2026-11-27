@@ -72,7 +72,7 @@ test("«да» (по умолчанию): прежний остаётся осн
   const s = wizard(f, [[/Корень workspace/, [work]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   expectCode(s, 0);
   expect(asks(s)).toEqual([`Прежняя папка с проектами ${ws} на месте, в ней есть проекты. Оставить её основной, а ${work} добавить ещё одной папкой с проектами? (нет — основной станет ${work}, как при переносе папки)`]);
-  expect(s.out).toContain(`основной остаётся ${ws} (его ветка дерева слоёв, слои и \${WORKSPACE} — как были); ${work} — ещё одна папка с проектами:`);
+  expect(s.out).toContain(`основной остаётся ${ws} (его раздел дерева слоёв, слои и \${WORKSPACE} — как были); ${work} — ещё одна папка с проектами:`);
   expect(s.out).toContain(`✓ ещё корень: ${work} → layers/tree/work`);
   expect(s.out).not.toMatch(/из workspace уходит|workspace меняется/);
   expect(roots(f)).toEqual([[ws, ""], [work, "work"]]);
@@ -86,11 +86,11 @@ test("«да» (по умолчанию): прежний остаётся осн
 
 test("«да», ветка — своя: ответ на вопрос ветки; занятая или неверная — папка не добавлена, основной прежний", () => {
   const { f, ws, work } = base();
-  const s = wizard(f, [[/Корень workspace/, [work]], [Q, [true]], [/Ветка этой папки/, ["Side"]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s = wizard(f, [[/Корень workspace/, [work]], [Q, [true]], [/Раздел этой папки/, ["Side"]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   expectCode(s, 0);
   expect(roots(f)).toEqual([[ws, ""], [work, "Side"]]);
   const bad = base();
-  const s2 = wizard(bad.f, [[/Корень workspace/, [bad.work]], [/Ветка этой папки/, ["a/../b"]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
+  const s2 = wizard(bad.f, [[/Корень workspace/, [bad.work]], [/Раздел этой папки/, ["a/../b"]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   expectCode(s2, 0);
   expect(s2.out).toContain(`${bad.work} не добавлена — добавить позже: miksy root add "${bad.work}"`);
   expect(roots(bad.f)).toEqual([[bad.ws, ""]]);
@@ -121,7 +121,7 @@ test("«нет»: ветка прежнего основного переход�
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([{ path: ws, tree: "Main" }])}agents: [claude]\n`);
   const s = wizard(f, [[/Корень workspace/, [work]], [Q, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   expectCode(s, 0);
-  expect(s.out).toContain(`ветка layers/tree/Main перешла к новому основному ${work}; прежний основной ${ws} из workspace уходит`);
+  expect(s.out).toContain(`раздел layers/tree/Main перешёл к новому основному ${work}; прежний основной ${ws} из workspace уходит`);
   expect(roots(f)).toEqual([[work, "Main"]]);
 }, 300000);
 

@@ -208,7 +208,7 @@ describe("B.3: подсказки после «забыть» ведут к це
     renameSync(f.archive, `${f.archive}-disk`);
     const c = f.run(["clean", app, "--forget"]);
     expectCode(c, 0);
-    expect(c.out).toContain(`Если диск найдётся: сначала верните прежний корень workspace, в котором лежал проект, с его прежней веткой (miksy root add "<прежний корень>" --tree <прежняя ветка>), затем miksy sync "${app}"`);
+    expect(c.out).toContain(`Если диск найдётся: сначала верните прежний корень workspace, в котором лежал проект, с его прежним разделом дерева слоёв (miksy root add "<прежний корень>" --tree <прежний раздел>), затем miksy sync "${app}"`);
     renameSync(`${f.archive}-disk`, f.archive);
     expectCode(f.run(["root", "add", f.archive, "--tree", "Archive"]), 0);
     const s = f.run(["sync", app]);

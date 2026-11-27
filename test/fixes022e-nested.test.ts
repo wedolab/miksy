@@ -35,7 +35,7 @@ test("F1: папку СКОПИРОВАЛИ с вложенным корнем �
   const s = inSetup(f, [[/Корень workspace/, [ws2]], [/Оставить её основной/, [false]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => l.includes("из workspace уходит"))!;
   // Корень назван, его копия — тоже; утверждения о его проектах — правда; его папка — не «одноимённая со своими слоями»
-  const m = line.match(/Внутри него ещё корень (\S+) \(ветка Code; если новая папка — копия прежней, его копия — (\S+)\): он остаётся в workspace по прежнему пути, его проекты miksy обновляет, как раньше\./)!;
+  const m = line.match(/Внутри него ещё корень (\S+) \(раздел Code; если новая папка — копия прежней, его копия — (\S+)\): он остаётся в workspace по прежнему пути, его проекты miksy обновляет, как раньше\./)!;
   expect(m).toBeTruthy();
   expect([m[1], m[2]]).toEqual([`${ws}/Inner`, `${ws2}/Inner`]);
   expect(line).toContain("его проекты (кроме вложенного корня — ниже) miksy больше не обновляет");
@@ -63,6 +63,6 @@ test("F1: перенесли, а пустые папки проектов ост
   for (const d of ["Org/p1", "Inner/Acme/site"]) mkdirSync(`${ws}/${d}`, { recursive: true });
   const s = inSetup(f, [[/Корень workspace/, [ws2]], [/Есть ещё папки/, [null]], [/Записать настройки агентам/, [false]]]);
   const line = s.out.split("\n").find((l) => /из workspace уходит|нет на месте|проектов нет/.test(l)) ?? "";
-  expect(line).toContain(`${ws}/Inner (ветка Code`);
+  expect(line).toContain(`${ws}/Inner (раздел Code`);
 }, 300000);
 

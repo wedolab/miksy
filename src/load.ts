@@ -146,13 +146,13 @@ export function rootAway(given: string): { path: string; away?: string } {
 }
 
 // workspace в machine.yaml: строка (один корень в корне дерева) или список — путь либо { path, tree }.
-// У дополнительных корней ветка дерева (tree) обязательна и у всех корней — своя: иначе правила одной
-// ветки молча доставались бы папкам с тем же именем в другом корне. Один каталог дважды (повтор,
+// У дополнительных корней раздел дерева (tree) обязателен и у всех корней — свой: иначе правила одного
+// раздела молча доставались бы папкам с тем же именем в другом корне. Один каталог дважды (повтор,
 // junction, симлинк) — ошибка: сравниваются настоящие пути. Недоступный корень (нет диска, ссылка в
 // никуда, каталога нет; пуст, а в учёте есть его цели — точка монтирования без диска) — не ошибка: away,
 // путь — последний известный настоящий из учёта (memory), иначе как записан
 export function parseRoots(value: unknown, file: string, memory?: LedgerRoots): Root[] {
-  const usage = `${file}: workspace — путь или список корней: путь, либо { path: <путь>, tree: <ветка дерева слоёв, например Clients> }`;
+  const usage = `${file}: workspace — путь или список корней: путь, либо { path: <путь>, tree: <раздел дерева слоёв, например Clients> }`;
   if (value === undefined || value === null || value === "") throw new Error(`${file}: не задан workspace`);
   const items: unknown[] = typeof value === "string" ? [value] : Array.isArray(value) && value.length ? value : (() => { throw new Error(usage); })();
   const roots: (Root & { given: string })[] = [];
@@ -163,11 +163,11 @@ export function parseRoots(value: unknown, file: string, memory?: LedgerRoots): 
     const given = raw.path.trim();
     const tree = checkTree(typeof raw.tree === "string" ? raw.tree : "");
     if (tree === null)
-      throw new Error(`${file}: tree «${raw.tree}» корня ${given} — ветка дерева слоёв: имена каталогов через «/» (например, Clients), без «..», дисков и имён ${[...LAYER_PARTS].join(", ")}`);
+      throw new Error(`${file}: tree «${raw.tree}» корня ${given} — раздел дерева слоёв: имена каталогов через «/» (например, Clients), без «..», дисков и имён ${[...LAYER_PARTS].join(", ")}`);
     if (i > 0 && !tree)
-      throw new Error(`${file}: у корня ${given} не указана ветка дерева слоёв — укажите: { path: ${JSON.stringify(given)}, tree: <ветка, например Clients> }. У дополнительных корней ветка обязательна: без неё правила основного корня молча доставались бы папкам с теми же именами`);
+      throw new Error(`${file}: у корня ${given} не указан раздел дерева слоёв — укажите: { path: ${JSON.stringify(given)}, tree: <раздел, например Clients> }. У дополнительных корней раздел обязателен: без него правила основного корня молча доставались бы папкам с теми же именами`);
     const busy = roots.find((r) => tree && r.tree.toLowerCase() === tree.toLowerCase());
-    if (busy) throw new Error(`${file}: tree: ${tree} уже у корня ${busy.given} — выберите корню ${given} другое имя ветки (общие правила для нескольких корней — слоем в map.yaml, docs/roots.md, «Правила нескольких корней»)`);
+    if (busy) throw new Error(`${file}: tree: ${tree} уже у корня ${busy.given} — выберите корню ${given} другое имя раздела (общие правила для нескольких корней — слоем в map.yaml, docs/roots.md, «Правила нескольких корней»)`);
     const expanded = given.replace(/^~(?=$|[\\/])/, homeDir());
     let { path, away } = rootAway(expanded);
     if (!away && memory && emptyDir(path) && memory.hasTargets(path)) away = "пуст, а в учёте есть его цели — диск не смонтирован?";
@@ -309,11 +309,11 @@ const similar = (a: string, b: string) => {
 const asRoots = (workspace: string | Root[]): Root[] => (typeof workspace === "string" ? [{ path: slash(realpathSync.native(workspace)), tree: "" }] : workspace);
 
 // Слои дерева, которые на этой машине ни к чему не применяются (нет такого каталога ни в одном корне).
-// Проверяется только та часть дерева, куда смонтированы корни этой машины: ветка, над которой нет
+// Проверяется только та часть дерева, куда смонтированы корни этой машины: раздел, над которым нет
 // корня, — unmounted (для другой машины, не опечатка); часть недоступного корня (диск не подключён) не
-// проверяется. Ветка без своего каталога сообщается один раз — её вложенные слои не перечисляются.
-// suggestion — похожий каталог на том же уровне: вероятная опечатка или переименование. other — ветка верхнего
-// уровня дерева (под основным корнем без tree): она может быть и веткой корня другой машины ({ path, tree: <ветка> }
+// проверяется. Раздел без своего каталога сообщается один раз — его вложенные слои не перечисляются.
+// suggestion — похожий каталог на том же уровне: вероятная опечатка или переименование. other — раздел верхнего
+// уровня дерева (под основным корнем без tree): он может быть и разделом корня другой машины ({ path, tree: <раздел> }
 // в её machine.yaml) — отсюда не отличить (рецензия 6x, B4)
 export function orphanTreeDirs(workspace: string | Root[], root = configRoot()): { path: string; suggestion?: string; unmounted?: true; other?: true }[] {
   const roots = asRoots(workspace);

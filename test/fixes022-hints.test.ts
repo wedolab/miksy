@@ -233,7 +233,7 @@ test("C6: забытая папка, основной сменил setup --force
   expectCode(s, 0);
   expect(s.out).toContain(`прежний основной ${ws} из workspace уходит`);
   const c = f.run(["clean", p1]);
-  expect(c.out).toContain("ветка — любая новая, которой нет в layers/tree. Слои его проектов под неё скопируйте, а не переносите");
+  expect(c.out).toContain("раздел — любой новый, которого нет в layers/tree. Слои его проектов под него скопируйте, а не переносите");
   returnRoot(f, "Old", ws, "Old", ["Org", "Lab"]);
   runLines(f, c.out.split("\n").filter((l) => /^\s+miksy sync/.test(l)));
   expect(filesIn(p1)).toEqual([]);
@@ -331,7 +331,7 @@ test("C6: новый основной внутри прежнего с ветк�
   put(`${f.config}/local/machine.yaml`, `${yamlRoots([{ path: ws, tree: "Main" }])}agents: [claude]\n`);
   const s = inSetup(f, true, [[/Корень workspace/, [`${ws}/Org`]], [/Есть ещё папки/, [null]]]);
   expectCode(s, 0);
-  const line = s.out.split("\n").find((l) => l.includes("перешла к новому основному"))!;
+  const line = s.out.split("\n").find((l) => l.includes("перешёл к новому основному"))!;
   expect(line).toContain(`(кроме проектов внутри нового основного: они остаются в workspace`);
   expect(line).toContain(`Передумали — miksy setup --force ещё раз, корень workspace — ${ws}`);
   expect(line).not.toMatch(/Вернуть его|переименуйте|miksy root add/);

@@ -39,7 +39,7 @@ miksy-config/
 
 A project gets every layer along its path, top to bottom; a lower layer adds to and overrides the
 upper ones. Projects in several unrelated places (a second disk, a cloud storage folder) are listed as
-several workspace roots, each with its own branch of the same layer tree: `miksy root add E:/Clients --tree Clients`
+several workspace roots, each with its own section of the same layer tree: `miksy root add E:/Clients --tree Clients`
 (or `{ path: "E:/Clients", tree: Clients }` in `local/machine.yaml`). Secrets are referenced as `${NAME}` and stored in `local/secrets.env` — agent configs get
 wrappers, not the values.
 
@@ -92,7 +92,7 @@ reads Russian fine and can explain the steps to you in English.
 | `miksy setup` | setup wizard; rerun to continue or to pick up newly installed agents |
 | `miksy sync --global`, `miksy sync --all` | write your settings to the agents (home folder / all projects); `--dry-run` shows the plan |
 | `miksy sync` | the same for the project (or `target: true` folder) you are in, also from its subfolders |
-| `miksy root add [<path>]` | add another folder with projects as a workspace root (`--tree <branch>`); `miksy root` lists roots, `miksy root remove <path>` removes one |
+| `miksy root add [<path>]` | add another folder with projects as a workspace root (`--tree <section>`); `miksy root` lists roots, `miksy root remove <path>` removes one |
 | `miksy target [<path>]` | let a folder without git (notes, a group of projects) get settings like a project |
 | `miksy doctor` | checks that everything is written and nothing has drifted (changes nothing) |
 | `miksy explain [<path>]` | what a folder (the current one by default) gets and from which layer; `--global` — home folder settings |

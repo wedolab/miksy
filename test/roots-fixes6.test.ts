@@ -345,7 +345,7 @@ describe("B.7 — doctor: ветка слоёв, похожая на папку 
     expectCode(f.run(["sync", "--global"]), 0);
     const d = f.run(["doctor"]);
     const info = d.out.split("Справочно")[1] ?? "";
-    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку"), both: info.includes("ветка корня другой машины") && info.includes("если опечатка") && info.includes("layers/tree/Clients ↔ в workspace есть Clients-old") }, said(d))
+    expect({ code: d.code, typo: d.out.includes("Похоже на опечатку"), both: info.includes("раздел корня другой машины") && info.includes("если опечатка") && info.includes("layers/tree/Clients ↔ в workspace есть Clients-old") }, said(d))
       .toEqual({ code: 0, typo: false, both: true });
   }, 120000);
 
