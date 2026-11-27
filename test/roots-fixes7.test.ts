@@ -139,10 +139,12 @@ describe("B.5 — документация по правде", () => {
     expect(c.slice(0, c.indexOf("## 0.1.1"))).not.toMatch(/подкаталог[^\n]*требуют вашего решения/);
   }, 30000);
 
-  test("справочник команд README: root add … [--yes] — каталог, который сам проект, объясняет и спрашивает, без терминала — только с --yes", () => {
-    const r = readme();
-    const line = r.split("\n").find((l) => l.startsWith("| `root [add [<путь>] [--tree <раздел>] [--yes]"));
-    expect(line).toMatch(/сама? проект[^|]*спрашивает, без терминала добавляет только с `--yes`/);
+  // Круг 12c: ячейки справочника команд README короткие, подробности root add — в docs/roots.md
+  test("справочник команд README: root add … [--yes]; docs/roots.md — каталог, который сам проект, объясняет и спрашивает, без терминала — только с --yes", () => {
+    const line = readFileSync(join(ENGINE, "README.md"), "utf8").split("\n").find((l) => l.startsWith("| `root [add [<путь>] [--tree <раздел>] [--yes]"));
+    expect(line).toContain("docs/roots.md");
+    const roots = readFileSync(join(ENGINE, "docs/roots.md"), "utf8").replace(/\s+/g, " ");
+    expect(roots).toMatch(/сама проект[^.]*объяснит и спросит, добавлять ли; без терминала добавит только с `--yes`/);
   });
 });
 

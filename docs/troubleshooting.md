@@ -200,7 +200,8 @@ layers/tree/<раздел>»), они же — в копии `local/machine.yaml
 |---|---|
 | `… установок несколько — используется …` (doctor, setup, install) | Удалите лишнюю. Для Bun затем `miksy setup`, `miksy sync --global` и `sync --all` |
 | Windows, Git Bash: `miksy: command not found` / doctor: `в Git Bash команды miksy нет` | Git Bash не находит `miksy.cmd` по имени `miksy`. `miksy update` (или `miksy setup --yes` из PowerShell) положит рядом команду `miksy` для Git Bash |
-| `CODEX_HOME=…` / `CLAUDE_CONFIG_DIR=…` / `XDG_CONFIG_HOME=…`: `… настройки miksy агент не увидит` (doctor) | Уберите переменную из профиля оболочки |
+| `CODEX_HOME=…` / `CLAUDE_CONFIG_DIR=…` / `XDG_CONFIG_HOME=…` (и `OPENCODE_CONFIG`, `GEMINI_CLI_HOME` и т. п.): `… настройки miksy агент не увидит` (doctor, «Справочно») | Уберите переменную из профиля оболочки |
+| `конфигурация: используется … (MIKSY_CONFIG)` или `(~/.miksy)`; `рядом с движком есть другая …, она не используется` (doctor, «Справочно») | Так и задумано — ничего; нет — уберите `MIKSY_CONFIG` или `~/.miksy`, тогда miksy возьмёт ту, что рядом с движком |
 | `Прежнее имя агента … gemini теперь antigravity` (doctor) | Переименуйте, когда удобно |
 | `opencode … — версия 1.x, а miksy пишет настройки в формате opencode 2.x` (doctor, setup) | Обновите opencode ([install.md](install.md#установка-агентов)) |
 | Номер версии вида `0.7.0-2-gc5c1a79` или `…-dirty` (`miksy --version`, doctor, setup) | `0.7.0` — последний выпуск, на котором основан движок. `-2-gc5c1a79` — движок на 2 коммита новее этого выпуска, то есть это не выпуск (ветка разработки или ваши коммиты), `c5c1a79` — коммит. `-dirty` — в папке движка есть незакоммиченные правки. `miksy --version` пишет это словами. Только номер (`0.7.0`) — ровно выпуск |
