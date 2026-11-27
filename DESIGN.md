@@ -1576,8 +1576,8 @@ opencode: config, precedence). (3) Конфигурация задана `MIKSY_
 
 **Открытые вопросы:**
 
-- Antigravity IDE и CLI хранят состояние и MCP раздельно (`~/.gemini/antigravity-cli/`,
-  `~/.gemini/antigravity-ide/`) — см. `adapters/antigravity/CAPABILITIES.md`.
+- Antigravity IDE и CLI хранят состояние раздельно (`~/.gemini/antigravity-cli/`, `~/.gemini/antigravity-ide/`);
+  глобальный MCP общий — `~/.gemini/config/mcp_config.json` (круг 11z) — см. `adapters/antigravity/CAPABILITIES.md`.
 - Какие функции агентов теряются при запуске через ACP в Zed.
 
 ## 12. Версии, ветки и обновление

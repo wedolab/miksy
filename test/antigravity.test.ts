@@ -68,7 +68,8 @@ describe("antigravity adapter", () => {
   });
 
   describe("render: global", () => {
-    test("инструкции в ~/.gemini/GEMINI.md, skills в ~/.gemini/config/skills/, mcp в CLI и IDE", () => {
+    // Круг 11z: файл IDE (~/.gemini/antigravity-ide/mcp_config.json) никто не читает — не пишется (было: «mcp в CLI и IDE»)
+    test("инструкции в ~/.gemini/GEMINI.md, skills в ~/.gemini/config/skills/, mcp в ~/.gemini/config", () => {
       const { cfg, machine } = fixture();
       const r = antigravity.render(cfg, { scope: "global" }, machine);
 
@@ -96,7 +97,7 @@ describe("antigravity adapter", () => {
         content: "resource content\n",
       });
 
-      // 3. MCP: оба файла mcp_config.json (CLI и IDE)
+      // 3. MCP: ~/.gemini/config/mcp_config.json (его читают CLI, IDE 2.6+ и Antigravity 2.0)
       const cliMcp = r.files.find((f) => f.path === ".gemini/config/mcp_config.json");
       expect(cliMcp).toMatchObject({
         base: "home",
@@ -107,15 +108,7 @@ describe("antigravity adapter", () => {
         data: { ctx: { command: "npx", args: ["ctx7"], env: { TOKEN: "v" } } },
       });
 
-      const ideMcp = r.files.find((f) => f.path === ".gemini/antigravity-ide/mcp_config.json");
-      expect(ideMcp).toMatchObject({
-        base: "home",
-        path: ".gemini/antigravity-ide/mcp_config.json",
-        mode: "merge",
-        format: "json",
-        key: ["mcpServers"],
-        data: { ctx: { command: "npx", args: ["ctx7"], env: { TOKEN: "v" } } },
-      });
+      expect(r.files.some((f) => f.path.startsWith(".gemini/antigravity-ide/"))).toBe(false);
     });
 
     test("нестрогий JSON (комментарии) в существующем mcp_config.json вызывает warning", () => {
@@ -124,8 +117,8 @@ describe("antigravity adapter", () => {
       const r = antigravity.render(cfg, { scope: "global" }, machine);
       expect(r.warnings.some((w) => w.includes("не парсится как строгий JSON"))).toBe(true);
       expect(r.files.some((f) => f.path === ".gemini/config/mcp_config.json")).toBe(false);
-      // IDE файл при этом чистый и записывается
-      expect(r.files.some((f) => f.path === ".gemini/antigravity-ide/mcp_config.json")).toBe(true);
+      // Круг 11z: текст — что сделать (было: файл IDE при этом записывается — его больше нет)
+      expect(r.warnings.some((w) => w.includes("Antigravity не читает такой файл целиком: уберите их"))).toBe(true);
     });
   });
 

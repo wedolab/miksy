@@ -93,7 +93,7 @@ function asBefore020(f: ReturnType<typeof cliFixture>) {
   const swap = (s: string) => s.replaceAll("/local/run/antigravity/", "/local/run/gemini/").replaceAll("\\\\local\\\\run\\\\antigravity\\\\", "\\\\local\\\\run\\\\gemini\\\\");
   const state = `${f.config}/local/state/manifest.json`;
   const manifest = JSON.parse(read(state));
-  const files = [`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`, `${f.home}/.gemini/config/mcp_config.json`, `${f.home}/.gemini/antigravity-ide/mcp_config.json`];
+  const files = [`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`, `${f.home}/.gemini/config/mcp_config.json`];
   for (const p of files) writeFileSync(p, swap(read(p)));
   renameSync(`${f.config}/local/run/antigravity`, `${f.config}/local/run/gemini`);
   const targets: Record<string, any> = {};
@@ -115,7 +115,7 @@ describe("агент antigravity (прежнее имя gemini — синони�
   test("старая конфигурация и учёт: sync после обновления не считает записанное чужим, переносит учёт, обёртки и блок exclude; doctor подсказывает", () => {
     const f = cliFixture({ agents: ["antigravity"] });
     withShim(f); // MCP проекта запускает команда miksy — doctor её проверяет (круг 10v)
-    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её настройки тоже пишутся (круг 11v)
+    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её файл MCP всё равно не пишется (круг 11z)
     put(`${f.config}/layers/global/mcp/s.yaml`, "name: s\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/p.yaml`, "name: p\ncommand: echo\nenv:\n  T: ${TOK}\n");
     put(`${f.config}/layers/tree/mcp/skipped.yaml`, "name: skipped\ncommand: echo\nagents:\n  gemini: skip\n");

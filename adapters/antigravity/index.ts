@@ -140,30 +140,15 @@ export const antigravity: Adapter = {
     // 4. MCP:
     if (isGlobal) {
       if (hasMcp) {
-        // Настройки CLI и IDE хранятся раздельно:
-        // CLI читает ~/.gemini/config/mcp_config.json
-        // IDE читает ~/.gemini/antigravity-ide/mcp_config.json — пишется, только если IDE на машине есть (её папку
-        // создаёт первый запуск IDE): иначе sync заводил папку IDE, которой нет (круг 11v). Поставят IDE позже —
-        // допишет sync после её первого запуска; записанное раньше снимает clean по учёту
-        const configs = [
-          { path: ".gemini/config/mcp_config.json", label: "CLI" },
-          ...(existsSync(join(machine.home, ".gemini/antigravity-ide")) ? [{ path: ".gemini/antigravity-ide/mcp_config.json", label: "IDE" }] : []),
-        ];
-        for (const { path } of configs) {
-          const abs = join(machine.home, path);
-          if (existsSync(abs) && !strictJson(abs)) {
-            warnings.push(`mcp antigravity: ${path} не парсится как строгий JSON (комментарии?) — серверы не записаны: не проверено, читает ли Antigravity JSONC`);
-          } else {
-            files.push({
-              base: "home",
-              path,
-              mode: "merge",
-              format: "json",
-              key: ["mcpServers"],
-              data: servers,
-            });
-          }
-        }
+        // Глобальный MCP — ~/.gemini/config/mcp_config.json: его читают CLI (agy), IDE 2.6+ и Antigravity 2.0. Файл
+        // ~/.gemini/antigravity-ide/mcp_config.json не читает никто (круг 11z: agy 1.5.9 вживую, IDE 2.7.0 и
+        // language_server 2.0 — по бандлу) — miksy его больше не пишет; записанное раньше снимается по учёту слияний
+        const path = ".gemini/config/mcp_config.json";
+        // Строгий JSON: Antigravity не разбирает комментарии, концевые запятые и BOM — файл не читается целиком (agy
+        // 1.5.9: «failed to parse JSON config»); пустой файл (0 байт) — {}
+        if (existsSync(join(machine.home, path)) && !strictJson(join(machine.home, path)))
+          warnings.push(`mcp antigravity: ${path} не парсится как строгий JSON (комментарии, запятая в конце, BOM) — Antigravity не читает такой файл целиком: уберите их; серверы miksy не записаны`);
+        else files.push({ base: "home", path, mode: "merge", format: "json", key: ["mcpServers"], data: servers });
       }
       files.push(...(ctx?.launch?.files() ?? []));
     } else if (hasMcp) {

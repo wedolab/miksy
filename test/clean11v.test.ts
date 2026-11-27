@@ -170,13 +170,14 @@ describe("clean убирает начисто (круг 11v)", () => {
     expect(existsSync(`${f.home}/.codex/config.toml`)).toBe(true);
   }, 180000);
 
-  test("Antigravity IDE: есть папка IDE — пишется её настройка, clean снимает файл, папка IDE остаётся", () => {
+  // Круг 11z: файл IDE никто не читает — не пишется и при папке IDE (было: пишется, clean снимает); записанное раньше
+  // снимается по учёту — test/antigravity11z.test.ts
+  test("Antigravity IDE: есть папка IDE — её mcp_config.json не пишется, clean оставляет папку IDE как была", () => {
     const f = fixture();
     mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true });
     f.sync();
-    expect(readFileSync(`${f.home}/.gemini/antigravity-ide/mcp_config.json`, "utf8")).toContain("tok");
-    f.clean();
     expect(existsSync(`${f.home}/.gemini/antigravity-ide/mcp_config.json`)).toBe(false);
+    f.clean();
     expect(readdirSync(`${f.home}/.gemini`)).toEqual(["antigravity-ide"]);
   }, 180000);
 });

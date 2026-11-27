@@ -54,7 +54,7 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     layers(f, "global");
     layers(f, "tree");
     secretsEnv(f);
-    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её настройки тоже пишутся (круг 11v)
+    mkdirSync(`${f.home}/.gemini/antigravity-ide`, { recursive: true }); // IDE есть — её файл MCP всё равно не пишется (круг 11z)
     const g = f.run(["sync", "--global"]);
     expectCode(g, 0);
     const p = f.run(["sync", `${f.ws}/Org/p1`]);
@@ -84,7 +84,9 @@ describe("п.1, 3, 4, 5, 7, 9: значения секретов не попад
     const plugin = JSON.parse(readFileSync(`${f.ws}/Org/p1/.agents/plugins/miksy/mcp_config.json`, "utf8"));
     expect(plugin.mcpServers["http-secret"]).toMatchObject({ command: "miksy", args: ["mcp", "antigravity", "Org/p1", "http-secret", "--bridge"] });
     expect(plugin.mcpServers["http-secret"].url).toBeUndefined();
-    for (const c of [".gemini/config/mcp_config.json", ".gemini/antigravity-ide/mcp_config.json"])
+    // Круг 11z: только ~/.gemini/config (файл IDE не пишется — было: оба файла)
+    expect(existsSync(`${f.home}/.gemini/antigravity-ide/mcp_config.json`)).toBe(false);
+    for (const c of [".gemini/config/mcp_config.json"])
       expect(JSON.parse(readFileSync(`${f.home}/${c}`, "utf8")).mcpServers["http-secret"].command).toMatch(/-bridge-[0-9a-f]{8}\.(cmd|sh)$/);
     // Обёртки — вне проектов, в local/run/<агент>/<цель>/
     expect(walk(`${f.ws}/Org/p1`).some((x) => /\.(cmd|sh)$/.test(x))).toBe(false);

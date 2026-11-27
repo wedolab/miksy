@@ -10,8 +10,8 @@ export function readJsonc(path: string): Record<string, any> {
   try { return readJsoncText(readFileSync(path, "utf8")); } catch { return {}; }
 }
 
-// Строгий JSON без комментариев — только такой файл miksy сливает: ядро правит и JSONC на месте (круг 11y), но читает ли
-// Antigravity комментарии, не проверено (BACKLOG). Пустой файл (0 байт — так его заводит Antigravity) — пустой объект, ядро сливает в него как в {}
+// Строгий JSON без комментариев — только такой файл miksy сливает: Antigravity не читает комментарии, концевые запятые
+// и BOM (agy 1.5.9 вживую, круг 11z): файл не читается целиком. Пустой файл (0 байт — так его заводит Antigravity) — пустой объект, ядро сливает в него как в {}
 export function strictJson(path: string): boolean {
   if (!existsSync(path)) return false;
   const src = readFileSync(path, "utf8");

@@ -35,7 +35,7 @@ MCP, plugins), встроенные руководства CLI
 | Skills проекта | `.agents/skills/<имя>/` (командные), `skills/` плагина | Own-файлы `.agents/plugins/miksy/skills/<имя>/`; агент активирует skill по запросу | Вживую: agy 1.3.3 Windows |
 | Импорт командных skills | Агент видит только `.agents/skills` | Skills команды из других каталогов (`.claude/skills` и т. п.) копируются в `skills/` плагина (`import_skills`) | По коду; читатель `.agents/skills` — вживую |
 | MCP глобально, CLI | `~/.gemini/config/mcp_config.json` → `mcpServers` (сюда пишет `agy mcp add`); также `~/.gemini/antigravity-cli/mcp_config.json` | Merge по именам в `~/.gemini/config/mcp_config.json` | Вживую: agy 1.4.2 Windows, macOS |
-| MCP глобально, IDE | `~/.gemini/antigravity-ide/mcp_config.json` → `mcpServers` | Merge по именам в этот же файл (одновременно с CLI), только если папка `~/.gemini/antigravity-ide` есть (её создаёт первый запуск IDE): без IDE папку не заводим | Разбор бандла IDE |
+| MCP глобально, IDE и 2.0 | `~/.gemini/config/mcp_config.json` (тот же файл, что у CLI); `~/.gemini/antigravity-ide/mcp_config.json` не читает | Отдельно не пишется (круг 11z); записанное туда раньше снимается по учёту: свои серверы уходят, файл, созданный miksy, удаляется | IDE 2.6.0 вживую (2026-11-14); IDE 2.7.0 и 2.0 — разбор бандла (2026-11-27) |
 | MCP проекта | `mcp_config.json` плагина; также `.agents/mcp_config.json` | Own-файл `.agents/plugins/miksy/mcp_config.json` | Вживую: agy (Windows), IDE и 2.0 (Windows), вызов инструмента моделью |
 | Формат сервера | stdio: `command`, `args`, `env`; HTTP (Streamable): `url`, `headers`; `disabled` | Пишет эти поля; `agents.antigravity` слоя может дополнить или выключить (`skip`) | Вживую: `agy mcp list` |
 | stdio с секретом | Подстановок в `env`/`headers` нет (`${V}`, `$V`, `%V%`, `{env:V}`, `{file:…}` — литерал); у плагинов agy 1.5.9 — только `${PLUGIN_ROOT}`/`${PLUGIN_DATA}` в `args`, `env`, `cwd` (не в `command`) | глобально — `command` — обёртка `local/run/antigravity/<цель>/<сервер>-stdio-<хеш>.cmd\|.sh`, `args: []`; в плагине проекта — `miksy mcp` (ниже) | Вживую: agy 1.4.3–1.4.7 Windows, 1.4.2 macOS; IDE Windows |
@@ -50,7 +50,7 @@ MCP, plugins), встроенные руководства CLI
 | Манифест плагина | — | `.agents/plugins/miksy/plugin.json` (own) |
 | Правила | блок в `~/.gemini/GEMINI.md` | `.agents/plugins/miksy/rules/AGENTS.md` (own) |
 | Skills | `~/.gemini/config/skills/<имя>/` (own) | `.agents/plugins/miksy/skills/<имя>/` (own) |
-| MCP | `~/.gemini/config/mcp_config.json` и `~/.gemini/antigravity-ide/mcp_config.json` (merge `mcpServers`) | `.agents/plugins/miksy/mcp_config.json` (own) |
+| MCP | `~/.gemini/config/mcp_config.json` (merge `mcpServers`) | `.agents/plugins/miksy/mcp_config.json` (own) |
 | Обёртки секретов | `local/run/antigravity/global/` | `local/run/antigravity/<проект>-<хеш>/` |
 
 До 0.2.0 обёртки лежали в `local/run/gemini/`, а учёт вёлся под `gemini|…`: учёт переходит к новому
@@ -67,10 +67,11 @@ MCP, plugins), встроенные руководства CLI
 - Файлы плагина, закоммиченные командой, и каталог `.agents/plugins`, который версионирует
   команда, — конфликт: личный файл не кладётся среди командных. Личные и импортированные skills
   в такие коллекции тоже не доставляются; метка `team` защиту не обходит.
-- Глобальные `mcp_config.json` сливаются только как строгий JSON. Пустой файл (0 байт — так его
-  заводит Antigravity) считается `{}`; JSONC с комментариями — предупреждение, серверы не
-  записываются: ядро умеет править JSONC на месте, но читает ли Antigravity комментарии, не проверено
-  (BACKLOG). Строгий JSON правится на месте — оформление файла сохраняется. Пользовательские поля и токены OAuth не затрагиваются.
+- Глобальный `mcp_config.json` сливается только как строгий JSON: Antigravity не читает комментарии, запятую в
+  конце и BOM — такой файл он не разбирает целиком (agy 1.5.9: «failed to parse JSON config», серверов нет;
+  проверено вживую 2026-11-27). Пустой файл (0 байт — так его заводит Antigravity) считается `{}`. Нестрогий —
+  предупреждение «уберите их», серверы miksy не записываются. Строгий JSON правится на месте — оформление файла
+  сохраняется. Пользовательские поля и токены OAuth не затрагиваются.
 - Пропущенный сервер (нет переменной) остаётся в `mcp_config.json` плагина как был (keep), старая
   версия сверяется по хешу. Ради keep плагин рендерится, только если его `mcp_config.json` уже в
   учёте: на первом sync пропущенный сервер пустой плагин не создаёт.
@@ -82,13 +83,14 @@ MCP, plugins), встроенные руководства CLI
 | | CLI (`agy`) | IDE и Antigravity 2.0 |
 |---|---|---|
 | Состояние | `~/.gemini/antigravity-cli/` (`settings.json`, `history.jsonl`, `conversations/`, `brain/`, `log/`) | `~/.gemini/antigravity-ide/` (`user_settings.pb`, `antigravity_state.pbtxt`, `conversations/`, `brain/`) |
-| Глобальный MCP | `~/.gemini/config/mcp_config.json`, `~/.gemini/antigravity-cli/mcp_config.json`; `antigravity-ide/` и `~/.gemini/antigravity/` не читает | `~/.gemini/antigravity-ide/mcp_config.json` |
+| Глобальный MCP | `~/.gemini/config/mcp_config.json`, `~/.gemini/antigravity-cli/mcp_config.json`; `antigravity-ide/` и `~/.gemini/antigravity/` не читает | `~/.gemini/config/mcp_config.json` (IDE 2.7.0, бандл); `antigravity-ide/mcp_config.json` не читает |
 | Общее | `~/.gemini/GEMINI.md`, `~/.gemini/config/skills/`, `~/.gemini/projects.json` | то же |
 | MCP плагина | работает | работает; серверы — потомки `language_server_windows_x64.exe`, окон консоли нет |
 
 IDE 2.6.0 (Windows, 2026-11-14): беседа легла в `~/.gemini/antigravity/brain/`, не в `antigravity-ide/`; сервер
-только из `~/.gemini/config/mcp_config.json` IDE увидела и вызвала. Читает ли она ещё
-`antigravity-ide/mcp_config.json` — не проверялось (miksy пишет в оба файла, вреда нет; в файл IDE — когда её папка есть).
+только из `~/.gemini/config/mcp_config.json` IDE увидела и вызвала. IDE 2.7.0 (бандл, 2026-11-27): путь к MCP —
+`userHome/.gemini/config/mcp_config.json` (просмотр, сохранение, чтение сервера); `antigravity-ide/mcp_config.json`
+нет ни в IDE, ни в `agy.exe`, ни в `language_server.exe` 2.0 — miksy этот файл больше не пишет (круг 11z).
 
 ## Поведение MCP
 
@@ -219,6 +221,15 @@ OAuth не нужен.
 - 2026-11-14: `agy` 1.5.9 (Windows, Linux) — `agy acp` в Zed видит правила, skills и MCP miksy (таблица в
   «Через ACP в Zed»); `agy -p` 1.4.12 и 1.5.9 — то же; IDE 2.6.0 — то же; `antigravity-acp` 1.5.0 — по коду и
   со слов владельца настроек не видит.
+- 2026-11-27 (круг 11z, Windows): agy 1.5.9 в песочнице (свой HOME, без входа, `agy mcp list`) — `mcp_config.json` с
+  `//`, `/* */`, запятой в конце или BOM не читается целиком («failed to parse JSON config»); сервер только в
+  `antigravity-ide/mcp_config.json` не виден. IDE 2.7.0 и Antigravity 2.0 — разбор бандла (путь MCP —
+  `~/.gemini/config`; у `language_server.exe` та же ошибка разбора, библиотек JSONC нет). Подсказка
+  `call_mcp_tool` в глобальном `GEMINI.md` не нужна: у глобальных серверов нет префикса `miksy_`, а
+  `~/.gemini/GEMINI.md` читает и Gemini CLI.
+  **Не проверено** (нужен вход в аккаунт или окно IDE): IDE 2.7.0 и 2.0 вживую — откуда грузят MCP и как разбирают
+  JSONC (вывод по бандлу); нужна ли модели подсказка `call_mcp_tool` для глобальных серверов; macOS и Linux вживую
+  (код общий).
 - Базовая проверка адаптера — `bun test/antigravity-live.ts` (все вызовы `agy` с временным HOME).
 
 ## MCP проекта без путей машины (`miksy mcp`, круги 10u–10w)
