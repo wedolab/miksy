@@ -4,7 +4,7 @@
 // Значения секретов — искусственные
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { stableBun } from "../src/launch";
 import { ourShim, shimCompanion, shimFiles, shimNotes, shimPath, shimState, shimText, windowsBash } from "../src/shim";
 import { cliFixture, expectCode, put, restoreEnv } from "./helpers";
@@ -125,7 +125,10 @@ describe.skipIf(!WIN)("Windows: setup создаёт и обновляет сп�
     const value = ["git", "bash", "11m", "Zx8"].join("-");
     put(`${f.config}/layers/global/layer.yaml`, "exclude: [skill.miksy]\nskill_secrets: [GB_KEY]\n");
     put(`${f.config}/local/secrets.env`, `GB_KEY=${value}\n`);
-    const path = `${f.bunDir}/bin;${f.env.PATH ?? f.env.Path ?? ""}`;
+    // Утилиты bash (od, tr) — рядом с ним: Git\usr\bin при Git\bin\bash.exe, та же папка у MSYS2 и Cygwin. bash -c
+    // (не вход) берёт PATH как есть, а в PATH PowerShell или cmd их обычно нет — тест должен проходить и при запуске оттуда
+    const tools = [dirname(bash!), join(dirname(bash!), "..", "usr", "bin")].filter((d) => existsSync(join(d, "od.exe")));
+    const path = [`${f.bunDir}/bin`, ...tools, f.env.PATH ?? f.env.Path ?? ""].join(";");
     const env = { ...f.env, PATH: path, Path: path };
     const run = (script: string) => {
       const r = Bun.spawnSync([bash!, "-c", script], { cwd: f.dir, env, stdout: "pipe", stderr: "pipe" });

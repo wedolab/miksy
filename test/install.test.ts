@@ -2,7 +2,7 @@
 // Bun; установщик Bun подменён (поддельные curl / powershell кладут поддельный bun, который только
 // записывает, с чем его запустили), движок клонируется из локального bare-репо (MIKSY_REPO)
 import { describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonical } from "../src/paths";
@@ -177,12 +177,13 @@ EOF
   }, 60000);
 });
 
-// Запуск PowerShell на раннерах GitHub Windows медленный: один запуск install.ps1 — до ~75 с, а на медленном раннере в
-// полтора-два раза дольше (круг 10o: тест с двумя запусками шёл 104–148 с при пределе 180 с и на 5356efa его превысил —
-// весь прогон был в 1,5 раза медленнее; локально все пять тестов — 19 с). Предел одного запуска — PS_LIMIT: он
-// срабатывает раньше предела теста (TEST_LIMIT — два запуска и запас), и в ошибке — что install.ps1 успел напечатать
-const PS_LIMIT = 150_000;
-const TEST_LIMIT = 2 * PS_LIMIT + 30_000;
+// Предел одного запуска install.ps1 — PS_LIMIT: он срабатывает раньше предела теста (TEST_LIMIT — два запуска и запас), и
+// в ошибке — что install.ps1 успел напечатать. Раньше пределы поднимали (до 330 с на тест) из-за медленного PowerShell на
+// раннерах GitHub; причина найдена в круге 12e — см. PSModuleAnalysisCachePath в psEnv. Теперь запуск — секунды (локально
+// под нагрузкой полного прогона — до ~8 с), а на CI тесты бывают в 2–8 раз медленнее: 50 с — запас от случайных падений,
+// настоящее зависание предел всё равно поймает
+const PS_LIMIT = 50_000;
+const TEST_LIMIT = 2 * PS_LIMIT + 10_000;
 const SYS = process.env.SystemRoot ?? "C:\\Windows";
 const PS_MODULES = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\Modules`;
 // Окружение install.ps1 (круг 12e). Урезан нарочно только PATH: в нём нет Bun (и нет программ машины) — install.ps1 должен
@@ -197,14 +198,20 @@ const PS_MODULES = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\Modules`;
 //   — ещё и сотни установленных модулей. Папку Program Files\WindowsPowerShell\Modules PowerShell 5.1 добавляет сам, её
 //   не убрать;
 // - SystemRoot, PATHEXT — без них Windows-программы и поиск .cmd не работают;
-// - GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL — git без настроек машины.
+// - GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL — git без настроек машины;
+// - PSModuleAnalysisCachePath — если задан у машины, передаётся как есть: это файл кеша разбора модулей PowerShell. Без
+//   прогретого кеша PowerShell при первой же автозагрузке модуля (любой командлет не из ядра) разбирает все модули
+//   заново: на раннере GitHub Windows (десятки модулей) — 20–45 с на запуск, с кешем раннера — меньше секунды (замеры
+//   круга 12e). Раннер задаёт переменную сам; локально её обычно нет — PowerShell берёт кеш в LOCALAPPDATA песочницы.
 const psEnv = (home: string, bin: string): Record<string, string> => {
   const local = `${home}\\AppData\\Local`, roaming = `${home}\\AppData\\Roaming`, temp = `${home}\\AppData\\Local\\Temp`;
   for (const d of [local, roaming, temp]) mkdirSync(d, { recursive: true });
+  const cache = process.env.PSModuleAnalysisCachePath;
   return {
     USERPROFILE: home, HOME: home, LOCALAPPDATA: local, APPDATA: roaming, TEMP: temp, TMP: temp, PSModulePath: PS_MODULES,
     SystemRoot: SYS, PATHEXT: ".COM;.EXE;.BAT;.CMD", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${home}/.gitconfig`,
     PATH: [bin.replaceAll("/", "\\"), `${SYS}\\System32`, `${SYS}\\System32\\WindowsPowerShell\\v1.0`, dirname(Bun.which("git") ?? "C:\\git\\git.exe")].join(";"),
+    ...(cache ? { PSModuleAnalysisCachePath: cache } : {}),
   };
 };
 describe.skipIf(!win)("install.ps1", () => {
@@ -326,45 +333,4 @@ ${again.out}`).toBe("");
     });
     expect({ code: r.exitCode, outside: r.stdout.toString().trim(), err: r.stderr.toString().trim() }).toEqual({ code: 0, outside: "", err: "" });
   }, TEST_LIMIT);
-
-  // ВРЕМЕННО (круг 12e, убрать после замеров на GitHub): что в полном окружении раннера делает запуск PowerShell быстрым
-  // (полсекунды против 20–45 с в окружении теста, замер 341004b). Каждый вариант — один запуск в своём свежем доме
-  // песочницы; по строке «12e-замер» на вариант, сразу после запуска. На отказ не влияет
-  test.skipIf(!process.env.GITHUB_ACTIONS)("12e-замер: что ускоряет PowerShell на раннере", () => {
-    const f = sandbox();
-    const ps = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    const miss = "if (-not (Get-Command bunxx -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0";
-    const full = { ...process.env } as Record<string, string>;
-    // Без переменных keys (имена в Windows — без учёта регистра: Path и PATH — одна переменная)
-    const without = (env: Record<string, string>, keys: string[]) =>
-      Object.fromEntries(Object.entries(env).filter(([k]) => !keys.some((x) => x.toLowerCase() === k.toLowerCase())));
-    const say = (s: string) => console.log(`12e-замер: ${s}`);
-    const size = (p: string) => { try { return `${statSync(p).size} байт`; } catch { return "нет"; } };
-    let n = 0;
-    const home = () => { const h = `${f.dir.replaceAll("/", "\\")}\\h${n++}`; mkdirSync(h, { recursive: true }); return h; };
-    const cacheIn = (h: string) => `${h}\\AppData\\Local\\Microsoft\\Windows\\PowerShell\\ModuleAnalysisCache`;
-    const time = (label: string, env: Record<string, string>, script = miss, after?: () => string) => {
-      const s = performance.now();
-      const r = Bun.spawnSync([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { env, stdout: "pipe", stderr: "pipe", timeout: 120_000 });
-      say(`${label} — ${Math.round(performance.now() - s)} мс${r.exitedDueToTimeout ? " (остановлен по пределу)" : ""}${after ? `; ${after()}` : ""}`);
-    };
-    const runnerCache = full.PSModuleAnalysisCachePath || `${full.LOCALAPPDATA}\\Microsoft\\Windows\\PowerShell\\ModuleAnalysisCache`;
-    const mp = Bun.spawnSync([ps, "-NoProfile", "-Command", "$s = Get-MpComputerStatus; $p = Get-MpPreference; 'RealTimeProtectionEnabled=' + $s.RealTimeProtectionEnabled + '; ExclusionPath=' + ($p.ExclusionPath -join ',')"],
-      { env: full, stdout: "pipe", stderr: "pipe", timeout: 60_000 });
-    say(`Defender: ${(mp.stdout.toString() + mp.stderr.toString()).trim().split(/\r?\n/).slice(0, 3).join(" | ")}`);
-    say(`PSModuleAnalysisCachePath раннера: ${full.PSModuleAnalysisCachePath ?? "не задан"}; кеш раннера ${runnerCache}: ${size(runnerCache)}`);
-    say(`PSModulePath раннера: ${full.PSModulePath ?? "не задан"}`);
-    time("полное", full);
-    time("полное без LOCALAPPDATA", without(full, ["LOCALAPPDATA"]));
-    { const h = home(); mkdirSync(`${h}\\AppData\\Local`, { recursive: true });
-      time("полное с песочным LOCALAPPDATA", { ...without(full, ["LOCALAPPDATA"]), LOCALAPPDATA: `${h}\\AppData\\Local` }, miss, () => `кеш в песочнице: ${size(cacheIn(h))}`); }
-    { const h = home(), e = psEnv(h, f.bin);
-      time("новое + остальные переменные раннера", { ...without(full, Object.keys(e)), ...e }, miss, () => `кеш в песочнице: ${size(cacheIn(h))}`); }
-    { const h = home();
-      time("новое, Get-Command -CommandType Application", psEnv(h, f.bin), "if (-not (Get-Command bunxx -CommandType Application -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0", () => `кеш в песочнице: ${size(cacheIn(h))}`); }
-    { const h = home();
-      time("новое, без поиска отсутствующей команды (только Test-Path)", psEnv(h, f.bin), "Test-Path C:\\ | Out-Null; exit 0", () => `кеш в песочнице: ${size(cacheIn(h))}`); }
-    { const h = home();
-      time("новое + PSModuleAnalysisCachePath раннера", { ...psEnv(h, f.bin), PSModuleAnalysisCachePath: runnerCache }, miss, () => `кеш раннера: ${size(runnerCache)}`); }
-  }, 8 * 120_000 + 60_000);
 });
