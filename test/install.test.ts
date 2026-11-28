@@ -2,7 +2,7 @@
 // Bun; установщик Bun подменён (поддельные curl / powershell кладут поддельный bun, который только
 // записывает, с чем его запустили), движок клонируется из локального bare-репо (MIKSY_REPO)
 import { describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonical } from "../src/paths";
@@ -183,6 +183,30 @@ EOF
 // срабатывает раньше предела теста (TEST_LIMIT — два запуска и запас), и в ошибке — что install.ps1 успел напечатать
 const PS_LIMIT = 150_000;
 const TEST_LIMIT = 2 * PS_LIMIT + 30_000;
+const SYS = process.env.SystemRoot ?? "C:\\Windows";
+const PS_MODULES = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\Modules`;
+// Окружение install.ps1 (круг 12e). Урезан нарочно только PATH: в нём нет Bun (и нет программ машины) — install.ps1 должен
+// найти Bun сам или предложить установщик; программы теста (поддельные powershell.cmd, bun) — в bin песочницы. Остальное —
+// как у обычного пользователя, но в песочнице:
+// - USERPROFILE, HOME — дом песочницы: туда install.ps1 ставит Bun (~\.bun) и скачивает движок (~\Projects);
+// - LOCALAPPDATA, APPDATA — папки данных пользователя: без них PowerShell 5.1 не может хранить свои кеши (разбор модулей
+//   и т. п.), а у пользователя они всегда есть; в песочнице — чтобы не писать в настоящий профиль;
+// - TEMP, TMP — временные файлы PowerShell и git — тоже в песочнице;
+// - PSModulePath — только системные модули (там все командлеты install.ps1 — проверяет тест ниже). Без него PowerShell
+//   берёт модули и из «Документов» настоящего пользователя (путь — из реестра, не из USERPROFILE), а на раннерах GitHub
+//   — ещё и сотни установленных модулей. Папку Program Files\WindowsPowerShell\Modules PowerShell 5.1 добавляет сам, её
+//   не убрать;
+// - SystemRoot, PATHEXT — без них Windows-программы и поиск .cmd не работают;
+// - GIT_CONFIG_NOSYSTEM, GIT_CONFIG_GLOBAL — git без настроек машины.
+const psEnv = (home: string, bin: string): Record<string, string> => {
+  const local = `${home}\\AppData\\Local`, roaming = `${home}\\AppData\\Roaming`, temp = `${home}\\AppData\\Local\\Temp`;
+  for (const d of [local, roaming, temp]) mkdirSync(d, { recursive: true });
+  return {
+    USERPROFILE: home, HOME: home, LOCALAPPDATA: local, APPDATA: roaming, TEMP: temp, TMP: temp, PSModulePath: PS_MODULES,
+    SystemRoot: SYS, PATHEXT: ".COM;.EXE;.BAT;.CMD", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${home}/.gitconfig`,
+    PATH: [bin.replaceAll("/", "\\"), `${SYS}\\System32`, `${SYS}\\System32\\WindowsPowerShell\\v1.0`, dirname(Bun.which("git") ?? "C:\\git\\git.exe")].join(";"),
+  };
+};
 describe.skipIf(!win)("install.ps1", () => {
   const fakes = (f: ReturnType<typeof sandbox>) => {
     // Официальный установщик: powershell -c "irm bun.sh/install.ps1 | iex" → кладёт bun.cmd
@@ -190,13 +214,8 @@ describe.skipIf(!win)("install.ps1", () => {
     put(`${f.bin}/powershell.cmd`, `@echo off\r\necho %*>> "%USERPROFILE%\\ps-args"\r\nmkdir "%USERPROFILE%\\.bun\\bin" 2>nul\r\ncopy /y "${f.dir.replaceAll("/", "\\")}\\fakebun.cmd" "%USERPROFILE%\\.bun\\bin\\bun.cmd" >nul\r\n`);
   };
   const run = (f: ReturnType<typeof sandbox>, script: string, stdin: string, repo = f.bare) => {
-    const sys = process.env.SystemRoot ?? "C:\\Windows";
-    const git = dirname(Bun.which("git")!);
-    const r = Bun.spawnSync([`${sys}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "--yes"], {
-      cwd: f.dir, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe",
-      env: { USERPROFILE: f.home, HOME: f.home, SystemRoot: sys, PATHEXT: ".COM;.EXE;.BAT;.CMD", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: `${f.home}/.gitconfig`,
-        PATH: [f.bin.replaceAll("/", "\\"), `${sys}\\System32`, `${sys}\\System32\\WindowsPowerShell\\v1.0`, git].join(";"), MIKSY_REPO: repo },
-      timeout: PS_LIMIT,
+    const r = Bun.spawnSync([`${SYS}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "--yes"], {
+      cwd: f.dir, stdin: Buffer.from(stdin), stdout: "pipe", stderr: "pipe", env: { ...psEnv(f.home, f.bin), MIKSY_REPO: repo }, timeout: PS_LIMIT,
     });
     const out = r.stdout.toString() + r.stderr.toString();
     return { code: r.exitCode, out: r.exitedDueToTimeout ? `${out}\n(install.ps1 остановлен: не закончил за ${PS_LIMIT / 1000} с — выше всё, что он успел напечатать)` : out };
@@ -282,4 +301,44 @@ ${again.out}`).toBe("");
     expect(r.out).toContain("Bun 1.4.2 старше 1.4.3 — обновите: bun upgrade");
     expect(existsSync(`${f.home}/Projects/miksy`) || existsSync(`${f.home}/bun-args`)).toBe(false);
   }, TEST_LIMIT);
+
+  // Круг 12e: тесты выше дают install.ps1 только системные модули (PSModulePath). Команда не оттуда (например, из
+  // модуля, поставленного отдельно) у пользователя бы работала, а в тесте — нет, или наоборот: этот тест называет её.
+  // Разбор скрипта PowerShell (все вызовы команд) и Get-Command для каждой в том же окружении
+  test("install.ps1 вызывает только системные командлеты, свои функции и git, bun, powershell", () => {
+    const f = sandbox();
+    const probe = `${f.dir}/probe.ps1`;
+    put(probe, [
+      "param([string]$Script)",
+      "$ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$null, [ref]$null)",
+      "$own = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name }",
+      "$names = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() } | Where-Object { $_ } | Sort-Object -Unique",
+      "foreach ($n in $names) {",
+      "  if ($own -contains $n -or @('git', 'bun', 'powershell') -contains $n) { continue }",
+      "  $c = Get-Command $n -CommandType Cmdlet,Function,Alias -ErrorAction SilentlyContinue | Select-Object -First 1",
+      "  if (-not $c) { \"$n : not found\"; continue }",
+      "  $base = if ($c.Module) { $c.Module.ModuleBase } else { $PSHOME }",
+      "  if (-not $base.StartsWith($PSHOME, [StringComparison]::OrdinalIgnoreCase)) { \"$n : $base\" }",
+      "}",
+    ].join("\r\n"));
+    const r = Bun.spawnSync([`${SYS}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", probe, join(ROOT, "install.ps1")], {
+      cwd: f.dir, stdout: "pipe", stderr: "pipe", env: psEnv(f.home, f.bin), timeout: PS_LIMIT,
+    });
+    expect({ code: r.exitCode, outside: r.stdout.toString().trim(), err: r.stderr.toString().trim() }).toEqual({ code: 0, outside: "", err: "" });
+  }, TEST_LIMIT);
+
+  // ВРЕМЕННО (круг 12e, убрать после замеров на GitHub): сколько стоит один запуск PowerShell с поиском отсутствующей
+  // команды — как в install.ps1 — в прежнем урезанном окружении, в новом (psEnv) и в полном окружении раннера. Печатает
+  // строку «12e-замер» в вывод; на отказ не влияет
+  test.skipIf(!process.env.GITHUB_ACTIONS)("12e-замер: запуск PowerShell в трёх окружениях", () => {
+    const f = sandbox();
+    const ps = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const cmd = "if (-not (Get-Command bunxx -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0";
+    const old = { USERPROFILE: f.home, HOME: f.home, SystemRoot: SYS, PATHEXT: ".COM;.EXE;.BAT;.CMD", PATH: `${SYS}\\System32` };
+    const time = (env: Record<string, string>) => { const s = performance.now(); Bun.spawnSync([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd], { env, stdout: "pipe", stderr: "pipe", timeout: PS_LIMIT }); return Math.round(performance.now() - s); };
+    const count = (d: string) => { try { return readdirSync(d).length; } catch { return -1; } };
+    const pf = `${process.env.ProgramFiles ?? "C:\\Program Files"}\\WindowsPowerShell\\Modules`;
+    console.log(`12e-замер: прежнее ${time(old)} мс, прежнее повторно ${time(old)} мс, новое ${time(psEnv(f.home, f.bin))} мс, ` +
+      `новое повторно ${time(psEnv(f.home, f.bin))} мс, полное ${time(process.env as Record<string, string>)} мс; модулей в ${pf}: ${count(pf)}`);
+  }, 4 * PS_LIMIT);
 });
