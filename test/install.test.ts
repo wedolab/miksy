@@ -2,7 +2,7 @@
 // Bun; установщик Bun подменён (поддельные curl / powershell кладут поддельный bun, который только
 // записывает, с чем его запустили), движок клонируется из локального bare-репо (MIKSY_REPO)
 import { describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { canonical } from "../src/paths";
@@ -327,18 +327,44 @@ ${again.out}`).toBe("");
     expect({ code: r.exitCode, outside: r.stdout.toString().trim(), err: r.stderr.toString().trim() }).toEqual({ code: 0, outside: "", err: "" });
   }, TEST_LIMIT);
 
-  // ВРЕМЕННО (круг 12e, убрать после замеров на GitHub): сколько стоит один запуск PowerShell с поиском отсутствующей
-  // команды — как в install.ps1 — в прежнем урезанном окружении, в новом (psEnv) и в полном окружении раннера. Печатает
-  // строку «12e-замер» в вывод; на отказ не влияет
-  test.skipIf(!process.env.GITHUB_ACTIONS)("12e-замер: запуск PowerShell в трёх окружениях", () => {
+  // ВРЕМЕННО (круг 12e, убрать после замеров на GitHub): что в полном окружении раннера делает запуск PowerShell быстрым
+  // (полсекунды против 20–45 с в окружении теста, замер 341004b). Каждый вариант — один запуск в своём свежем доме
+  // песочницы; по строке «12e-замер» на вариант, сразу после запуска. На отказ не влияет
+  test.skipIf(!process.env.GITHUB_ACTIONS)("12e-замер: что ускоряет PowerShell на раннере", () => {
     const f = sandbox();
     const ps = `${SYS}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    const cmd = "if (-not (Get-Command bunxx -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0";
-    const old = { USERPROFILE: f.home, HOME: f.home, SystemRoot: SYS, PATHEXT: ".COM;.EXE;.BAT;.CMD", PATH: `${SYS}\\System32` };
-    const time = (env: Record<string, string>) => { const s = performance.now(); Bun.spawnSync([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd], { env, stdout: "pipe", stderr: "pipe", timeout: PS_LIMIT }); return Math.round(performance.now() - s); };
-    const count = (d: string) => { try { return readdirSync(d).length; } catch { return -1; } };
-    const pf = `${process.env.ProgramFiles ?? "C:\\Program Files"}\\WindowsPowerShell\\Modules`;
-    console.log(`12e-замер: прежнее ${time(old)} мс, прежнее повторно ${time(old)} мс, новое ${time(psEnv(f.home, f.bin))} мс, ` +
-      `новое повторно ${time(psEnv(f.home, f.bin))} мс, полное ${time(process.env as Record<string, string>)} мс; модулей в ${pf}: ${count(pf)}`);
-  }, 4 * PS_LIMIT);
+    const miss = "if (-not (Get-Command bunxx -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0";
+    const full = { ...process.env } as Record<string, string>;
+    // Без переменных keys (имена в Windows — без учёта регистра: Path и PATH — одна переменная)
+    const without = (env: Record<string, string>, keys: string[]) =>
+      Object.fromEntries(Object.entries(env).filter(([k]) => !keys.some((x) => x.toLowerCase() === k.toLowerCase())));
+    const say = (s: string) => console.log(`12e-замер: ${s}`);
+    const size = (p: string) => { try { return `${statSync(p).size} байт`; } catch { return "нет"; } };
+    let n = 0;
+    const home = () => { const h = `${f.dir.replaceAll("/", "\\")}\\h${n++}`; mkdirSync(h, { recursive: true }); return h; };
+    const cacheIn = (h: string) => `${h}\\AppData\\Local\\Microsoft\\Windows\\PowerShell\\ModuleAnalysisCache`;
+    const time = (label: string, env: Record<string, string>, script = miss, after?: () => string) => {
+      const s = performance.now();
+      const r = Bun.spawnSync([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], { env, stdout: "pipe", stderr: "pipe", timeout: 120_000 });
+      say(`${label} — ${Math.round(performance.now() - s)} мс${r.exitedDueToTimeout ? " (остановлен по пределу)" : ""}${after ? `; ${after()}` : ""}`);
+    };
+    const runnerCache = full.PSModuleAnalysisCachePath || `${full.LOCALAPPDATA}\\Microsoft\\Windows\\PowerShell\\ModuleAnalysisCache`;
+    const mp = Bun.spawnSync([ps, "-NoProfile", "-Command", "$s = Get-MpComputerStatus; $p = Get-MpPreference; 'RealTimeProtectionEnabled=' + $s.RealTimeProtectionEnabled + '; ExclusionPath=' + ($p.ExclusionPath -join ',')"],
+      { env: full, stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+    say(`Defender: ${(mp.stdout.toString() + mp.stderr.toString()).trim().split(/\r?\n/).slice(0, 3).join(" | ")}`);
+    say(`PSModuleAnalysisCachePath раннера: ${full.PSModuleAnalysisCachePath ?? "не задан"}; кеш раннера ${runnerCache}: ${size(runnerCache)}`);
+    say(`PSModulePath раннера: ${full.PSModulePath ?? "не задан"}`);
+    time("полное", full);
+    time("полное без LOCALAPPDATA", without(full, ["LOCALAPPDATA"]));
+    { const h = home(); mkdirSync(`${h}\\AppData\\Local`, { recursive: true });
+      time("полное с песочным LOCALAPPDATA", { ...without(full, ["LOCALAPPDATA"]), LOCALAPPDATA: `${h}\\AppData\\Local` }, miss, () => `кеш в песочнице: ${size(cacheIn(h))}`); }
+    { const h = home(), e = psEnv(h, f.bin);
+      time("новое + остальные переменные раннера", { ...without(full, Object.keys(e)), ...e }, miss, () => `кеш в песочнице: ${size(cacheIn(h))}`); }
+    { const h = home();
+      time("новое, Get-Command -CommandType Application", psEnv(h, f.bin), "if (-not (Get-Command bunxx -CommandType Application -ErrorAction SilentlyContinue)) { Test-Path C:\\ | Out-Null }; exit 0", () => `кеш в песочнице: ${size(cacheIn(h))}`); }
+    { const h = home();
+      time("новое, без поиска отсутствующей команды (только Test-Path)", psEnv(h, f.bin), "Test-Path C:\\ | Out-Null; exit 0", () => `кеш в песочнице: ${size(cacheIn(h))}`); }
+    { const h = home();
+      time("новое + PSModuleAnalysisCachePath раннера", { ...psEnv(h, f.bin), PSModuleAnalysisCachePath: runnerCache }, miss, () => `кеш раннера: ${size(runnerCache)}`); }
+  }, 8 * 120_000 + 60_000);
 });
