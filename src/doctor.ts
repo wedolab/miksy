@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter } from "./adapter";
 import { type Action, plan, verifyMerges } from "./apply";
-import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, declaredSkillSecrets, loadLayer, loadMap, loadSecrets, orphanTreeDirs, unknownKeys, WIDE_SKILL_SECRETS, wideSkillSecrets, SHALLOW_LEVELS, type WalkCut } from "./load";
+import { allLayerMcp, caseTwins, configRoot, ENGINE, ignoredLayerParts, ignoredText, layerSecrets, SKILL_SECRETS_ADVICE, legacyAgentNames, declaredSkillSecrets, loadLayer, loadMap, loadSecrets, orphanTreeDirs, configScan, WIDE_SKILL_SECRETS, wideSkillSecrets, SHALLOW_LEVELS, type WalkCut } from "./load";
 import { machineRoots, rootText } from "./roots";
 import { engineVersion, newerLedger, oldBun } from "./version";
 import { splitInstructions } from "./instructions";
@@ -337,6 +337,11 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   };
 
   if (manifestError) out.push(manifestError, "Проверка без сведений о владении; файлы и учёт не изменены.", "");
+  // Ошибки формы файлов настроек (круг 12f): все файлы; sync, которому нужен такой файл, откажет до записи. Цели выше
+  // проверены без ключей с ошибками
+  const scan = configScan();
+  const shapeErrors = [...scan.errors.values()].flat();
+  if (shapeErrors.length) out.push(`Ошибки в файлах настроек (${shapeErrors.length}) — sync, которому нужен такой файл, откажет, пока их не исправить:`, ...shapeErrors.map((l) => "  " + l), "");
   section("Конфликты первого sync", "файлы не записаны", blocked);
   section("Небезопасные права", "открытые пути local/ и права файлов miksy исправит sync/setup; о ссылках — в самих строках", permissions);
   section("Проекты без доверия", "причина для каждого агента; чужое доверие не меняется", trust);
@@ -396,7 +401,8 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
 
   const problems = Number(!!manifestError) + blocked.length + permissions.length + unsynced.length + forgottenNow.length + renumbered.files.length + stale.length + vanished.length + team.length + manual.length + lost.length + orphans.length + typos.length + naked.length + nakedSkills.length + missing.size
     + values.length + secretProblems.length + undeliverable.length + skillLinks.length + groupBelow.length + former.length + badGroups.length + pendingTrust.length
-    + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length;
+    + emptySecrets.length + strayOff.length + missingExe.length + shimProblems.length + clashes.length + rooted.length + rootedMain.length + twins.length
+    + shapeErrors.length;
   out.push(problems ? `Проблем: ${problems}.` : "Всё синхронизировано.");
   // Старый Bun — предупреждение, не проблема: код выхода doctor от него не меняется (круг 10f)
   const bun = oldBun(bunVersion);
@@ -426,8 +432,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
     info.push(`Серверы, которые на этой машине не запустятся (${idle.size}):`);
     for (const [name, byWhy] of idle) for (const [why, ag] of byWhy) info.push(`  ${name}  ${why}  (${[...ag].join(", ")})`);
   }
-  const keys = unknownKeys();
+  const keys = scan.unknown;
   if (keys.length) info.push(`Неизвестные ключи (${keys.length}) — miksy их не читает: опечатка или ключ более новой версии miksy:`, ...keys.map((k) => "  " + k));
+  if (scan.soft.length) info.push(`Замечания к файлам настроек (${scan.soft.length}):`, ...scan.soft.map((k) => "  " + k));
   if (persistent.length) {
     info.push(`Известные конфликты (${persistent.length}) — повторяются при каждом sync, miksy их не трогает:`);
     for (const f of (verbose ? persistent : persistent.slice(0, 8))) info.push(`  ${f.agent}  ${f.target}  ${f.detail}`);

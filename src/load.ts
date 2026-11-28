@@ -4,9 +4,9 @@ import { canonical, child, fold, homeDir, inside, sameKey, samePath, slash, driv
 import { nakedInText, nakedSecrets, skillFileKind, textFile } from "./secrets";
 import { gitSpawn } from "./git";
 import { agentId } from "./agentid";
-import { ADAPTERS } from "./agents";
 import { innerRoots, locate, type Root, rootExists, rootKey, treeAbove, treeJoin } from "./roots";
 import type { MiksyMap, Instruction, Layer, Machine, McpServer, Os, Skill } from "./types";
+import { check, distance, LAYER_FORM, MACHINE_FORM, MAP_FORM, mapNotes, MCP_FORM, mcpKind, type Field, type Finding } from "./schema";
 
 // Движок (этот код) и конфигурация пользователя (layers/, map.yaml, local/) живут отдельно:
 // движком можно делиться, конфигурация — личная.
@@ -50,36 +50,73 @@ function yaml<T>(path: string): T {
 }
 
 
+// ---- Проверка формы файлов настроек (круг 12f, src/schema.ts) ----
+// Ошибки формы файлов, прочитанных командой. Без «ворот» загрузчик бросает сразу (adopt, target, mcp off …). sync,
+// explain открывают ворота (collect): загрузчики копят ошибки всех прочитанных файлов, команда до записи бросает их
+// одним блоком (gateCheck в src/commands.ts). doctor и clean — ignore: ошибки не останавливают (doctor показывает их
+// сам, clean должен убирать записанное и при сломанной конфигурации), загрузчик отдаёт файл без ключей с ошибками
+export class ConfigError extends Error {}
+export const configErrorText = (lines: string[]) =>
+  `ошибки в настройках miksy — ничего не записано. Исправьте эти строки в файлах вручную и повторите:\n${lines.map((l) => "  " + l).join("\n")}`;
+let gate: { mode: "collect" | "ignore"; errors: Map<string, string[]>; read: Set<string> } | null = null;
+export function openGate(mode: "collect" | "ignore") { gate = { mode, errors: new Map(), read: new Set() }; }
+// Вложенный запуск команды (план setup/update — sync --dry-run): свои ворота, по выходе — ворота внешней
+export function swapGate(next: unknown = null): unknown {
+  const old = gate;
+  gate = next as typeof gate;
+  return old;
+}
+// Закрыть ворота: ошибки прочитанных файлов и сами файлы (от корня конфигурации)
+export function closeGate(): { errors: string[]; read: Set<string> } {
+  const g = gate;
+  gate = null;
+  return { errors: g ? [...g.errors.values()].flat() : [], read: g?.read ?? new Set() };
+}
+// Путь файла от корня конфигурации («layers/tree/Acme/layer.yaml», «local/machine.yaml»); вне её — как есть
+export function configRel(path: string, root = configRoot()): string {
+  const p = slash(path);
+  return inside(p, slash(root)) ? slash(relative(root, path)) : p;
+}
+// read — файл прочитан командой целиком (его ошибки — её); treeGroups читает из слоя только target
+function report(file: string, findings: Finding[], read = true) {
+  if (read) gate?.read.add(file);
+  if (!findings.length) return;
+  const lines = findings.map((e) => `${file}: ${e.text}`);
+  if (!gate) throw new ConfigError(configErrorText(lines));
+  gate.errors.set(file, [...new Set([...(gate.errors.get(file) ?? []), ...lines])]);
+}
+// Документ файла по форме: ошибки — в report, в ответ — документ без ключей с ошибками
+function checked<T>(doc: unknown, form: Field, file: string, extra: Finding[] = []): T {
+  const c = check(doc, form);
+  report(file, [...c.errors, ...extra]);
+  return c.value as T;
+}
+// Обход слоёв ради справки (все MCP, широкие skill_secrets): не чтение командой — ворота его не видят, а ошибки
+// слоя ловит сам обход
+function ungated<T>(fn: () => T): T {
+  const g = gate;
+  gate = null;
+  try { return fn(); } finally { gate = g; }
+}
+
 export function currentOs(): Os {
   if (process.platform === "win32") return "windows";
   if (process.platform === "darwin") return "macos";
   return "linux";
 }
 
-// trust в machine.yaml и layer.yaml: { <агент>: boolean } — агенты с доверием проектам (адаптер: trust). В сообщении —
-// в обратном порядке списка адаптеров: так оно выглядело до круга 10x-2 ({ codex: boolean, claude: boolean })
-function checkTrust(t: unknown, where: string) {
-  const ids = Object.values(ADAPTERS).filter((a) => a.trust).map((a) => a.id);
-  if (t !== undefined && (!t || typeof t !== "object" || Array.isArray(t) || Object.entries(t).some(([k, v]) => !ids.includes(k) || typeof v !== "boolean")))
-    throw new Error(`${where}: trust — объект { ${[...ids].reverse().map((id) => `${id}: boolean`).join(", ")} }`);
-}
-
 export function loadMachine(root = configRoot()): Machine {
   const path = join(root, "local", "machine.yaml");
   if (!existsSync(path)) throw new Error(`Нет ${path}. Машина ещё не настроена — запусти: bun src/cli.ts setup`);
-  const m = yaml<{ workspace?: unknown; vars?: Record<string, string>; agents?: string[]; trust?: Machine["trust"]; mcp_off?: unknown }>(path);
-  checkTrust(m?.trust, path);
-  const roots = parseRoots(m?.workspace, slash(path), ledgerRoots(root));
-  if (m.agents !== undefined && !(Array.isArray(m.agents) && m.agents.every((a) => typeof a === "string")))
-    throw new Error(`${path}: agents — список агентов, например [claude, codex]`);
-  if (m.mcp_off != null && !(Array.isArray(m.mcp_off) && m.mcp_off.every((a) => typeof a === "string" && a)))
-    throw new Error(`${path}: mcp_off — список имён MCP-серверов, выключенных на этой машине, например mcp_off: [gitlab]. Исправьте строку в файле вручную или удалите её`);
+  // Форма (vars, agents, trust, mcp_off) — src/schema.ts; workspace разбирает parseRoots
+  const m = checked<{ workspace?: unknown; vars?: Record<string, unknown>; agents?: string[]; trust?: Machine["trust"]; mcp_off?: string[] }>(yaml(path), MACHINE_FORM(), configRel(path, root));
+  const roots = parseRoots(m.workspace, slash(path), ledgerRoots(root));
   return {
     workspace: roots[0].path,
     roots,
     os: currentOs(),
     home: slash(homeDir()),
-    vars: m.vars ?? {},
+    vars: Object.fromEntries(Object.entries(m.vars ?? {}).map(([k, v]) => [k, String(v)])),
     // Прежние имена агентов (gemini) — синонимы
     ...(m.agents && { agents: [...new Set(m.agents.map(agentId))] }),
     ...(m.trust && { trust: m.trust }),
@@ -205,18 +242,11 @@ export function parseEnv(text: string): Record<string, string> {
 
 export function loadMap(root = configRoot()): MiksyMap {
   const path = join(root, "map.yaml");
-  const m = yaml<Partial<MiksyMap> & { skill_prefix?: unknown; tools?: unknown }>(path) ?? {};
-  if (m.skill_prefix !== undefined && (typeof m.skill_prefix !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(m.skill_prefix)))
-    throw new Error(`${slash(path)}: skill_prefix — строка из букв, цифр, «-», «_», «.», например miksy-`);
-  const tools = m.tools ?? {};
-  const list = (v: unknown) => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x);
-  if (typeof tools !== "object" || Array.isArray(tools) || Object.entries(tools as object).some(([k, t]) =>
-    !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || !t || typeof t !== "object" || !list(t.find)
-    || (t.install !== undefined && (typeof t.install !== "object" || Object.entries(t.install).some(([os, s]) => !["windows", "macos", "linux"].includes(os) || typeof s !== "string")))))
-    throw new Error(`${slash(path)}: tools — { ИМЯ: { find: [команда, …], install: { windows|macos|linux: как установить } } }`);
+  // Форма — src/schema.ts (MAP_FORM)
+  const m = checked<Partial<MiksyMap> & { skill_prefix?: string; tools?: MiksyMap["tools"] }>(yaml(path), MAP_FORM(), configRel(path, root));
   return { global: m.global ?? [], layers: m.layers ?? [],
-    ...(m.skill_prefix !== undefined && { skillPrefix: m.skill_prefix as string }),
-    ...(m.tools !== undefined && { tools: tools as MiksyMap["tools"] }) };
+    ...(m.skill_prefix !== undefined && { skillPrefix: m.skill_prefix }),
+    ...(m.tools !== undefined && { tools: m.tools }) };
 }
 
 const listDir = (dir: string) => (existsSync(dir) ? readdirSync(dir).sort() : []);
@@ -288,16 +318,7 @@ export function caseTwins(root = configRoot()): { names: string[]; used: string 
   return out;
 }
 
-// Расстояние Левенштейна — для поиска опечаток в именах каталогов
-function distance(a: string, b: string): number {
-  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
-  for (let j = 1; j <= b.length; j++) d[0][j] = j;
-  for (let i = 1; i <= a.length; i++)
-    for (let j = 1; j <= b.length; j++)
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-  return d[a.length][b.length];
-}
-
+// Похожие имена каталогов — вероятная опечатка (расстояние Левенштейна — src/schema.ts)
 const similar = (a: string, b: string) => {
   const [x, y] = [a.toLowerCase(), b.toLowerCase()];
   if (x === y) return false;
@@ -363,6 +384,9 @@ export function orphanTreeDirs(workspace: string | Root[], root = configRoot()):
 // Все определения MCP-серверов во всех слоях конфигурации (каталоги с mcp/), в том числе не подключённых в map.yaml:
 // для miksy mcp off/on и doctor — есть ли имя где-нибудь в слоях. Слой не читается — пропускается (ошибку покажет sync)
 export function allLayerMcp(root = configRoot()): McpServer[] {
+  return ungated(() => allMcp(root));
+}
+function allMcp(root: string): McpServer[] {
   const out: McpServer[] = [];
   const walk = (dir: string) => {
     let entries;
@@ -379,15 +403,12 @@ export function allLayerMcp(root = configRoot()): McpServer[] {
 
 export function loadLayerDir(dir: string, name: string): Layer {
   const metaPath = join(dir, "layer.yaml");
+  // Форма — src/schema.ts (LAYER_FORM); ключи с ошибками в meta не попадают
   const meta = existsSync(metaPath)
-    ? yaml<{ description?: string; exclude?: string[]; import_skills?: unknown; trust?: unknown; target?: unknown; skill_secrets?: unknown }>(metaPath) ?? {}
+    ? checked<{ description?: unknown; exclude?: string[]; import_skills?: Layer["importSkills"]; trust?: Layer["trust"]; target?: boolean; skill_secrets?: string[] }>(yaml(metaPath), LAYER_FORM(), configRel(metaPath))
     : {};
-  checkTrust(meta.trust, `${name}/layer.yaml`);
-  checkTarget(meta.target, `${name}/layer.yaml`);
-  const skillSecrets = checkSkillSecrets(meta.skill_secrets, `${name}/layer.yaml`);
+  const skillSecrets = [...new Set(meta.skill_secrets ?? [])];
   const imp = meta.import_skills;
-  if (imp !== undefined && imp !== "auto" && imp !== "all" && imp !== false && !(Array.isArray(imp) && imp.every((x) => typeof x === "string")))
-    throw new Error(`${name}/layer.yaml: import_skills — auto, all, false или список имён`);
 
   const instructions: Instruction[] = listDir(join(dir, "instructions"))
     .filter((f) => f.endsWith(".md"))
@@ -399,55 +420,72 @@ export function loadLayerDir(dir: string, name: string): Layer {
 
   const mcp: McpServer[] = listDir(join(dir, "mcp"))
     .filter((f) => f.endsWith(".yaml") || f.endsWith(".yml"))
-    .map((f) => {
-      const s = yaml<McpServer>(join(dir, "mcp", f));
-      if (!s?.name) throw new Error(`${name}/mcp/${f}: нет поля name`);
-      if (!s.command && !s.url) throw new Error(`${name}/mcp/${f}: нужно command или url`);
+    .flatMap((f) => {
+      // Форма — src/schema.ts (MCP_FORM) и ровно одно из command и url; сервер с ошибкой не берётся (команда с воротами
+      // откажет до записи, doctor и clean — без него)
+      const doc = yaml<unknown>(join(dir, "mcp", f));
+      const c = check(doc, MCP_FORM());
+      const kind = doc && typeof doc === "object" && !Array.isArray(doc) ? mcpKind(doc as Record<string, unknown>) : null;
+      const errors = [...c.errors, ...(kind ? [kind] : [])];
+      report(configRel(join(dir, "mcp", f)), errors);
+      if (errors.length) return [];
+      const s = c.value as McpServer & { os?: Os | Os[] };
+      s.name = String(s.name);
+      // os строкой — как список из одной ОС
+      if (typeof s.os === "string") s.os = [s.os];
       // Прежнее имя агента (agents: { gemini: … }) — синоним; заданное новым именем важнее
       if (s.agents && typeof s.agents === "object" && Object.keys(s.agents).some((k) => agentId(k) !== k))
         s.agents = Object.fromEntries(Object.entries(s.agents).sort(([a], [b]) => Number(agentId(a) === a) - Number(agentId(b) === b)).map(([k, v]) => [agentId(k), v]));
-      return s;
+      return [s as McpServer];
     });
 
-  return { name, dir, description: meta.description, exclude: meta.exclude ?? [], importSkills: imp as Layer["importSkills"],
+  return { name, dir, ...(meta.description !== undefined && { description: String(meta.description) }), exclude: meta.exclude ?? [], importSkills: imp,
     ...(meta.trust !== undefined && { trust: meta.trust as Layer["trust"] }), ...(meta.target === true && { target: true }), ...(skillSecrets.length && { skillSecrets }), instructions, skills, mcp };
 }
 
-// Ключи, которые miksy читает: остальные — опечатка или ключ более новой версии (sync и doctor
-// предупреждают; значения не проверяются здесь — это делают loadMap и loadLayerDir)
-const MAP_KEYS = ["global", "layers", "skill_prefix", "tools"];
-const MAP_ENTRY_KEYS = ["use", "match", "os"];
-const LAYER_KEYS = ["description", "exclude", "import_skills", "trust", "target", "skill_secrets"];
-
-// Неизвестные ключи map.yaml (и его привязок) и всех layer.yaml в layers/: «файл: ключ». Файл, который не
-// разбирается, пропускается — об ошибке скажет загрузка
-export function unknownKeys(root = configRoot()): string[] {
-  const out: string[] = [];
-  const read = (path: string): unknown => { try { return parseYaml(readFileSync(path, "utf8")); } catch { return null; } };
-  const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-  const map = read(join(root, "map.yaml"));
-  if (isObj(map)) {
-    for (const k of Object.keys(map)) if (!MAP_KEYS.includes(k)) out.push(`map.yaml: ${k}`);
-    for (const list of ["global", "layers"]) {
-      const v = map[list];
-      if (Array.isArray(v)) v.forEach((e, i) => {
-        if (isObj(e)) for (const k of Object.keys(e)) if (!MAP_ENTRY_KEYS.includes(k)) out.push(`map.yaml: ${list}[${i}].${k}`);
-      });
-    }
-  }
+// Все файлы настроек по форме (src/schema.ts): map.yaml, local/machine.yaml, все layer.yaml и mcp/*.yaml в layers/ (в
+// том числе слоёв, не подключённых на этой машине). errors — по файлам (от корня конфигурации); unknown — неизвестные
+// ключи «файл: путь ключа (может быть, …?)»; soft — замечания без отказа. Файл, который не разбирается как YAML, — в
+// errors (сам разбор бросает загрузчик). Для doctor (всё), sync и explain (ошибки файлов, которые команда не читает, —
+// предупреждением) и предупреждения о неизвестных ключах
+export type ConfigScan = { errors: Map<string, string[]>; unknown: string[]; soft: string[] };
+export function configScan(root = configRoot()): ConfigScan {
+  const out: ConfigScan = { errors: new Map(), unknown: [], soft: [] };
+  const file = (path: string, form: () => Field, more?: (doc: Record<string, unknown>) => { errors?: Finding[]; soft?: Finding[] }) => {
+    if (!existsSync(path)) return;
+    const rel = configRel(path, root);
+    let doc: unknown;
+    try { doc = parseYaml(readFileSync(path, "utf8")); }
+    catch { out.errors.set(rel, [`${rel}: YAML не разбирается; проверьте синтаксис (содержимое не выводится)`]); return; }
+    const c = check(doc, form());
+    const x = doc && typeof doc === "object" && !Array.isArray(doc) && more ? more(doc as Record<string, unknown>) : {};
+    const errors = [...c.errors, ...(x.errors ?? [])];
+    if (errors.length) out.errors.set(rel, errors.map((e) => `${rel}: ${e.text}`));
+    out.unknown.push(...c.unknown.map((e) => `${rel}: ${e.text}`));
+    out.soft.push(...[...c.soft, ...(x.soft ?? [])].map((e) => `${rel}: ${e.text}`));
+  };
+  file(join(root, "map.yaml"), MAP_FORM, (d) => ({ soft: mapNotes(d) }));
+  file(join(root, "local", "machine.yaml"), MACHINE_FORM);
   const walk = (dir: string) => {
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (e.isFile() && e.name === "layer.yaml") {
-        const doc = read(join(dir, e.name));
-        if (isObj(doc)) for (const k of Object.keys(doc)) if (!LAYER_KEYS.includes(k)) out.push(`${slash(relative(root, join(dir, e.name)))}: ${k}`);
+      if (e.isFile() && e.name === "layer.yaml") file(join(dir, e.name), LAYER_FORM);
+      else if (e.isDirectory() && e.name === "mcp") {
+        let defs: string[] = [];
+        try { defs = readdirSync(join(dir, e.name)).filter((f) => /\.ya?ml$/.test(f)).sort(); } catch { /* нет доступа */ }
+        for (const f of defs) file(join(dir, e.name, f), MCP_FORM, (d) => { const k = mcpKind(d); return { errors: k ? [k] : [] }; });
       } else if (e.isDirectory() && !LAYER_PARTS.has(e.name)) walk(join(dir, e.name));
     }
   };
   walk(join(root, "layers"));
   return out;
 }
+// Неизвестные ключи всех файлов настроек: «файл: путь ключа» (с подсказкой похожего имени)
+export const unknownKeys = (root = configRoot()): string[] => configScan(root).unknown;
+export const UNKNOWN_KEYS = "неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy)";
+export const OTHER_ERRORS = "ошибки в файлах настроек, которые эта команда не читает, — исправьте, иначе откажет sync, которому они нужны (например, sync --all)";
+
 
 // Прежние имена агентов в конфигурации (gemini — теперь antigravity): работают как синонимы, doctor
 // подсказывает переименовать. local/machine.yaml (agents) и agents: в MCP слоёв — «файл: где — было → стало»
@@ -487,6 +525,9 @@ export function checkSkillSecrets(v: unknown, where: string): string[] {
 // {…}), чей слой объявляет skill_secrets: эти имена получат skills всех подходящих организаций — как из global (круг 11l).
 // Строка «map.yaml: layers[i] (match: …) → слой: имена»; битая карта или слой — пропуск (ошибку покажет загрузка)
 export function wideSkillSecrets(root = configRoot()): string[] {
+  return ungated(() => wide(root));
+}
+function wide(root: string): string[] {
   const out: string[] = [];
   let map: MiksyMap;
   try { map = loadMap(root); } catch { return out; }
@@ -521,20 +562,17 @@ export function declaredSkillSecrets(root = configRoot()): { file: string; name:
   return out;
 }
 
-// target в layer.yaml слоя дерева: true — каталог workspace этого слоя становится целью-группой
-function checkTarget(t: unknown, where: string) {
-  if (t !== undefined && typeof t !== "boolean") throw new Error(`${where}: target — true или false (цель-группа)`);
-}
-
-// Пометки групп в дереве слоёв: rel — путь слоя (имена каталогов слоёв, «/»); "" — корень дерева
+// Пометки групп в дереве слоёв: rel — путь слоя (имена каталогов слоёв, «/»); "" — корень дерева. target: true —
+// каталог workspace этого слоя становится целью-группой. Из файла читается только target — и ошибка только его
+// (остальные ключи — дело загрузки слоя, если он применяется)
 export function treeGroups(root = configRoot()): string[] {
   const out: string[] = [];
   const walk = (dir: string, rel: string) => {
     const meta = join(dir, "layer.yaml");
     if (existsSync(meta)) {
-      const t = (yaml<{ target?: unknown }>(meta) ?? {}).target;
-      checkTarget(t, `${rel || "workspace"}/layer.yaml`);
-      if (t === true) out.push(rel);
+      const c = check(yaml(meta), LAYER_FORM());
+      report(configRel(meta, root), c.errors.filter((e) => e.path === "target"), false);
+      if ((c.value as { target?: unknown }).target === true) out.push(rel);
     }
     // Из каталогов, отличающихся только регистром, — тот, что применяется (первый в порядке каталога, как treeLayers и
     // caseTwins): пометка из другого не действует (проверка 7b, B №5)

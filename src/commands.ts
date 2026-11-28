@@ -18,7 +18,7 @@ import { expandPath, outsideRepoAdvice, projectRootText, repoAbove, setup, unsaf
 import { type Ask, terminalAsk } from "./ask";
 import { formatResolved } from "./explain";
 import { skillSecretCopies } from "./skillfiles";
-import { allLayerMcp, checkTree, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadLayer, loadMap, loadSecrets, configRoot, parseRoots, parseYaml, rootMemoryKey, unknownKeys, WIDE_SKILL_SECRETS, wideSkillSecrets } from "./load";
+import { allLayerMcp, checkTree, closeGate, ConfigError, configErrorText, configScan, containsProjects, ENGINE, serviceDir, findProject, type Project, ignoredLayerParts, ignoredText, LAYER_PARTS, layerSecrets, SKILL_SECRETS_ADVICE, ledgerRoots, listProjects, loadMachine, loadLayer, loadMap, loadSecrets, configRoot, openGate, OTHER_ERRORS, parseRoots, parseYaml, rootMemoryKey, swapGate, UNKNOWN_KEYS, WIDE_SKILL_SECRETS, wideSkillSecrets } from "./load";
 import { downgrade } from "./downgrade";
 import { finishUpdate, update } from "./update";
 import { runRestore } from "./restore";
@@ -879,6 +879,8 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   const paths = cachePaths(cmd === "doctor" || (["sync", "clean"].includes(cmd) && "dry-run" in flags));
   const outer = skippedReason();
   resetSkipped();
+  // Ворота проверки файлов настроек (круг 12f, src/load.ts): у каждого запуска свои
+  const outerGate = swapGate();
   try {
     let code = command(cmd, flags, positional, parsed.tail);
     // Номер этой машины не получен (круг 10z-2, src/machineid.ts): проекты с git отложены — одна строка, код не 0
@@ -889,7 +891,22 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
     }
     return code;
   }
-  finally { ask = null; observe = null; hints = true; restorePaths(paths); restoreSkipped(outer); }
+  finally { ask = null; observe = null; hints = true; restorePaths(paths); restoreSkipped(outer); swapGate(outerGate); }
+}
+
+// Ворота проверки файлов настроек (круг 12f): ошибки файлов, которые команда прочитала, — отказ до записи одним
+// блоком; ошибки остальных файлов — предупреждение (файл, который команда не читает, ничего не запишет не так)
+function gateCheck(warn: (s: string) => void) {
+  const { errors, read } = closeGate();
+  if (errors.length) throw new ConfigError(configErrorText(errors));
+  const others = [...configScan().errors].filter(([file]) => !read.has(file)).flatMap(([, lines]) => lines);
+  if (others.length) warn(`${OTHER_ERRORS}:\n${others.map((l) => "  " + l).join("\n")}\n`);
+}
+// Предупреждения о форме всех файлов настроек: неизвестные ключи и замечания (sync, explain)
+function shapeNotes(warn: (s: string) => void) {
+  const scan = configScan();
+  if (scan.unknown.length) warn(`${UNKNOWN_KEYS}: ${scan.unknown.join(", ")}\n`);
+  for (const s of scan.soft) warn(`${s}\n`);
 }
 
 function command(cmd: string, flags: Record<string, string>, positional: string[], tail?: string[]): number {
@@ -925,6 +942,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
     }
 
     case "explain": {
+      // Как sync для своего пути: ошибки формы в файлах, которые нужны этому месту, — отказ (gateCheck ниже)
+      openGate("collect");
       const machine = loadMachine();
       const roots = machineRoots(machine);
       let title: [string, string][];
@@ -976,6 +995,10 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           ["Группа выше", below.groups.map((g) => g.rel).join(" → ")],
           ["Claude здесь", `правила только слоёв ${below.layers.join(" → ") || "—"} (остальные — из файлов групп выше)`]);
       }
+      // Предупреждения о форме файлов настроек — как в sync
+      const note = (s: string) => console.log(`предупреждение: ${s}`);
+      gateCheck(note);
+      shapeNotes(note);
       title.unshift(["Конфигурация", configRoot().replaceAll("\\", "/")]);
       title.unshift(["Движок miksy", ENGINE.replaceAll("\\", "/")]);
       const known = loadSecrets();
@@ -1037,6 +1060,9 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
 
     case "sync":
     case "clean": {
+      // sync — отказ до записи, если в файлах, которые он читает, ошибки формы (gateCheck ниже); clean убирает записанное
+      // и при сломанной конфигурации — без проверки
+      openGate(cmd === "sync" ? "collect" : "ignore");
       const machine = loadMachine();
       if (cmd === "sync") {
         const naked = layerSecrets();
@@ -1046,8 +1072,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
           console.log(`ВНИМАНИЕ: секреты в skills слоёв (уйдут в git конфигурации; значения скрыты) — ${SKILL_SECRETS_ADVICE}:\n${naked.skills.map((l) => "  " + l).join("\n")}\n`);
         const unread = ignoredLayerParts();
         if (unread.length) console.log(`предупреждение: ${ignoredText(unread)}\n`);
-        const keys = unknownKeys();
-        if (keys.length) console.log(`предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): ${keys.join(", ")}\n`);
+        shapeNotes((s) => console.log(`предупреждение: ${s}`));
         const wide = wideSkillSecrets();
         if (wide.length) console.log(`предупреждение: ${WIDE_SKILL_SECRETS}:\n${wide.map((l) => "  " + l).join("\n")}\n`);
         // Команда miksy старого вида (движок обновили git pull, без update или setup): ею агенты запускают MCP-серверы
@@ -1068,6 +1093,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if (cmd === "sync" && "out" in flags) {
         const p = one;
         const t = p ? projectTarget(p.abs, p.rel, machine, p.nested) : globalTarget(machine);
+        gateCheck((s) => console.log(`предупреждение: ${s}`));
         const secrets = loadSecrets();
         const { manifest } = loadManifestMoved(machine);
         const adapters = agentsFor(machine, flags.agent);
@@ -1149,6 +1175,9 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         : "global" in flags ? [globalTarget(machine)]
         : one ? [projectTarget(one.abs, one.rel, machine, one.nested, runGroups)]
         : [vanishedTarget(positional[0], manifest, machine) || (() => { const p = findProject(positional[0], roots); return projectTarget(p.abs, p.rel, machine, p.nested, runGroups); })()];
+      // Ошибки формы в прочитанных файлах — отказ до записи целей (clean — без проверки)
+      if (cmd === "sync") gateCheck(warn);
+      else closeGate();
 
       // Своя замена встроенного skill miksy: одна строка, когда встроенный сменился с прошлого sync --global этой машины
       // (хеш — в учёте), а не на каждом sync (круг 11j). Замены нет — учёт не трогаем (sync без изменений оставляет его
@@ -1836,6 +1865,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       break;
 
     case "doctor": {
+      // Ошибки формы файлов настроек doctor показывает сам (все, проблемами) — загрузка их не останавливает
+      openGate("ignore");
       const machine = loadMachine();
       const { text, problems } = doctor(agentsFor(machine, flags.agent), machine, "verbose" in flags);
       console.log(text);

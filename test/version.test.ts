@@ -98,11 +98,13 @@ describe("совместимость: неизвестные ключи map.yaml
     put(`${f.config}/layers/tree/Org/layer.yaml`, "description: орг\ntrusts: { claude: true }\nimport_skills: auto\n");
     put(`${f.config}/layers/global/layer.yaml`, "description: всё\nexclude: []\n");
     put(`${f.config}/layers/global/skills/s/layer.yaml`, "not: a layer\n"); // внутри skills — не слой
-    expect(unknownKeys(f.config)).toEqual(["map.yaml: skil_prefix", "map.yaml: global[0].mach", "layers/tree/Org/layer.yaml: trusts"]);
+    // С подсказкой похожего известного имени (круг 12f); в порядке ключей файла
+    const keys = ["map.yaml: global[0].mach (может быть, global[0].match?)", "map.yaml: skil_prefix (может быть, skill_prefix?)", "layers/tree/Org/layer.yaml: trusts (может быть, trust?)"];
+    expect(unknownKeys(f.config)).toEqual(keys);
     const doc = f.run(["doctor"]);
-    expect(doc.out).toMatch(/Неизвестные ключи \(3\) — miksy их не читает: опечатка или ключ более новой версии miksy:\n  map\.yaml: skil_prefix\n  map\.yaml: global\[0\]\.mach\n  layers\/tree\/Org\/layer\.yaml: trusts/);
+    expect(doc.out).toContain(`Неизвестные ключи (3) — miksy их не читает: опечатка или ключ более новой версии miksy:\n${keys.map((k) => "  " + k).join("\n")}`);
     const dry = f.run(["sync", "--all", "--dry-run"]);
-    expect(dry.out).toContain("предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): map.yaml: skil_prefix, map.yaml: global[0].mach, layers/tree/Org/layer.yaml: trusts");
+    expect(dry.out).toContain(`предупреждение: неизвестные ключи — miksy их не читает (опечатка или ключ более новой версии miksy): ${keys.join(", ")}`);
     // Конфигурация без лишних ключей — без предупреждения
     const clean = cliFixture();
     expect(unknownKeys(clean.config)).toEqual([]);

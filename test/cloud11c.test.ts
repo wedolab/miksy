@@ -156,7 +156,7 @@ describe("11c: правка mcp_off строками", () => {
     const bad = f.run(["mcp", "off"]);
     expect(bad.code).toBe(1);
     expect(bad.err).toContain("mcp_off — список имён MCP-серверов");
-    expect(bad.err).toContain("Исправьте строку в файле вручную");
+    expect(bad.err).toContain("Исправьте эти строки в файлах вручную");
     expect(bad.err).not.toContain("miksy mcp");
   });
 });
