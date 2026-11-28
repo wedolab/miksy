@@ -5,7 +5,7 @@ import { deliver, type Launcher, nativeServers } from "../../src/launch";
 import { skillFileFlags, skillFiles } from "../../src/skillfiles";
 import type { McpServer } from "../../src/types";
 import { currentGlobal, currentProject, strictJson } from "./current";
-import { keepOwn } from "../../src/paths";
+import { keepOwn, slash } from "../../src/paths";
 
 export const HEADER = (layers: string[]) =>
   `<!-- Сгенерировано miksy (слои: ${layers.join(" → ")}). Не править вручную — изменения вносить в конфигурацию miksy (слои). -->`;
@@ -66,7 +66,7 @@ export const antigravity: Adapter = {
     if (!existsSync(p)) return [];
     try {
       const data = JSON.parse(readFileSync(p, "utf8"));
-      return Object.keys(data.projects ?? {}).map((k) => k.replaceAll("\\", "/"));
+      return Object.keys(data.projects ?? {}).map((k) => slash(k));
     } catch {
       return [];
     }

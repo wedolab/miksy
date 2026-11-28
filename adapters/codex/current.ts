@@ -1,3 +1,4 @@
+import { slash } from "../../src/paths";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CurrentState } from "../../src/adapter";
@@ -8,16 +9,16 @@ export const readConfig = (path: string): Record<string, any> =>
 
 // В каждом каталоге Codex читает только первый непустой файл; @-импортов нет.
 export function instructionFile(dir: string, fallbacks: string[] = []): string | undefined {
-  return ["AGENTS.override.md", "AGENTS.md", ...fallbacks]
+  const found = ["AGENTS.override.md", "AGENTS.md", ...fallbacks]
     .map((name) => join(dir, name))
-    .find((path) => existsSync(path) && readFileSync(path, "utf8").trim().length > 0)
-    ?.replaceAll("\\", "/");
+    .find((path) => existsSync(path) && readFileSync(path, "utf8").trim().length > 0);
+  return found && slash(found);
 }
 
 function servers(config: Record<string, any>, source: string): CurrentState["mcp"] {
   return Object.fromEntries(Object.entries<Record<string, unknown>>(config.mcp_servers ?? {})
     .filter(([, def]) => def.enabled !== false)
-    .map(([name, def]) => [name, { source: source.replaceAll("\\", "/"), def }]));
+    .map(([name, def]) => [name, { source: slash(source), def }]));
 }
 
 export function currentGlobal(home: string): CurrentState {
@@ -26,7 +27,7 @@ export function currentGlobal(home: string): CurrentState {
   const path = join(dir, "config.toml");
   const config = readConfig(path);
   return { instructionFiles: file ? [file] : [], mcp: servers(config, path),
-    ...(typeof config.developer_instructions === "string" && { instructionTexts: [{ source: path.replaceAll("\\", "/") + " (developer_instructions)", text: config.developer_instructions }] }) };
+    ...(typeof config.developer_instructions === "string" && { instructionTexts: [{ source: slash(path) + " (developer_instructions)", text: config.developer_instructions }] }) };
 }
 
 // Как у Claude, проектный снимок не включает глобальный слой: он сравнивается отдельно.
@@ -39,5 +40,5 @@ export function currentProject(dir: string, home: string, os = process.platform 
   const config = trust === "trusted" ? readConfig(path) : {};
   const file = instructionFile(dir, config.project_doc_fallback_filenames ?? global.project_doc_fallback_filenames ?? []);
   return { instructionFiles: file ? [file] : [], mcp: servers(config, path),
-    ...(typeof config.developer_instructions === "string" && { instructionTexts: [{ source: path.replaceAll("\\", "/") + " (developer_instructions)", text: config.developer_instructions }] }) };
+    ...(typeof config.developer_instructions === "string" && { instructionTexts: [{ source: slash(path) + " (developer_instructions)", text: config.developer_instructions }] }) };
 }

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { RenderedFile, RenderResult, Target } from "./adapter";
 import { canonical, escapes, guard, inside, safeRelative } from "./bounds";
@@ -14,6 +14,7 @@ import { canonicalState, emptyState, type ForgottenMark, hasAny, pruneState, rem
 import type { Machine } from "./types";
 import { configRoot } from "./load";
 import { ensurePrivateLocal } from "./secretfiles";
+import { modesWork, modeSys, noModeAt, setMode } from "./modes";
 import { agentId, aliasesOf } from "./agentid";
 import { allMiksyLines, blocksOf, coveredBy, type ExcludeBlock, lineAlive, removeBlock, setBlock } from "./excludeblocks";
 import { ensureMachineId, machineId, machineUnknown, noteSkipped } from "./machineid";
@@ -71,7 +72,7 @@ function setAt(o: any, key: string[], value: unknown) {
 function excludeFile(dir: string): { path: string; shared: boolean; root: string } | null {
   const git = join(dir, ".git");
   if (!existsSync(git)) return null;
-  if (lstatSync(git).isDirectory()) return { path: join(git, "info", "exclude").replaceAll("\\", "/"), shared: false, root: canonical(git) };
+  if (lstatSync(git).isDirectory()) return { path: slash(join(git, "info", "exclude")), shared: false, root: canonical(git) };
   // Ответ git — один на каталог за команду (gitMemo): каждый агент спрашивал заново (круг 10k); устройство репо miksy не меняет
   return { ...gitMemo(`exclude|${fold(slash(dir))}`, () => worktreeExclude(dir)) };
 }
@@ -81,7 +82,7 @@ function worktreeExclude(dir: string): { path: string; shared: boolean; root: st
   const lines = r.out.trim().split(/\r?\n/).filter(Boolean);
   // Три пути — или сбой: пустая строка дала бы resolve(dir, "") — сам каталог проекта вместо файла exclude (10d-6)
   if (lines.length !== 3) throw new GitError(`git exclude для ${dir}: git ответил не тремя путями (${lines.length}, код ${r.code})`);
-  const [path, gitDir, common] = lines.map((p) => resolve(dir, p).replaceAll("\\", "/"));
+  const [path, gitDir, common] = lines.map((p) => slash(resolve(dir, p)));
   return { path, shared: canonical(gitDir) !== canonical(common), root: canonical(common) };
 }
 
@@ -211,9 +212,17 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
   ]);
   const finish = (list: Action[]) => markSensitive(list, sensitivePaths);
   // Права, до которых надо исправить существующий файл; null — исправлять нечего (или Windows)
-  const modeFix = (p: string, executable = false): number | null =>
-    process.platform === "win32" || !existsSync(p) ? null : repairMode(statSync(p).mode, { sensitive: sensitivePaths.has(pathKey(p)), executable });
-  const abs = (base: "home" | "project" | "local", p: string) => join(rootOf(base), p).replaceAll("\\", "/");
+  // На диске, где права не меняются (точка в учёте, src/modes.ts), — не предлагать: chmod там не действует (круг 12g)
+  const modeFix = (p: string, executable = false): number | null => {
+    if (process.platform === "win32" || !existsSync(p)) return null;
+    const sensitive = sensitivePaths.has(pathKey(p));
+    const fix = repairMode(modeSys.mode(p), { sensitive, executable });
+    if (!noModeAt(p)) return fix;
+    // Под точкой секретный файл закрыт — права там снова работают: точка уйдёт из учёта (src/modes.ts)
+    if (fix === null && sensitive) modesWork(p);
+    return null;
+  };
+  const abs = (base: "home" | "project" | "local", p: string) => slash(join(rootOf(base), p));
   // Пути из учёта: файлы — внутри цели и в local/ (обёртки секретов); общие файлы со слитыми
   // ключами — ещё и в домашнем каталоге
   const fileRoots = [target.scope === "project" ? target.dir : machine.home, localRoot];
@@ -245,7 +254,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     if (target.scope !== "project") return null;
     for (const p of new Set([path, pathKey(path)])) {
       if (!inside(p, target.dir)) continue;
-      const c = relative(target.dir, p).replaceAll("\\", "/").match(collectionRx());
+      const c = slash(relative(target.dir, p)).match(collectionRx());
       const m = c && [c[0], c[2]];
       if (!m) continue;
       if (!teamDirs.has(m[1])) teamDirs.set(m[1], trackedPaths(target.dir, [m[1]]).length > 0);
@@ -268,7 +277,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
       let top: string | null = null;
       if (target.scope === "project" && inside(path, target.dir) && real === path) {
         if (projectGitError) throw new Error(projectGitError);
-        const rel = relative(target.dir, path).replaceAll("\\", "/");
+        const rel = slash(relative(target.dir, path));
         // Обычные проектные пути уже проверены одним запросом. Ссылки требуют
         // отдельной проверки логического пути, предков и физической цели.
         if (tracked.has(rel) || (!projectPaths.includes(rel) && trackedPaths(target.dir, [rel]).length)) top = target.dir;
@@ -321,7 +330,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     .map((b) => ({ owner: b.owner, machine: b.machine }));
   const current = [...new Set(ownBlocks.flatMap((b) => b.lines))].sort();
   const foreign = [...new Set(foreignBlocks.flatMap((b) => b.lines))];
-  const relOf = (p: string) => relative(target.scope === "project" ? target.dir : machine.home, p).replaceAll("\\", "/");
+  const relOf = (p: string) => slash(relative(target.scope === "project" ? target.dir : machine.home, p));
   // Файл проекта под строкой блока другой машины (по логическому пути и по физическому)
   const otherMachine = (rel: string, path: string) => target.scope === "project" && !!foreign.length
     && (coveredBy(foreign, rel) || (inside(pathKey(path), target.dir) && coveredBy(foreign, relOf(pathKey(path)))));
@@ -787,7 +796,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
     const consumers = [...new Set(actions.filter((a) => a.kind === "conflict").map((a) => conflictFile(a.abs)).filter((p): p is string => !!p && !inside(p, localRoot)))]
       .map((p) => fold(readFileSync(p, "utf8").replace(/\\\\/g, "/").replace(/\\/g, "/")));
     for (const a of stale) {
-      const rel = fold(relative(localRoot, a.abs).replaceAll("\\", "/"));
+      const rel = fold(slash(relative(localRoot, a.abs)));
       if (consumers.some((text) => text.includes(rel))) actions.splice(actions.indexOf(a), 1);
     }
   }
@@ -833,7 +842,7 @@ export function plan(result: RenderResult, target: Target, machine: Machine, pre
         // Без защиты exclude новые проектные файлы не должны появиться.
         return finishTrust(actions.filter((a) => a.kind === "conflict" || !inside(a.abs, target.dir)));
       }
-      const rel = (p: string) => relative(target.dir, p).replaceAll("\\", "/");
+      const rel = (p: string) => slash(relative(target.dir, p));
       const inProject = (p: string) => inside(p, target.dir);
       const conflicts = actions.filter((a) => a.kind === "conflict");
       const conflicted = new Set(conflicts.map((a) => pathKey(a.abs)));
@@ -1158,7 +1167,7 @@ export function approvalExclude(planned: Action[], dir: string): Extract<Action,
   const ex = planned.find((a): a is Extract<Action, { kind: "exclude" }> => a.kind === "exclude");
   const approves = planned.filter((a): a is ApproveAction => a.kind === "approve");
   if (!ex || !approves.length) return null;
-  const line = (a: ApproveAction) => "/" + relative(canonical(dir), a.abs).replaceAll("\\", "/");
+  const line = (a: ApproveAction) => "/" + slash(relative(canonical(dir), a.abs));
   const current = ex.current ?? [];
   const add = approves.filter((a) => a.own.length).map(line).filter((l) => ex.lines.includes(l));
   const drop = approves.filter((a) => !a.own.length).map(line).filter((l) => !ex.lines.includes(l));
@@ -1327,10 +1336,10 @@ function applyInto(actions: Action[], state: TargetState, made?: Made): { state:
       pruneState(state);
     } else if (a.kind === "chmod") {
       if (a.roots) guard(a.abs, ...a.roots);
-      if (process.platform !== "win32") chmodSync(a.abs, a.mode);
+      setMode(a.abs, a.mode);
     } else if (a.kind === "adopt") {
-      const mode = process.platform === "win32" ? null : repairMode(statSync(a.abs).mode, { sensitive: a.sensitive, executable: a.executable });
-      if (mode !== null) chmodSync(a.abs, mode);
+      const mode = process.platform === "win32" || noModeAt(a.abs) ? null : repairMode(modeSys.mode(a.abs), { sensitive: a.sensitive, executable: a.executable });
+      if (mode !== null) setMode(a.abs, mode);
       if (lstatSync(a.abs).isSymbolicLink()) (state.links ??= {})[pathKey(a.abs)] = a.abs;
       state.files[pathKey(a.abs)] = sha(a.content);
       rememberPath(state, a.abs);

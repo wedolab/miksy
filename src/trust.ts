@@ -222,7 +222,7 @@ export function executableSettings(dir: string, git: boolean, agent: TrustAgent,
   const found: [string, unknown][] = [], past: [string, unknown][] = [], lines: string[] = [], files: string[] = [];
   for (const c of list) {
     const abs = join(dir, c.rel);
-    const show = (r: Inspected) => { if (r) { lines.push(...r.lines); files.push(abs.replaceAll("\\", "/")); } };
+    const show = (r: Inspected) => { if (r) { lines.push(...r.lines); files.push(slash(abs)); } };
     // Неотслеживаемый файл: в git-цели — не в индексе; без git — settings.local.json (личный файл Claude: ответы
     // пользователя в окне Claude и одобрения miksy в нём — как в git-проекте; остальное — исполняемые настройки) и
     // .codex/config.toml (свой — только с записанным хешем: правка или подмена после доверия miksy — чужое, как в
@@ -268,7 +268,7 @@ export function executableSettings(dir: string, git: boolean, agent: TrustAgent,
 // в той же папке. Нет — решение прежней версии или ФС без номеров: как раньше
 type Decision = { answer: "yes" | "no"; fingerprint: string; date: string; alone?: true; folder?: string };
 type Decisions = Record<string, { rel?: string } & Partial<Record<DecisionKind, Decision>>>;
-const decisionsPath = () => join(configRoot(), "local", "trust.json").replaceAll("\\", "/");
+const decisionsPath = () => slash(join(configRoot(), "local", "trust.json"));
 // Переехавшие каталоги (src/relocate.ts): решение прежнего пути — решение нового (отпечаток — от
 // содержимого настроек, путь в него не входит)
 let movedDecisions: { moves: Move[]; rel: (dir: string) => string } | null = null;
@@ -366,7 +366,7 @@ export function inheritedExec(group: string, otherGroups: string[], dialog = fal
       walk(sub, depth + 1);
     }
   };
-  walk(group.replaceAll("\\", "/"), 1);
+  walk(slash(group), 1);
   return out;
 }
 
@@ -389,7 +389,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
   if (target.scope !== "project" || !spec) return { actions: out, missing, advice };
   const a = agent as TrustAgent;
   const clean = result.clean === true;
-  const file = join(machine.home, spec.file).replaceAll("\\", "/");
+  const file = slash(join(machine.home, spec.file));
   const format = spec.format;
   let trusted = false;
   try {
@@ -425,7 +425,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
     const known = Object.fromEntries(actions.flatMap((x) => (x.known && x.kind !== "approve" && existsSync(x.abs) ? [[pathKey(x.abs), sha(readFileSync(x.abs, "utf8"))]] : [])));
     // Личный файл агента с одобрениями серверов командного файла (адаптер: trust.approvals; Claude — .claude/settings.local.json)
     const appr = spec.approvals;
-    const local = appr ? join(target.dir, appr.file).replaceAll("\\", "/") : "";
+    const local = appr ? slash(join(target.dir, appr.file)) : "";
     const written = actions.filter((x) => x.kind === "write").map((x) => pathKey(x.abs));
     // Одобрения серверов .mcp.json, которые записал miksy, когда учёт их забыл: файл одобрений под точной строкой
     // блока miksy claude в exclude (её miksy пишет, только пока в файле его одобрения), не файл git; кандидаты —
@@ -504,7 +504,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       // Файл одобрений под строкой блока exclude другой машины (общая папка, круг 10z-2): в учёт — только одобренное этой
       // машиной; своё ненужное она не снимает, пока строка другой машины на файле есть (той машине одобрение может быть
       // нужно, а различить, кто одобрил, нельзя): sync держит его в учёте и снимет позже, clean оставляет в файле
-      const shared = otherMachine(relative(target.dir, local).replaceAll("\\", "/"));
+      const shared = otherMachine(slash(relative(target.dir, local)));
       const stale = ours.filter((n) => !want.includes(n) && enabled.includes(n));
       const own = [...new Set([...ours.filter((n) => want.includes(n) && enabled.includes(n)), ...add, ...(shared && !clean ? stale : [])])].sort();
       const remove = shared ? [] : stale;
@@ -518,7 +518,7 @@ export function trustPlan(result: RenderResult, target: Target, machine: Machine
       // следующем (проверка 7b, A №2)
       const unapproved = mcp && eligible && !basis ? mcp.names.filter((n) => (!enabled.includes(n) || remove.includes(n)) && !disabled.includes(n)) : [];
       if (unapproved.length && !pending)
-        pending = { dir: target.dir, rel: target.rel, agent: "mcpjson", fingerprint: mcp!.fingerprint, lines: mcp!.lines, files: [join(target.dir, appr.source).replaceAll("\\", "/")], ...(mcpDecision?.answer === "no" && { declined: true }) };
+        pending = { dir: target.dir, rel: target.rel, agent: "mcpjson", fingerprint: mcp!.fingerprint, lines: mcp!.lines, files: [slash(join(target.dir, appr.source))], ...(mcpDecision?.answer === "no" && { declined: true }) };
       // Одобрение miksy снимается, а вопроса в этом запуске нет: проект не доверенный в Claude (вы сняли доверие сами;
       // доверие miksy здесь не ставил — «нет» доверию Claude), а прежний отказ не переспрашивается. Вопрос о серверах
       // не поможет — без доверия Claude их не запускает; подсказка — что будет дальше (выпуск 0.2.2, A2: правило R2 и

@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, rmdirSync, unlinkSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { configRoot, containsProjects, LAYER_PARTS, parseYaml, serviceDir, SKIP_DIRS } from "./load";
-import { canonical, child, fold, homeDir, inside, pathKey, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { canonical, child, fold, homeDir, inside, pathKey, sameKey, samePath, slash, driveRoot, expandHome, trimSlash } from "./paths";
 import { writeAtomic } from "./manifest";
 import type { Group, TargetSpec } from "./registry";
 import { innerRoots, locate, type Root, rootExists, treeJoin } from "./roots";
@@ -92,7 +92,7 @@ export function targetDir(path: string, workspace: string | Root[], home: string
   if (!at && remove)
     for (const r of roots) {
       if (!r.away || !r.given) continue;
-      const link = trimSlash(slash(resolve(process.cwd(), driveRoot(r.given.replace(/^~(?=$|[\\/])/, homeDir())))));
+      const link = trimSlash(slash(resolve(process.cwd(), driveRoot(expandHome(r.given, homeDir())))));
       if (!inside(given, link)) continue;
       const moved = trimSlash(`${r.path}${given.slice(link.length)}`);
       const hit = locate(moved, roots);

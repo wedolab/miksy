@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { configRoot } from "./load";
 import { inside, pathKey, slash } from "./paths";
@@ -9,6 +9,7 @@ import { busyError } from "./locks";
 import { packageVersion } from "./version";
 import { agentId } from "./agentid";
 import { type Made, normalizeMade, validMade } from "./made";
+import { knownNoModes, noModeAt, noModesList, setMode, tryChmod } from "./modes";
 
 // Что miksy записал на этой машине — по каждой цели (агент + глобально/проект)
 export interface TargetState {
@@ -87,6 +88,8 @@ export interface Manifest {
   // Хеш встроенного skill miksy (builtin.ts: skillHash), который видел последний sync --global этой машины: строка
   // «ваша замена отстаёт от встроенного» — только когда встроенный сменился с тех пор (круг 11j). Поля нет — до 0.6.1
   builtinSkill?: string;
+  // Точки монтирования, где права файлов не меняются (сетевой диск, FAT): там miksy права не чинит (src/modes.ts, круг 12g)
+  noModes?: string[];
   // Папки и файлы-обёртки, которые создал miksy (src/made.ts; круг 11v). Поля нет — учёт до 11v: ничего такого не убирается
   made?: Made;
 }
@@ -182,6 +185,7 @@ export function loadManifest(path = manifestPath()): Manifest {
     if (names(m.trustedBefore)) delete m.trustedBefore;
     if (m.trustedBefore !== undefined && (!record(m.trustedBefore) || !Object.entries(m.trustedBefore).every(([id, v]) => id.includes("|") && typeof v === "string"))) throw new Error();
     if (m.builtinSkill !== undefined && typeof m.builtinSkill !== "string") delete m.builtinSkill; // справочное поле — без отказа
+    if (m.noModes !== undefined && !names(m.noModes)) delete m.noModes; // справочное — без отказа (круг 12g)
     if (m.made !== undefined && !validMade(m.made)) throw new Error();
     if (m.trustedFolder !== undefined && (!record(m.trustedFolder) || !Object.values(m.trustedFolder).every((v) => typeof v === "string"))) throw new Error();
     for (const [id, state] of Object.entries(m.targets)) {
@@ -190,6 +194,7 @@ export function loadManifest(path = manifestPath()): Manifest {
   } catch {
     throw new ManifestError(`${path}: учёт повреждён или недоступен. Сохраните копию и восстановите manifest.json (предыдущая версия — manifest.json.bak рядом); doctor продолжит проверку без учёта. Не удаляйте учёт: это потеряет сведения о владении.`);
   }
+  knownNoModes(m.noModes);
   return normalizeManifest(m);
 }
 
@@ -235,6 +240,7 @@ export function normalizeManifest(m: Manifest, entries: [string, TargetState][] 
     ...(Object.keys(forgotten).length > 0 && { forgotten }), ...(Object.keys(before).length > 0 && { trustedBefore: before }),
     ...(Object.keys(folders).length > 0 && { trustedFolder: folders }),
     ...(typeof m.builtinSkill === "string" && { builtinSkill: m.builtinSkill }),
+    ...(Array.isArray(m.noModes) && m.noModes.length > 0 && { noModes: m.noModes }),
     ...(normalizeMade(m.made) && { made: normalizeMade(m.made) }) };
 }
 
@@ -343,6 +349,10 @@ export function saveManifest(m: Manifest, path = manifestPath()) {
   savedOnce.add(path);
   const { version, engine: _, ...rest } = m;
   if (rest.made && !rest.made.dirs?.length && !Object.keys(rest.made.files ?? {}).length && !Object.keys(rest.made.keys ?? {}).length) delete rest.made;
+  // Точки, где права файлов не меняются (src/modes.ts): записанные и найденные в этом запуске
+  const noModes = noModesList(join(configRoot(), "local"), m.noModes ?? []);
+  if (noModes.length) rest.noModes = noModes;
+  else delete rest.noModes;
   writeAtomic(path, JSON.stringify({ version, engine: packageVersion(), ...rest }, null, 2) + "\n");
 }
 
@@ -358,14 +368,17 @@ export function writeAtomic(path: string, content: string, opts: { executable?: 
   const local = join(configRoot(), "local");
   if (inside(target, local)) {
     opts = { ...opts, sensitive: true };
-    if (process.platform !== "win32") for (let d = dirname(target); inside(d, local); d = dirname(d)) chmodSync(d, 0o700);
+    // ФС без прав: chmod без падения (local/ на таком диске — отказ раньше, src/secretfiles.ts)
+    if (process.platform !== "win32") for (let d = dirname(target); inside(d, local); d = dirname(d)) tryChmod(d, 0o700);
   }
   const mode = opts.sensitive ? (opts.executable ? 0o700 : 0o600) : fileMode(existsSync(target) ? statSync(target).mode & 0o7777 : undefined, !!opts.executable);
   const tmp = `${target}.miksy-tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
   writeFileSync(tmp, content, { flag: "wx", mode: 0o600 });
   try {
-    // mode при создании урезается umask — выставляем явно
-    if (process.platform !== "win32") chmodSync(tmp, mode ?? (0o666 & ~process.umask()));
+    // mode при создании урезается umask — выставляем явно. Секретный и исполняемый — с проверкой: не подействовал
+    // (ФС без прав) — точка запоминается (src/modes.ts), запись идёт. Под записанной точкой — проверка у любого файла:
+    // подействовал — права там снова работают, точка уйдёт из учёта
+    if (process.platform !== "win32") setMode(tmp, mode ?? (0o666 & ~process.umask()), !!(opts.sensitive || opts.executable) || !!noModeAt(target));
     renameRetrying(tmp, target);
   } catch (e) {
     rmSync(tmp, { force: true });

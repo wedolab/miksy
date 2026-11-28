@@ -133,7 +133,7 @@ describe("C1: правило на путях таблицы (checkLocalAccess, p
       link(k, targetOf(k, d), `${local}/backups/before-miksy-x/.agents/skills`);
       const dotBefore = rights(d.dot);
       expect({ check: checkLocalAccess(local), fix: privateLocal(local), dot: rights(d.dot) })
-        .toEqual({ check: { bad: [], failed: [], links: [], refuse: null }, fix: { fixed: false, warnings: [] }, dot: dotBefore });
+        .toEqual({ check: { bad: [], failed: [], links: [], refuse: null, noPerms: null }, fix: { fixed: false, warnings: [] }, dot: dotBefore });
     }, 60000);
 
   // local/ сам ссылка (перенесён на другой том): всё — от каталога назначения; ссылки внутри — по тем же правилам

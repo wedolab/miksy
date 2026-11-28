@@ -1,4 +1,5 @@
 // Что Antigravity видит сейчас из ручных конфигов — для сравнения с тем, что сгенерирует miksy.
+import { slash } from "../../src/paths";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { CurrentState } from "../../src/adapter";
@@ -28,7 +29,7 @@ export function currentGlobal(home: string): CurrentState {
   const instructionFiles: string[] = [];
   for (const rel of [".gemini/GEMINI.md", ".gemini/config/GEMINI.md", ".gemini/config/AGENTS.md"]) {
     const abs = join(home, rel);
-    if (existsSync(abs)) instructionFiles.push(abs.replaceAll("\\", "/"));
+    if (existsSync(abs)) instructionFiles.push(slash(abs));
   }
 
   const mcp: CurrentState["mcp"] = {};
@@ -47,7 +48,7 @@ export function currentGlobal(home: string): CurrentState {
       for (const [name, def] of Object.entries(data.mcpServers)) {
         if (!mcp[name] && def && typeof def === "object") {
           if ((def as Record<string, unknown>).disabled === true) continue;
-          mcp[name] = { source: abs.replaceAll("\\", "/"), def: def as Record<string, unknown> };
+          mcp[name] = { source: slash(abs), def: def as Record<string, unknown> };
         }
       }
     }
@@ -64,12 +65,12 @@ export function currentProject(dir: string, home: string): CurrentState {
     ".agents/plugins/miksy/rules/AGENTS.md",
   ]) {
     const abs = join(dir, rel);
-    if (existsSync(abs)) instructionFiles.push(abs.replaceAll("\\", "/"));
+    if (existsSync(abs)) instructionFiles.push(slash(abs));
   }
   const rulesDir = join(dir, ".agents", "rules");
   if (existsSync(rulesDir) && statSync(rulesDir).isDirectory()) {
     for (const f of readdirSync(rulesDir)) {
-      if (f.endsWith(".md")) instructionFiles.push(join(rulesDir, f).replaceAll("\\", "/"));
+      if (f.endsWith(".md")) instructionFiles.push(slash(join(rulesDir, f)));
     }
   }
 
@@ -80,7 +81,7 @@ export function currentProject(dir: string, home: string): CurrentState {
     if (data.mcpServers && typeof data.mcpServers === "object") {
       for (const [name, def] of Object.entries(data.mcpServers)) {
         if (def && typeof def === "object") {
-          mcp[name] = { source: mcpPath.replaceAll("\\", "/"), def: def as Record<string, unknown> };
+          mcp[name] = { source: slash(mcpPath), def: def as Record<string, unknown> };
         }
       }
     }

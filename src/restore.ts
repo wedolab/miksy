@@ -98,7 +98,7 @@ export function pickCopy(config: string, arg?: string): { copy: string | null; a
 }
 
 const readTarget = (p: string) => readlinkSync(p).replace(/^\\\\\?\\/, "");
-const normLink = (s: string) => key(s.replaceAll("\\", "/").replace(/^\/\/\?\//, "").replace(/\/+$/, ""));
+const normLink = (s: string) => key(slash(s).replace(/^\/\/\?\//, "").replace(/\/+$/, ""));
 const isLinkAt = (p: string) => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
 
 // Что нужно на месте: для ссылки на Windows — цель как её запишет junction (относительная раскрыта от папки ссылки)

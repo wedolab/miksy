@@ -15,7 +15,7 @@ import { foreignMcp, foreignSkills } from "./foreign";
 import { connectHint, detectAgents } from "./agentid";
 import { agentsFor, allProjects, allTargets, branchNotes, clashNotes, formerGroups, globalTarget, groupRulesDelivered, ledgerSkills, listGroups, literalFindings, loadManifestMoved, movesText, nestedNotes, outsideRoots, READERS, stranded, renderFor, rootedTargets, rootedText, isMainRoot, rootNotes, type TargetSpec, targetId, targetKey, unavailable, unprotectedSecrets, unsyncedGroups, workspaceRepoNote } from "./registry";
 import type { Machine } from "./types";
-import { checkLocalAccess, checkSecretFiles, localAccessText, secretsDir } from "./secretfiles";
+import { checkLocalAccess, checkSecretFiles, localAccessText, noPermsText, secretsDir } from "./secretfiles";
 import { plainDirs } from "./target";
 import { environment } from "./environ";
 import { stableBun } from "./launch";
@@ -208,7 +208,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
 
   const localAccess = checkLocalAccess();
   if (localAccess.refuse) permissions.push({ agent: "—", target: "local/backups", detail: `пока так, все команды, которые пишут (sync, clean, setup, update, root, adopt, trust, target), откажут: ${localAccess.refuse}` });
-  if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `${localAccessText(localAccess)} — sync/setup закроет local/ (секреты и учёт этой машины) только для вас${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
+  // Диск без прав (круг 12g): закрыть local/ нельзя — sync и setup откажут, пока конфигурация там
+  if (localAccess.noPerms) permissions.push({ agent: "—", target: "local/", detail: `${noPermsText(localAccess.noPerms)}; пока так, sync и setup откажут` });
+  else if (localAccess.bad.length) permissions.push({ agent: "—", target: "local/", detail: `${localAccessText(localAccess)} — sync/setup закроет local/ (секреты и учёт этой машины) только для вас${localAccess.refuse ? ", когда перестанут отказывать (строка выше)" : ""}` });
   // Ссылка local/secrets — одной строкой, в «Файлах секретов» (там и что делает sync); здесь — без повтора (выпуск 0.2.3, A7)
   // Путь — как записан и через настоящий путь local/ (local/ сама — ссылка; рецензия 9a, №8)
   const secretsLinks = [slash(secretsDir())];
@@ -413,6 +415,9 @@ export function doctor(adapters: Adapter[], machine: Machine, verbose: boolean, 
   if (shim.info.length) info.push(`Команда miksy (${shim.info.length}):`, ...shim.info.map((l) => "  " + l));
   const newer = newerLedger(manifest.engine);
   if (newer) info.push(`Версия: ${newer}`);
+  // Диски, где права файлов не меняются (учёт noModes, src/modes.ts; круг 12g): miksy права там не чинит
+  if (manifest.noModes?.length) info.push(`Права файлов не меняются (${manifest.noModes.length}) — сетевой диск или ФС без прав (например, SMB или FAT): miksy их там не меняет; файлы настроек агентов видны всем, у кого есть доступ к диску (значений секретов в них нет). Диск перемонтировали с правами — miksy заметит при следующей записи:`,
+    ...manifest.noModes.map((p) => "  " + p));
   // Копии skill miksy в глобальных слоях: прежний образец не действует, своя замена может отставать (круг 11j)
   let copies: BuiltinCopy[] = [];
   try {

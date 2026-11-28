@@ -5,7 +5,7 @@
 // adopt) — через run в этом же процессе, действия с системой (установка программ, PATH, git) — через
 // System: тесты подменяют все три. Без Ask (--yes, нет терминала) — только безопасная часть.
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { canonical, driveRoot, homeDir, inside, quoteArg, samePath, slash, trimSlash } from "./paths";
+import { canonical, driveRoot, homeDir, inside, quoteArg, samePath, slash, expandHome, trimSlash } from "./paths";
 import { basename, delimiter, dirname, join, posix, relative, win32 } from "node:path";
 import { behindLink, closeOwn, ensurePrivateLocal, refuseBackupPath } from "./secretfiles";
 import { checkTree, containsProjects, currentOs, ENGINE, findConfig, hasConfig, LAYER_PARTS, loadMachine, loadMap, loadSecrets, orphanTreeDirs, parseYaml, rootAway, treeGroups } from "./load";
@@ -117,7 +117,7 @@ const unquote = (s: string) => s.trim().replace(/^(["'])(.*)\1$/s, "$2").trim();
 export function expandPath(input: string, home: string, cwd: string): string {
   const bare = unquote(input);
   // «X:» — корень диска X:/, а не текущий каталог диска; косая в конце — прочь, кроме корня
-  const p = driveRoot(bare.replace(/^~(?=$|[\\/])/, home));
+  const p = driveRoot(expandHome(bare, home));
   return trimSlash(slash(paths(p, cwd).resolve(cwd, p)));
 }
 
@@ -474,7 +474,7 @@ export function setup(o: SetupOptions): number {
   const explicit = process.env.MIKSY_CONFIG;
   const pointer = join(home, ".miksy");
   const sibling = slash(join(dirname(engine), "miksy-config"));
-  let config = canonical(findConfig(engine).replace(/^~(?=$|[\\/])/, home));
+  let config = canonical(expandHome(findConfig(engine), home));
   if (hasConfig(config)) {
     if (ask) log(`✓ есть: ${config}`);
   } else {

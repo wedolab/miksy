@@ -3,7 +3,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { configRoot } from "./load";
 import { dirname, join, win32 } from "node:path";
-import { slash } from "./paths";
+import { slash, treeSlash } from "./paths";
 import type { Os } from "./types";
 
 // Команда miksy (shim): запускает Bun, которым её создал setup, — по пути без версии (stableBun), чтобы
@@ -171,7 +171,8 @@ export function shimNotes(home: string, os: Os, used: boolean, o: { registryPath
   else if (state === "foreign") info.push(`${path} — не команда miksy: MCP-серверы проектов (${who}) запускаются командой miksy (miksy mcp) — уберите этот файл и выполните miksy setup --yes`);
   else {
     const dir = dirname(path);
-    const norm = (p: string) => slash(p).replace(/\/+$/, "").toLowerCase();
+    // Для Windows — пути Windows («\» — разделитель), на какой бы ОС ни шла проверка
+    const norm = (p: string) => treeSlash(p).replace(/\/+$/, "").toLowerCase();
     if (os === "windows") {
       const list = (o.registryPath ?? registryPath)();
       if (list !== null && !list.split(";").some((e) => e && norm(e.replace(/%([^%]+)%/g, (m, k: string) => process.env[k] ?? m)) === norm(dir)))

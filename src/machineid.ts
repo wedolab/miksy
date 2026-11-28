@@ -12,6 +12,7 @@
 // Номер компьютера никуда не пишется (ни в общую папку, ни в журналы, ни в вывод); сам номер на диск не кешируется —
 // иначе копия local/ унесла бы его на другой компьютер. Номер компьютера берётся один раз за запуск (DESIGN §8.3,
 // «Машины в общей папке»)
+import { slash } from "./paths";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -78,7 +79,7 @@ function readSalt(config: string): string | null | false {
   } catch { return false; }
 }
 export const saltProblem = (config = configRoot()): string | null =>
-  readSalt(config) === false ? `${saltFile(config).replaceAll("\\", "/")} испорчен (ожидалось 32 знака 0-9a-f): номер этой машины не определить. Удалите файл — sync создаст новый номер; блоки exclude с прежним номером станут блоками «другой машины» (miksy doctor подскажет, как вернуть их своими)` : null;
+  readSalt(config) === false ? `${slash(saltFile(config))} испорчен (ожидалось 32 знака 0-9a-f): номер этой машины не определить. Удалите файл — sync создаст новый номер; блоки exclude с прежним номером станут блоками «другой машины» (miksy doctor подскажет, как вернуть их своими)` : null;
 
 // Номер этой машины. null — соли ещё нет (своих блоков с меткой нет), номер компьютера не получен или соль испорчена
 // (machineIdProblem, saltProblem)

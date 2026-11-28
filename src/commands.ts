@@ -2,7 +2,7 @@
 // (src/setup.ts) вызывают runCommand; вопросы — через Ask (в терминале — prompt, в тестах — сценарий)
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { cachePaths, canonical, restorePaths, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { cachePaths, canonical, restorePaths, fold, homeDir, inside, pathKey, quoteArg, sameKey, samePath, slash, driveRoot, expandHome, TILDE, trimSlash } from "./paths";
 import { shimNotes } from "./shim";
 import type { RenderResult } from "./adapter";
 import { apply, applyPlanned, approvalExclude, conflictFile, describe, plan, verifyMerges, type Action } from "./apply";
@@ -39,7 +39,8 @@ import { type AgentId, formatTeamSkills, scanTeamSkills } from "./teamskills";
 import type { Adapter } from "./adapter";
 import type { Machine, McpServer, Resolved } from "./types";
 import { deliveredSkillNames, deliveryOrder } from "./registry";
-import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, linkedDir, localAccessText, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
+import { backupsRefusal, checkLocalAccess, ensurePrivateLocal, noPermsText, tolerateOpenLocal, linkedDir, localAccessText, neededSecrets, pruneSecretFiles, secretFileState, secretsDir, secretWritable, writeSecretFiles } from "./secretfiles";
+import { freshNoModes, noModesText, resetModes } from "./modes";
 
 // Ссылка (в том числе битая)
 const isLinkPath = (p: string) => { try { return lstatSync(p).isSymbolicLink(); } catch { return false; } };
@@ -858,7 +859,7 @@ function syncProject(path: string | undefined, machine: Machine, out: boolean): 
   return { p, plain };
 }
 
-const tilde = (s: string) => (/^~(?=$|[\\/])/.test(s) ? homeDir() + s.slice(1).replaceAll("\\", "/") : s);
+const tilde = (s: string) => (TILDE.test(s) ? slash(expandHome(s, homeDir())) : s);
 
 // Одна команда miksy: код выхода (0 — успех, 1 — проблемы doctor, 3 — конфликты). Ошибки — исключения
 // (UsageError — код 2, Cancelled — отказ в подтверждении). io.ask — вопросы (по умолчанию — терминал,
@@ -873,6 +874,8 @@ export function runCommand(cmd: string, rest: string[], io: { ask?: Ask | null; 
   observe = io.observe ?? null;
   hints = io.hints ?? true;
   resetRun();
+  resetModes();
+  tolerateOpenLocal(false);
   if (gitCaching()) cacheGit();
   // Кеш путей — только командам, которые ничего не пишут: doctor и sync/clean с --dry-run (круг 10k, src/paths.ts).
   // Вложенный запуск (план setup/update — sync --dry-run) кеширует своё и по выходе возвращает внешнее состояние
@@ -999,8 +1002,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       const note = (s: string) => console.log(`предупреждение: ${s}`);
       gateCheck(note);
       shapeNotes(note);
-      title.unshift(["Конфигурация", configRoot().replaceAll("\\", "/")]);
-      title.unshift(["Движок miksy", ENGINE.replaceAll("\\", "/")]);
+      title.unshift(["Конфигурация", slash(configRoot())]);
+      title.unshift(["Движок miksy", slash(ENGINE)]);
       const known = loadSecrets();
       console.log(formatResolved(title, cfg, machine, known));
       // Секреты, которые skills этого места получают через miksy secret (круг 11k): имена и слой, без значений
@@ -1098,7 +1101,7 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
         const { manifest } = loadManifestMoved(machine);
         const adapters = agentsFor(machine, flags.agent);
         // Путь — от текущего каталога; песочница проверяется до любых записей
-        const out = resolve(process.cwd(), flags.out).replaceAll("\\", "/");
+        const out = slash(resolve(process.cwd(), flags.out));
         const dryRun = "dry-run" in flags;
         prepareSandbox(out, dryRun);
         console.log(`${t.title}\nСлои: ${t.cfg.layers.join(" → ")}\nПесочница: ${out}`);
@@ -1233,9 +1236,14 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       // Права local/: проверка одним снимком; исправление — только при открытых путях
       if ("dry-run" in flags) {
         const access = checkLocalAccess();
-        if (access.bad.length) console.log(`\nДоступ к local/ (секреты и учёт этой машины): ${localAccessText(access)} — sync закроет его только для вас.`);
+        // Диск без прав (круг 12g): настоящий sync откажет — и --dry-run тоже, тем же текстом
+        if (access.noPerms && cmd === "sync") throw new Error(noPermsText(access.noPerms));
+        if (access.noPerms) warn(noPermsText(access.noPerms));
+        else if (access.bad.length) console.log(`\nДоступ к local/ (секреты и учёт этой машины): ${localAccessText(access)} — sync закроет его только для вас.`);
         for (const l of access.links) warn(l);
       } else {
+        // clean секретов не пишет — на диске без прав убирает записанное с предупреждением (круг 12g)
+        if (cmd === "clean") tolerateOpenLocal(true);
         const access = ensurePrivateLocal();
         if (access.fixed) console.log("\nДоступ к local/ (секреты и учёт этой машины): закрыт — теперь только для вас.");
         for (const l of access.warnings) warn(l);
@@ -1336,6 +1344,8 @@ function command(cmd: string, flags: Record<string, string>, positional: string[
       if ("dry-run" in flags) { if (!regainRoot) console.log("\n--dry-run: ничего не записано."); }
       else {
         console.log(`\nГотово. Бэкапы этого запуска: ${runDir() ?? "не понадобились"} (хранятся последние ${KEEP_RUNS} запусков)`);
+        // Диск, где права файлов не меняются, найден в этом запуске (src/modes.ts): один раз, дальше — «Справочно» doctor
+        for (const p of freshNoModes(join(configRoot(), "local"))) console.log(`предупреждение: ${noModesText(p)}`);
         // Записанные ключи общих файлов — на месте ли сразу после записи (без паузы); перезапись
         // открытой сессией агента позже покажет doctor («ключи пропали»)
         const checking = writtenMerges.filter((x) => x.actions.some((a) => a.kind === "merge" || a.kind === "toml" || a.kind === "trust" || a.kind === "approve"));

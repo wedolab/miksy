@@ -6,7 +6,8 @@
 // строки (синтаксис сохраняется, копия разбирается), в прочих файлах — диапазоны байтов. Откат по такой
 // копии и затем sync восстанавливают обёртки. Оригиналы (originals/) — точные копии: clean возвращает
 // их как были; их защищают права local/. Ссылка local/backups — права её цели не меняются (linkedDir).
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tryChmod } from "./modes";
 import { dirname, join } from "node:path";
 import { configRoot, loadSecrets } from "./load";
 import { sha } from "./manifest";
@@ -26,7 +27,7 @@ export function scrubbedCopy(src: string, dst: string, values: Values) {
   writeFileSync(dst, maskFile(data, src, values), { mode: 0o600 });
 }
 
-import { pathKey as fold } from "./paths";
+import { pathKey as fold, slash } from "./paths";
 
 // Новый запуск: следующая копия создаст новую метку (тесты; процесс CLI — один запуск)
 export function newBackupRun() {
@@ -36,14 +37,14 @@ export function newBackupRun() {
 // Путь копии файла внутри каталога запуска: полный путь без «:» диска (D:/x/y → D/x/y)
 export const backupRel = (path: string) => path.replace(/^([A-Za-z]):/, "$1").replace(/^\/+/, "");
 // Каталог бэкапов текущего запуска (null — копий ещё не было)
-export const runDir = () => (run ? join(run.root, run.stamp).replaceAll("\\", "/") : null);
+export const runDir = () => (run ? slash(join(run.root, run.stamp)) : null);
 
 // Новая папка за ссылкой (local/backups на другом томе) — своя: закрыть сразу, что бы ни наследовала цель (круг 8d, E1)
 function mkdirPrivate(dir: string, config = configRoot()) {
   if (linkedDir(dir)) return;
   const fresh = !existsSync(dir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  if (process.platform !== "win32") chmodSync(dir, 0o700);
+  if (process.platform !== "win32") tryChmod(dir, 0o700);
   else if (fresh && behindLink(dir, config)) closeOwn(dir, true);
 }
 
@@ -82,7 +83,7 @@ export function backup(path: string, config = configRoot()) {
   for (let d = dirname(dst); !existsSync(d); d = dirname(d)) dirs.unshift(d);
   for (const d of dirs) mkdirPrivate(d, config);
   scrubbedCopy(path, dst, run.values);
-  if (process.platform !== "win32") chmodSync(dst, 0o600);
+  tryChmod(dst, 0o600);
 }
 
 // Копия до захвата: отдельный каталог (originals/), rotate рассматривает только метки запусков. Копии неизменяемы:
@@ -91,7 +92,7 @@ export function backup(path: string, config = configRoot()) {
 // (та же версия уже лежит — новой записи нет)
 export function originalBackup(path: string, config = configRoot()): { path: string; hash: string; written: boolean } {
   const root = join(config, "local", "backups", "originals");
-  const base = join(root, path.replaceAll("\\", "/").replace(/^([A-Za-z]):/, "$1").replace(/^\/+/, ""));
+  const base = join(root, slash(path).replace(/^([A-Za-z]):/, "$1").replace(/^\/+/, ""));
   const hash = sha(readFileSync(path, "utf8"));
   const dst = !existsSync(base) || sha(readFileSync(base, "utf8")) === hash ? base : `${base}.miksy-${hash.slice(0, 16)}`;
   // Сначала замок C10: его текст говорит, что делать (ссылка в originals — заменить папкой); guard — запасной
@@ -103,8 +104,8 @@ export function originalBackup(path: string, config = configRoot()): { path: str
   for (const d of dirs) mkdirPrivate(d, config);
   const written = !existsSync(dst);
   if (written) copyFileSync(path, dst, 1); // COPYFILE_EXCL: копия никогда не перезаписывается
-  if (process.platform !== "win32") chmodSync(dst, 0o600);
+  tryChmod(dst, 0o600);
   const saved = sha(readFileSync(dst, "utf8"));
   if (saved !== hash) throw new Error(`${dst}: копия оригинала не совпадает с файлом — захват отменён`);
-  return { path: dst.replaceAll("\\", "/"), hash: saved, written };
+  return { path: slash(dst), hash: saved, written };
 }

@@ -82,7 +82,7 @@ export const opencode: Adapter = {
     if (!existsSync(log)) return [];
     const dirs = new Set<string>();
     for (const m of readFileSync(log, "utf8").matchAll(/message="creating instance" directory="([^"]*)"/g))
-      dirs.add(m[1].replaceAll("\\\\", "\\").replaceAll("\\", "/"));
+      dirs.add(slash(m[1].replaceAll("\\\\", "\\")));
     return [...dirs];
   },
 

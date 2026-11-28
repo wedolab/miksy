@@ -1,3 +1,4 @@
+import { slash } from "./paths";
 import { gitCaching, gitMemo, gitSpawn, gitWhy, indexModes } from "./git";
 // Командные skills в репо проекта: поиск, склейка копий, проверка формы.
 // Только чтение — файлы команды miksy не меняет.
@@ -146,7 +147,7 @@ function scan(
     const issues: string[] = []; // агент skill не найдёт или не поймёт
     const warnings: string[] = []; // работает, но хрупко или неаккуратно
     const text = existsSync(skillMd) ? readFileSync(skillMd, "utf8") : "";
-    if (broken) issues.push(`битый симлинк → ${broken.replaceAll("\\", "/")}`);
+    if (broken) issues.push(`битый симлинк → ${slash(broken)}`);
     else if (!text) issues.push("SKILL.md не найден");
     const fm = frontmatter(text);
     const dirName = skillDir.split("/").pop()!;
@@ -290,7 +291,7 @@ function crlfQuery(dir: string, paths: string[]): Set<string> {
 function linkInRepo(from: string, to: string): string | null {
   if (/^([A-Za-z]:)?[\\/]/.test(to)) return null;
   const parts: string[] = from.split("/").slice(0, -1);
-  for (const seg of to.replaceAll("\\", "/").split("/")) {
+  for (const seg of slash(to).split("/")) {
     if (!seg || seg === ".") continue;
     if (seg === "..") {
       if (!parts.length) return null;
@@ -394,7 +395,7 @@ export function withTeamSkills(
     if (typeof fm.description !== "string" || !fm.description) { warnings.push(`skill ${s.name}: нет description — не доставлен; исправленную версию можно положить в слой проекта`); continue; }
     if (s.variants > 1) warnings.push(`skill ${s.name}: копии в репо расходятся (${count(s.variants, "вариант", "варианта", "вариантов")}), взят ${src.path}`);
     added.push({
-      item: { name, dir: join(projectDir, src.path).replaceAll("\\", "/"), team: true, files, ...(fm.name !== name && { patch: { "SKILL.md": patchName(text, name) } }) },
+      item: { name, dir: slash(join(projectDir, src.path)), team: true, files, ...(fm.name !== name && { patch: { "SKILL.md": patchName(text, name) } }) },
       layer: `репо:${src.path}`,
     });
   }

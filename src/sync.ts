@@ -1,3 +1,4 @@
+import { slash } from "./paths";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Adapter, CurrentState, RenderResult, Target } from "./adapter";
@@ -40,7 +41,7 @@ export function writeSandbox(out: string, agent: string, result: RenderResult): 
     guard(path, root);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, f.mode === "own" ? (f.block ? instructionBlock(f.content, false, hashMarkers(f.path)) : f.content) : JSON.stringify({ format: f.format, key: f.key, data: f.data }, null, 2) + "\n");
-    written.push(path.replaceAll("\\", "/"));
+    written.push(slash(path));
   }
   return written;
 }
@@ -151,7 +152,7 @@ export function compare(adapter: Adapter, cfg: Resolved, current: CurrentState, 
 export function syncOut(adapter: Adapter, rendered: { result: RenderResult; cfg: Resolved; missing: string[] }, target: Target, machine: Machine, out: string, dryRun = false, secrets: Record<string, string> = {}, launch?: Launcher) {
   const { result, cfg, missing } = rendered;
   const count = dryRun ? result.files.length : writeSandbox(out, adapter.id, result).length;
-  const lines = [`Адаптер ${adapter.id}: ${files(count)} ${dryRun ? "были бы записаны в" : "→"} ${join(out, adapter.id).replaceAll("\\", "/")}`];
+  const lines = [`Адаптер ${adapter.id}: ${files(count)} ${dryRun ? "были бы записаны в" : "→"} ${slash(join(out, adapter.id))}`];
   for (const f of result.files) lines.push(`  ${f.mode === "own" ? "файл " : "слить"}  ${f.base === "home" ? "~" : f.base === "local" ? "<конфигурация>/local" : "<проект>"}/${f.path}${f.mode === "merge" ? `  ключ ${JSON.stringify(f.key)}` : ""}`);
 
   if (target.scope === "project") {

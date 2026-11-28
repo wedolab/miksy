@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { canonical, child, fold, homeDir, inside, sameKey, samePath, slash, driveRoot, trimSlash } from "./paths";
+import { canonical, child, fold, homeDir, inside, sameKey, samePath, slash, driveRoot, expandHome, treeSlash, trimSlash } from "./paths";
 import { nakedInText, nakedSecrets, skillFileKind, textFile } from "./secrets";
 import { gitSpawn } from "./git";
 import { agentId } from "./agentid";
@@ -32,7 +32,7 @@ export function findConfig(engine = ENGINE): string {
 // Корень конфигурации: слои, map.yaml, local/ (настройки машины, секреты, учёт, бэкапы).
 // Вычисляется при каждом обращении, а не при импорте: MIKSY_CONFIG, заданный позже
 // (тесты, вложенный вызов), действует сразу
-export const configRoot = (): string => canonical(findConfig().replace(/^~(?=$|[\\/])/, homeDir()));
+export const configRoot = (): string => canonical(expandHome(findConfig(), homeDir()));
 
 // YAML с BOM в начале (Set-Content -Encoding utf8 в PowerShell 5.1, Блокнот) — как без него: иначе
 // первый ключ получает невидимый префикс («нет поля name»)
@@ -126,7 +126,7 @@ export function loadMachine(root = configRoot()): Machine {
 
 // Место корня в дереве слоёв: имена каталогов через «/» — без .., «.», дисков и имён частей слоя
 export function checkTree(tree: string): string | null {
-  const t = slash(tree).trim().replace(/^\/+|\/+$/g, "");
+  const t = treeSlash(tree).trim().replace(/^\/+|\/+$/g, "");
   if (/^[A-Za-z]:/.test(t) || t.split("/").some((s) => s === "." || s === ".." || (t && !s) || LAYER_PARTS.has(s.toLowerCase())))
     return null;
   return t;
@@ -152,7 +152,7 @@ export function ledgerRoots(root = configRoot()): LedgerRoots {
 }
 
 // Ключ корня в учёте (manifest.roots): путь, как он записан в machine.yaml, без раскрытия ссылок
-export const rootMemoryKey = (given: string) => fold(trimSlash(slash(resolve(driveRoot(given.replace(/^~(?=$|[\\/])/, homeDir()))))));
+export const rootMemoryKey = (given: string) => fold(trimSlash(slash(resolve(driveRoot(expandHome(given, homeDir()))))));
 
 // Каталог без видимых записей (скрытые — .DS_Store и т. п. — не в счёт); не читается — не пуст
 const emptyDir = (dir: string) => { try { return !readdirSync(dir).some((n) => !n.startsWith(".")); } catch { return false; } };
@@ -205,7 +205,7 @@ export function parseRoots(value: unknown, file: string, memory?: LedgerRoots): 
       throw new Error(`${file}: у корня ${given} не указан раздел дерева слоёв — укажите: { path: ${JSON.stringify(given)}, tree: <раздел, например Clients> }. У дополнительных корней раздел обязателен: без него правила основного корня молча доставались бы папкам с теми же именами`);
     const busy = roots.find((r) => tree && r.tree.toLowerCase() === tree.toLowerCase());
     if (busy) throw new Error(`${file}: tree: ${tree} уже у корня ${busy.given} — выберите корню ${given} другое имя раздела (общие правила для нескольких корней — слоем в map.yaml, docs/roots.md, «Правила нескольких корней»)`);
-    const expanded = given.replace(/^~(?=$|[\\/])/, homeDir());
+    const expanded = expandHome(given, homeDir());
     let { path, away } = rootAway(expanded);
     if (!away && memory && emptyDir(path) && memory.hasTargets(path)) away = "пуст, а в учёте есть его цели — диск не смонтирован?";
     if (away) path = memory?.real(rootMemoryKey(given)) ?? path;

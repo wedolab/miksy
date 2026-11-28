@@ -3,16 +3,19 @@
 // наследования, только текущий пользователь; файлы наследуют). Без бэкапов и без хешей в учёте:
 // значение не должно появиться ни в одной копии. Какие файлы нужны — объединение секретов всех
 // целей учёта (TargetState.secrets); лишние удаляются.
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { configRoot } from "./load";
 import { type Manifest, writeAtomic } from "./manifest";
 import { slash } from "./paths";
+import { modeSys, mountPoint, tryChmod } from "./modes";
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const secretsDir = (root = configRoot()) => slash(join(root, "local", "secrets"));
 const win = process.platform === "win32";
+// Разделитель путей этой машины: на macOS и Linux «\» — символ имени (круг 12g)
+const SEP = win ? /[\\/]/ : "/";
 
 export type SecretFileState = "create" | "update" | "same" | "missing";
 
@@ -146,7 +149,7 @@ export function behindLink(p: string, config = configRoot()): boolean {
   const rel = relative(local, p);
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
   let cur = local;
-  for (const seg of rel.split(/[\\/]/).slice(0, -1)) {
+  for (const seg of rel.split(SEP).slice(0, -1)) {
     cur = join(cur, seg);
     if (isLink(cur)) return true;
   }
@@ -212,7 +215,7 @@ function localRoot(dir: string): string {
 // Ссылка в копии «до miksy» (local/backups/before-miksy-*/…) ведёт к собственным файлам пользователя, как до miksy:
 // ни цель, ни битость не проверяются (выпуск 0.2.2, круг 8b, C1)
 function inCopy(root: string, link: string): boolean {
-  const [top, copy, ...rest] = relative(root, link).split(/[\\/]/);
+  const [top, copy, ...rest] = relative(root, link).split(SEP);
   const norm = (s: string) => (win ? s.toLowerCase() : s);
   return rest.length > 0 && norm(top) === "backups" && norm(copy).startsWith("before-miksy-");
 }
@@ -368,7 +371,7 @@ export function refuseBackupPath(dst: string, config = configRoot()): void {
   if (rel.startsWith("..") || isAbsolute(rel)) return;
   let p = local;
   let behind = false;
-  for (const seg of rel.split(/[\\/]/).slice(0, -1)) {
+  for (const seg of rel.split(SEP).slice(0, -1)) {
     p = join(p, seg);
     try { lstatSync(p); } catch { break; }
     const r = isLink(p) ? linkRefusal(p) : behind ? openRefusal(p) : null;
@@ -425,7 +428,43 @@ function snapshot(root: string, w: Walk): Map<string, string> {
 // в нижнем регистре (что сбрасывать), null — проверка не удалась (сбрасывать всё)
 // bad — все находки (открытые пути и сбои проверки; по ним privateLocal решает, исправлять ли); failed — из них сбои
 // проверки (права не прочитаны): тексты doctor и sync --dry-run называют оба вида отдельно (круг 11s)
-function scan(dir: string): { bad: string[]; failed: string[]; links: string[]; open: Set<string> | null; refuse: string | null } {
+// noPerms — local/ открыт, а права на этом диске не меняются (проба, круг 12g): точка (диск), иначе null
+type Scan = { bad: string[]; failed: string[]; links: string[]; open: Set<string> | null; refuse: string | null; noPerms: string | null };
+function scan(dir: string): Scan {
+  const s = scanRaw(dir);
+  const noPerms = s.bad.length && !s.refuse && existsSync(dir) && !localPermsSys.probe(resolve(localRoot(dir))) ? permsPoint(resolve(localRoot(dir))) : null;
+  return { ...s, noPerms };
+}
+
+// ---- local/ на диске без прав (круг 12g) ----
+// Секреты local/ закрыты только для вас — это защита. На диске, где права файлов не работают (сетевой диск без прав,
+// FAT), закрыть их нельзя: запись в local/ — отказ с понятным текстом (sync, --dry-run, setup, adopt), doctor — проблема.
+// Разрешить такое — решение владельца, не автоматика. Проба: свой временный файл в local/ закрыть и проверить
+// (macOS, Linux — chmod 600; Windows — icacls как closeOwn); файл сразу удаляется. Подмена — для тестов
+export const localPermsSys = { probe: (root: string): boolean => probeLocal(root) };
+// Команда, которая секретов не пишет (clean): local/ на диске без прав — предупреждение, а не отказ. На запуск команды
+let tolerant = false;
+export const tolerateOpenLocal = (on: boolean) => { tolerant = on; };
+function probeLocal(root: string): boolean {
+  const p = join(root, `.miksy-perms-probe-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  try {
+    writeFileSync(p, "", { flag: "wx", mode: 0o600 });
+    if (!win) return tryChmod(p, 0o600) && (modeSys.mode(p) & 0o077) === 0;
+    try { closeOwn(p, false); } catch { return false; }
+    return others(p).length === 0;
+  } catch { return false; }
+  finally { rmSync(p, { force: true }); }
+}
+// Диск для текста: Windows — корень диска или \\сервер\ресурс; macOS, Linux — точка монтирования
+function permsPoint(p: string): string {
+  if (!win) return mountPoint(p);
+  const s = slash(p);
+  return s.match(/^\/\/[^/]+\/[^/]+/)?.[0] ?? s.match(/^[A-Za-z]:\//)?.[0] ?? s;
+}
+export const noPermsText = (point: string) =>
+  `local/ (секреты и учёт этой машины) лежит на диске, где права файлов не работают (${point}: сетевой диск или FAT) — секреты там были бы открыты всем, у кого есть доступ к диску, поэтому miksy туда не пишет. Перенесите конфигурацию miksy на локальный диск — как, docs/troubleshooting.md, «Конфигурация на сетевом диске или флешке»`;
+
+function scanRaw(dir: string): Omit<Scan, "noPerms"> {
   // Ссылки local/backups с открытой целью — это отказ (backupsRefusal), не «открытые пути»
   if (!existsSync(dir)) return { bad: [], failed: [], links: [], open: new Set(), refuse: null };
   try {
@@ -472,9 +511,10 @@ function scan(dir: string): { bad: string[]; failed: string[]; links: string[]; 
   } catch (e) { return { bad: [(e as Error).message], failed: [(e as Error).message], links: [], open: null, refuse: backupsRefusal(dir) }; }
 }
 // refuse — запись в local/backups будет отказана (C10): --dry-run и doctor говорят то же, что настоящий запуск
-export function checkLocalAccess(dir = join(configRoot(), "local")): { bad: string[]; failed: string[]; links: string[]; refuse: string | null } {
-  const { bad, failed, links, refuse } = scan(dir);
-  return { bad, failed, links, refuse };
+// noPerms — local/ на диске без прав (круг 12g): точка; запись туда — отказ (noPermsText)
+export function checkLocalAccess(dir = join(configRoot(), "local")): { bad: string[]; failed: string[]; links: string[]; refuse: string | null; noPerms: string | null } {
+  const { bad, failed, links, refuse, noPerms } = scan(dir);
+  return { bad, failed, links, refuse, noPerms };
 }
 
 // Итог проверки local/ для человека (doctor, sync --dry-run; круг 11s): сколько путей открыто другим пользователям
@@ -498,6 +538,12 @@ export function privateLocal(dir = join(configRoot(), "local")): { fixed: boolea
   // Отказ в начале команды, до любой записи (C10)
   if (before.refuse) throw new Error(before.refuse);
   if (!before.bad.length) return { fixed: false, warnings: before.links };
+  // Диск без прав: закрыть нельзя — отказ до записи, local/ не трогаем (круг 12g). clean секретов не пишет — ему
+  // предупреждение
+  if (before.noPerms) {
+    if (tolerant) return { fixed: false, warnings: [...before.links, noPermsText(before.noPerms)] };
+    throw new Error(noPermsText(before.noPerms));
+  }
   const w = walkLocal(root);
   if (win) {
     // Наследование от закрытого local/ сквозь junction и ссылку на папку не идёт (проверено, круг 8b). Сбрасываются только
@@ -514,8 +560,9 @@ export function privateLocal(dir = join(configRoot(), "local")): { fixed: boolea
     for (const p of parts(root, w, true))
       if (p.path !== root && has(p) && icacls([native(p.path), "/reset", ...(p.tree ? ["/t"] : []), "/q", "/L"]) !== 0)
         throw new Error(`${slash(p.path)}: icacls не закрыл доступ`);
-  } else for (const p of w.paths) chmodSync(p, statSync(p).isDirectory() || (statSync(p).mode & 0o100) ? 0o700 : 0o600);
+  } else for (const p of w.paths) tryChmod(p, statSync(p).isDirectory() || (modeSys.mode(p) & 0o100) ? 0o700 : 0o600);
   const after = checkLocalAccess(root);
+  if (after.noPerms) throw new Error(noPermsText(after.noPerms));
   if (after.bad.length) throw new Error(`local/ не закрыт: ${after.bad[0]}`);
   return { fixed: true, warnings: after.links };
 }
@@ -524,7 +571,8 @@ const secured = new Map<string, { fixed: boolean; warnings: string[] }>();
 export function ensurePrivateLocal(dir = join(configRoot(), "local")): { fixed: boolean; warnings: string[] } {
   if (secured.has(dir)) return { fixed: false, warnings: [] };
   const r = privateLocal(dir);
-  secured.set(dir, r);
+  // Терпимый запуск (clean) не запоминается: следующая команда этого процесса проверит заново
+  if (!tolerant) secured.set(dir, r);
   return r;
 }
 function protectFiles(dir: string) {
@@ -563,7 +611,7 @@ export function foreignAces(sddl: string, me: string): string[] {
 // null — доступ только у владельца; иначе что не так (для doctor)
 export function aclProblem(path: string): string | null {
   if (!win) {
-    const mode = statSync(path).mode & 0o777;
+    const mode = modeSys.mode(path) & 0o777;
     return mode & 0o077 ? `права ${mode.toString(8).padStart(4, "0")} — нужен доступ только владельцу (${statSync(path).isDirectory() ? "0700" : "0600"})` : null;
   }
   const list = others(path);

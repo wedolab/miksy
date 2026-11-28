@@ -1,4 +1,5 @@
 // Что opencode видит сейчас из ручных конфигов — для сравнения с тем, что сгенерирует miksy.
+import { slash } from "../../src/paths";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { CurrentState } from "../../src/adapter";
@@ -14,7 +15,7 @@ export function readJsonc(path: string): Record<string, any> {
 export function configsOf(dir: string): { path: string; cfg: Record<string, any> }[] {
   return ["opencode.json", "opencode.jsonc", join(".opencode", "opencode.json")]
     .map((rel) => {
-      const path = join(dir, rel).replaceAll("\\", "/");
+      const path = slash(join(dir, rel));
       return { path, cfg: existsSync(path) ? readJsonc(path) : null };
     })
     .filter((c): c is { path: string; cfg: Record<string, any> } => c.cfg !== null);
@@ -27,7 +28,7 @@ function instructionRefs(configs: { path: string; cfg: Record<string, any> }[], 
     for (const ref of (cfg.instructions ?? []) as string[]) {
       if (!ref || /[*?[]/.test(ref) || /^https?:/.test(ref)) continue;
       const p = ref.startsWith("~") ? join(home, ref.slice(1)) : isAbsolute(ref) ? ref : join(dirname(path), ref);
-      if (existsSync(p) && statSync(p).isFile()) out.push(p.replaceAll("\\", "/"));
+      if (existsSync(p) && statSync(p).isFile()) out.push(slash(p));
     }
   return out;
 }
@@ -44,8 +45,8 @@ export function currentGlobal(home: string): CurrentState {
   const dir = join(home, ".config", "opencode");
   const configs = configsOf(dir);
   const instructionFiles: string[] = [];
-  const md = join(dir, "AGENTS.md").replaceAll("\\", "/");
-  const claude = join(home, ".claude", "CLAUDE.md").replaceAll("\\", "/");
+  const md = slash(join(dir, "AGENTS.md"));
+  const claude = slash(join(home, ".claude", "CLAUDE.md"));
   if (existsSync(md)) instructionFiles.push(md);
   else if (existsSync(claude)) instructionFiles.push(claude); // Claude-совместимость: запасной глобальный файл
   instructionFiles.push(...instructionRefs(configs, home));
@@ -56,8 +57,8 @@ export function currentGlobal(home: string): CurrentState {
 export function currentProject(dir: string, home: string): CurrentState {
   const configs = configsOf(dir);
   const instructionFiles: string[] = [];
-  const agents = join(dir, "AGENTS.md").replaceAll("\\", "/");
-  const claude = join(dir, "CLAUDE.md").replaceAll("\\", "/");
+  const agents = slash(join(dir, "AGENTS.md"));
+  const claude = slash(join(dir, "CLAUDE.md"));
   if (existsSync(agents)) instructionFiles.push(agents);
   else if (existsSync(claude)) instructionFiles.push(claude); // Claude-совместимость (если нет AGENTS.md)
   instructionFiles.push(...instructionRefs(configs, home));

@@ -5,7 +5,19 @@ import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export const slash = (p: string) => p.replaceAll("\\", "/");
+// Путь — с «/». На Windows «\» — разделитель; на macOS и Linux — обычный символ имени (папка «a\b» — одна папка; круг
+// 12g). Путь в виде Windows (диск «X:\…» или «\\сервер\…») — «\» разделитель на любой ОС: это данные машины Windows
+// (adopt и проверки для другой ОС, тесты), путём macOS или Linux такая строка не бывает
+const winLike = (p: string) => /^[A-Za-z]:[\\/]|^\\\\/.test(p);
+export const slash = (p: string) => (process.platform === "win32" || winLike(p) ? p.replaceAll("\\", "/") : p);
+// Строка конфигурации, общая для машин (раздел дерева tree:, --tree): «\» — разделитель на всех ОС, как и раньше —
+// иначе tree: Clients\Sub, записанный на Windows, на macOS стал бы другим разделом
+export const treeSlash = (p: string) => p.replaceAll("\\", "/");
+// «~», «~/…», «~\…» — домашний каталог (PowerShell 5.1 передаёт «~» программе как есть; выпуск 0.2.1, A4). «~\» — запись
+// PowerShell: «\» после неё — разделители на любой ОС; после «~/» — как в slash
+export const TILDE = /^~(?=$|[\\/])/;
+export const expandHome = (s: string, home: string) =>
+  !TILDE.test(s) ? s : home + (s[1] === "\\" ? treeSlash(s.slice(1)) : s.slice(1));
 
 // Путь или имя в готовой команде подсказки — в кавычках, которые его не меняют: обычный — в двойных, как раньше; с `$`,
 // «`», `!` или `"` — в одинарных (PowerShell и sh подставили бы переменную, интерактивный bash и zsh — историю «!»);

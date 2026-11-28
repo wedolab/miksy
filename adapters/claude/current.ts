@@ -8,7 +8,7 @@ type CurrentMcp = CurrentState["mcp"][string];
 // Ключи проекта в ~/.claude.json. Claude хранит путь «как открыли»: «D:/work/x» из CLI, «D:\work\x»
 // из Zed, «d:/…», другой регистр (Windows, macOS), путь через симлинк. Возвращает канонический ключ
 // (каталог проекта, realpath) и все уже существующие ключи, указывающие на тот же каталог
-import { canonical, samePath } from "../../src/paths";
+import { canonical, samePath, slash } from "../../src/paths";
 function sameDir(key: string, dir: string, _os: string): boolean {
   try { return samePath(key, dir); } catch { return false; }
 }
@@ -45,7 +45,7 @@ function withImports(file: string, home: string): string[] {
     const m = line.match(/^@(\S+)$/);
     if (!m) continue;
     const p = m[1].startsWith("~") ? join(home, m[1].slice(1)) : join(dirname(file), m[1]);
-    if (existsSync(p)) out.push(p.replaceAll("\\", "/"));
+    if (existsSync(p)) out.push(slash(p));
   }
   return out;
 }
@@ -55,7 +55,7 @@ export function currentGlobal(home: string): CurrentState {
   const cfg = readJson(join(home, ".claude.json")) ?? {};
   const mcp: Record<string, CurrentMcp> = {};
   for (const [n, d] of Object.entries<Record<string, unknown>>(cfg.mcpServers ?? {})) mcp[n] = { source: "~/.claude.json (user)", def: d };
-  return { instructionFiles: existsSync(md) ? withImports(md, home).map((x) => x.replaceAll("\\", "/")) : [], mcp };
+  return { instructionFiles: existsSync(md) ? withImports(md, home).map((x) => slash(x)) : [], mcp };
 }
 
 // Проект: CLAUDE.md / CLAUDE.local.md / .mcp.json в каталоге и всех родителях + local scope.
@@ -69,13 +69,13 @@ export function currentProject(dir: string, home: string, os: string): CurrentSt
 
   const instructionFiles: string[] = [];
   const mcp: Record<string, CurrentMcp> = {};
-  for (const d of chain.reverse().map((x) => x.replaceAll("\\", "/"))) {
+  for (const d of chain.reverse().map((x) => slash(x))) {
     for (const f of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
       const p = join(d, f);
-      if (existsSync(p)) instructionFiles.push(...withImports(p, home).map((x) => x.replaceAll("\\", "/")));
+      if (existsSync(p)) instructionFiles.push(...withImports(p, home).map((x) => slash(x)));
     }
     const servers = readJson(join(d, ".mcp.json"))?.mcpServers ?? {};
-    for (const [n, def] of Object.entries<Record<string, unknown>>(servers)) mcp[n] = { source: join(d, ".mcp.json").replaceAll("\\", "/"), def };
+    for (const [n, def] of Object.entries<Record<string, unknown>>(servers)) mcp[n] = { source: slash(join(d, ".mcp.json")), def };
   }
 
   const cfg = readJson(join(home, ".claude.json")) ?? {};
